@@ -28,13 +28,14 @@ jobs:
         run: dotnet build Jellyfin.Plugin.Ingest.sln --configuration Release --no-restore
 
       - name: Test
+        id: test
         shell: bash
         run: |
           set -o pipefail
           dotnet test --solution Jellyfin.Plugin.Ingest.sln --configuration Release --no-build 2>&1 | tee test-output.log
 
       - name: Annotate failed tests
-        if: failure()
+        if: failure() && steps.test.outcome == 'failure'
         shell: python
         run: |
           # Surface the end of the test output as an annotation (readable on the PR without opening logs)

@@ -42,6 +42,20 @@ Key points that are easy to get wrong:
 5. Series folders may carry several IDs: `[tvdbid-N] [tmdbid-N]` — helps whichever provider is primary.
 6. Strip `< > : " / \ | ? *`; replace `:` with ` -`; no trailing dots.
 
+## Identification
+
+`MediaIdentifier` scores every candidate from the configured providers (plus titles already in the destination
+library) and only files automatically when the best is **≥ 0.80** and **clearly ahead** of the next distinct title
+(0.08, or 0.15 when the release name has no year). Everything else is *needs review*.
+
+Score = title similarity (max of an edit-distance ratio and a word-overlap score, on normalised titles)
++ year agreement (+0.10 exact, +0.05 off by one, −0.25 otherwise) + 0.20 if already in the library
++ a small nudge for the provider's own top results − a penalty when sequel numbers disagree.
+
+The thresholds were tuned against a private set of real release names with known ids (kept out of the repository):
+a clear majority are identified automatically, higher when the destination library already has the title, and the
+rest go to review rather than being guessed.
+
 ## Subtitle pairing
 
 For each video in a release, in order:

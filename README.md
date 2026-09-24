@@ -97,7 +97,7 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Plugin skeleton: configuration model and settings page
 - [ ] Folder watcher with settle-time detection
 - [x] Release-name parser (episode codes incl. `1x04`, `Lantern1E4`, `Season 1 Episode 4`, multi-episode, specials; title/year split; editions; extras; release-tag stripping)
-- [ ] Identification (provider lookup) with confidence scoring
+- [x] Identification: provider lookup through Jellyfin, fuzzy title matching, confidence scoring, library-aware tie-breaking
 - [x] Naming engine (movies, episodes, multi-episode, specials, editions, extras, subtitle sidecars)
 - [ ] Subtitle pairing and language/flag detection
 - [ ] Mover with dry-run, collision handling and activity log

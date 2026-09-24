@@ -183,6 +183,7 @@ public static partial class ReleaseNameParser
     private static string Normalise(string name)
     {
         var s = GroupPrefix().Replace(name, string.Empty, 1);
+        s = GenreBeforeYear().Replace(s, " ");
         s = BracketedYear().Replace(s, " $1 ");
         s = BracketedTag().Replace(s, " ");
         s = Separators().Replace(s, " ");
@@ -277,6 +278,10 @@ public static partial class ReleaseNameParser
     [GeneratedRegex(@"^[a-z0-9]{2,12}-(?=[A-Z])")]
     private static partial Regex GroupPrefix();
 
+    // Some uploaders write "Title - Action 1993" / "Title - Family Comedy 1990": drop the genre, keep the year
+    [GeneratedRegex(@"\s-\s(?:(?:action|adventure|animation|comedy|crime|drama|family|fantasy|horror|musical|mystery|romance|sci-?fi|thriller|war|western|documentary)\s?){1,3}(?=\s*[\[(]?(?:19|20)\d\d)", RegexOptions.IgnoreCase)]
+    private static partial Regex GenreBeforeYear();
+
     [GeneratedRegex(@"[\[(]((?:19|20)\d\d)[\])]")]
     private static partial Regex BracketedYear();
 
@@ -296,7 +301,7 @@ public static partial class ReleaseNameParser
     private static partial Regex KnownExtension();
 
     // Strong tokens only ever appear in release tags: the title ends at the first one.
-    [GeneratedRegex(@"(?<![a-z0-9])(?:\d{3,4}[pi]|4k|uhd|hdr(?:10\+?)?|sdr|blu-?ray|bdrip|brrip|web-?dl|web-?rip|web|hdtv|pdtv|dvdrip|hdrip|remux|amzn|dsnp|hmax|atvp|pcok|hulu|x ?26[45]|h ?26[45]|hevc|avc|xvid|divx|av1|10 ?bit|aac\d?|ac3|e-?ac-?3|dts(?:-?hd)?|ddp?\d?|truehd|atmos|flac|opus|eng(?:lish)? subs?|(?:ita|eng|hin|spa|fre|ger)(?: (?:ita|eng|hin|spa|fre|ger))* subs?|sub(?: (?:ita|eng|hin|spa|fre|ger))+|esubs?|msubs?|tsv|yts|yify|rarbg|eztv|tgx|galaxyrg)(?![a-z0-9])", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<![a-z0-9])(?:\d{3,4}[pi]|4k|uhd|hdr(?:10\+?)?|sdr|blu-?ray|bdrip|brrip|web-?dl|web-?rip|web|hdtv|pdtv|dvdrip|hdrip|remux|amzn|dsnp|hmax|atvp|pcok|hulu|x ?26[45]|h ?26[45]|hevc|avc|xvid|divx|av1|10 ?bit|aac\d?|ac3|e-?ac-?3|dts(?:-?hd)?|ddp?\d?|truehd|atmos|flac|opus|eng(?:lish)? subs?|(?:ita|eng|hin|spa|fre|ger|rus)(?: (?:ita|eng|hin|spa|fre|ger|rus))* (?:multi-?)?subs?|(?:ita|eng|hin|spa|fre|ger|rus)(?: (?:ita|eng|hin|spa|fre|ger|rus))+|sub(?: (?:ita|eng|hin|spa|fre|ger|rus))+|multi-?subs?|esubs?|msubs?|tsv|yts|yify|rarbg|eztv|tgx|galaxyrg)(?![a-z0-9])", RegexOptions.IgnoreCase)]
     private static partial Regex JunkToken();
 
     // Weak tokens are also ordinary words ("Internal Affairs", "NF"): only removed from episode titles.

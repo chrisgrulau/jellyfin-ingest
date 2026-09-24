@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Identification: searches Jellyfin's configured metadata providers (no plugin credentials), fuzzy title matching
+  (typos, roman numerals, `&`/and, leading "The", accents, `³`), year and sequel-number checks, merging of the same
+  title across providers, preference for titles already in the destination library, and a strict accept rule that
+  sends ambiguous cases to review instead of guessing.
 - Release-name parser: episode codes (`S01E04`, `1x04`, `Lantern1E4`, `Season 1 Episode 4`, multi-episode, `S13SP2`-style
   specials), title/year separation (incl. titles containing years), editions, extras and samples, release-tag stripping
   that leaves ordinary words in titles alone, title inference from parent folders.
