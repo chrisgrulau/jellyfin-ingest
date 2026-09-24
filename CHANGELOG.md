@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Planning: release classification (video / subtitle / sample / clutter), subtitle pairing across common release
+  layouts with language, SDH, forced and commentary detection, extras filed under their film or series, dated
+  quarantine for clutter; a release is filed completely or not at all.
+- Execution: never overwrites, verifies sizes after every move, JSON-lines action log for undo, stops at the first
+  failure, tidies empty folders; dry-run reports without touching anything.
 - Identification: searches Jellyfin's configured metadata providers (no plugin credentials), fuzzy title matching
   (typos, roman numerals, `&`/and, leading "The", accents, `³`), year and sequel-number checks, merging of the same
   title across providers, preference for titles already in the destination library, and a strict accept rule that

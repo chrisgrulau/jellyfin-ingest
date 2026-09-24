@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  # Every pull request, including ones stacked on another feature branch
   pull_request:
-    branches: [main]
 
 # Least privilege by default; only the release job may write
 permissions:

@@ -1,0 +1,56 @@
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Jellyfin.Plugin.Ingest.Planning;
+
+/// <summary>
+/// Why a planned operation exists.
+/// </summary>
+public enum OperationKind
+{
+    /// <summary>A main video filed into the library.</summary>
+    Video = 0,
+
+    /// <summary>A subtitle sidecar filed next to its video.</summary>
+    Subtitle,
+
+    /// <summary>An extra (featurette, trailer …) filed under its movie or series.</summary>
+    Extra,
+
+    /// <summary>Release clutter or a sample moved to quarantine.</summary>
+    Quarantine,
+}
+
+/// <summary>
+/// One file operation. Sources and destinations are absolute paths.
+/// </summary>
+/// <param name="Kind">What the operation is for.</param>
+/// <param name="Source">Current path.</param>
+/// <param name="Destination">Target path; never overwritten.</param>
+public sealed record PlannedOperation(OperationKind Kind, string Source, string Destination);
+
+/// <summary>
+/// Something a person has to decide before the release can be filed.
+/// </summary>
+/// <param name="Source">The file concerned (absolute path).</param>
+/// <param name="Reason">Why it can't be filed automatically.</param>
+public sealed record ReviewItem(string Source, string Reason);
+
+/// <summary>
+/// Everything that will happen to one dropped release. A release is all-or-nothing: if anything needs review,
+/// <see cref="Operations"/> is empty and the release is left exactly as it was dropped.
+/// </summary>
+public sealed record IngestPlan
+{
+    /// <summary>Gets the release's name (its top-level file or folder in the watch folder).</summary>
+    public required string ReleaseName { get; init; }
+
+    /// <summary>Gets the operations to perform, in order.</summary>
+    public IReadOnlyList<PlannedOperation> Operations { get; init; } = [];
+
+    /// <summary>Gets the items that need a decision; when non-empty nothing is moved.</summary>
+    public IReadOnlyList<ReviewItem> Review { get; init; } = [];
+
+    /// <summary>Gets a value indicating whether the plan can be executed as is.</summary>
+    public bool IsReady => Review.Count == 0 && Operations.Any(o => o.Kind is OperationKind.Video);
+}
