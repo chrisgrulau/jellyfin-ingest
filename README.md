@@ -23,9 +23,9 @@ incoming/
 and Jellyfin Ingest will:
 
 1. **Wait until the copy has finished** (the file size has stopped changing).
-2. **Identify it** using Jellyfin's own filename parser and the metadata providers you already have configured
-   (TMDb, TheTVDB, …) — here: *Lantern*, season 1, episode 4.
-3. **Rename and move it** into the right library using
+2. **Identify it** from the release name (title, year, season/episode, edition) and the metadata providers you
+   already have configured in Jellyfin (TMDb, TheTVDB, …) — here: *Lantern*, season 1, episode 4.
+3. **Rename and move it** into the watch folder's destination library for its kind (shows or films) using
    [Jellyfin's naming conventions](https://jellyfin.org/docs/general/server/media/shows/), including provider IDs so the
    match can never drift:
 
@@ -40,20 +40,23 @@ and Jellyfin Ingest will:
    items are removed automatically after a retention period (30 days by default) by a Jellyfin scheduled task.
 6. **Trigger a library scan** so the new item appears straight away.
 
-Anything it cannot identify confidently is left where it is and reported, never guessed.
+Anything it cannot identify confidently is left where it is, never guessed, and listed under **Needs review** on the
+plugin page, where you pick the right title (and library) with one click or search for it.
 
-## Features (planned)
+## Features
 
 | Area | Behaviour |
 |---|---|
-| Watch folders | Any number, each mapped to a target library (Movies, Shows, …). Picked in the plugin's settings page. |
-| Identification | Jellyfin's `Emby.Naming` parser + your configured metadata providers; confidence threshold before anything moves. |
+| Watch folders | Any number. Each has one or more destinations, at most one per kind: a Shows library, a Movies library, or a single Mixed Movies and Shows library. Releases go to the destination for their kind. |
+| Identification | Own release-name parser + your configured metadata providers; TMDb/TheTVDB matches preferred over IMDb-only ones; titles already in the library preferred; a confidence threshold and a clear lead over the runner-up before anything moves. |
 | Naming | Movies: `Title (Year) [tmdbid-N]/Title (Year) [tmdbid-N].ext` (editions as ` - Label`). Shows: `Series (Year) [tvdbid-N] [tmdbid-N]/Season NN/Series SNNEMM - Title.ext`, multi-episode `S01E01-E02`, specials in `Season 00`. Reserved characters (`< > : " / \ \| ? *`) removed. |
-| Subtitles | Matched by name, by folder (`Subs/`), or by being the only video in the release; renamed `<video>.<lang>[.sdh][.forced].srt`. |
+| Subtitles | Matched by name, by folder (`Subs/`), or by being the only video in the release; renamed `<video>[.Title].<lang>[.default][.sdh][.forced].srt`. When a language has several tracks, the main one is marked default. |
 | Extras | Trailers, featurettes, deleted scenes … filed into Jellyfin's extras folders. |
-| Clutter | Moved to a quarantine folder (default or user-chosen), purged after N days (default 30). |
-| Safety | Dry-run mode, never overwrites, every action written to an activity log, collisions and low-confidence matches left for review on the settings page, where you pick the right title with one click. |
-| Library refresh | Scans only the affected library after an ingest. |
+| Clutter | Moved to a dated quarantine folder (default or user-chosen), purged after N days (default 30). |
+| Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. |
+| Activity | *Recent activity* on the plugin page: filed, dry run, needs review, decisions, failures, quarantine and purges, with what went where. |
+| Safety | Dry-run mode (on by default), never overwrites, size-verified moves, a JSON-lines action log, all-or-nothing per release. |
+| Library refresh | Queues a library scan after a real ingest. |
 
 ## Requirements
 
@@ -64,10 +67,12 @@ Anything it cannot identify confidently is left where it is and reported, never 
 
 ## Installation
 
-Not yet published. Once releases exist you will be able to either:
+Pre-releases are published on the [Releases](../../releases) page. Download the `.zip`, extract it into
+`<jellyfin data>/plugins/Ingest_<version>/`, and restart Jellyfin. A plugin repository manifest (for installing and
+updating from **Dashboard → Plugins → Repositories**) is planned.
 
-- add this repository's plugin manifest URL under **Dashboard → Plugins → Repositories**, or
-- download the release `.zip` and extract it into `<jellyfin data>/plugins/Ingest_<version>/`, then restart Jellyfin.
+After installing, open **Dashboard → Plugins → Ingest** and add at least one watch folder with a destination library;
+nothing is watched until you do. Dry run is on until you turn it off.
 
 ## Configuration
 
@@ -75,10 +80,10 @@ Not yet published. Once releases exist you will be able to either:
 
 | Setting | Default | Notes |
 |---|---|---|
-| Watch folders | — | One or more folders, each with a target library. |
+| Watch folders | — | Required. One or more folders, each with one or more destination libraries (one per kind). |
 | Quarantine folder | `<watch folder>/.ingest-quarantine` | Keep it on the same filesystem as the watch folder so moves are instant. |
 | Quarantine retention | 30 days | Enforced by the *Purge Ingest quarantine* scheduled task. |
-| Dry run | On | Logs what would happen without moving anything. Turn off once you are happy with the results. |
+| Dry run | On | Records what would happen (see *Recent activity*) without moving anything. Turn off once you are happy with the results. |
 | Settle time | 60 s | How long a file's size must stay unchanged before it is processed. |
 | Scan library after ingest | On | |
 
@@ -103,8 +108,10 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Planner (all-or-nothing per release) and executor with dry-run, never-overwrite, size verification and a JSON-lines action log
 - [x] Quarantine + scheduled purge task
 - [x] Library scan after ingest
-- [x] Unit tests for parsing and naming; CI
-- [ ] Release packaging and plugin repository manifest
+- [x] Destinations per watch folder; review screen (library choice, title search); activity panel
+- [x] Unit tests; CI; release packaging (pre-releases)
+- [ ] Plugin repository manifest
+- [ ] New episodes of a show you already have follow it to the library it's in
 
 Design notes live in [`docs/DESIGN.md`](docs/DESIGN.md).
 

@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.2] - 2026-09-24
+
 ### Added
 - **Destinations per watch folder:** each watch folder files into one or more libraries, at most one per kind: a Shows
   library, a Movies library, or a single Mixed Movies and Shows library (which takes both). Each release goes to the
@@ -39,7 +41,9 @@ All notable changes to this project are documented here. The format follows
 - A 0.1.0-alpha.1 configuration (single target library) keeps working and is converted to a destination on the next
   save.
 
-### Added (0.1.0-alpha.1)
+## [0.1.0-alpha.1] - 2026-09-24
+
+### Added
 - Background service: sweeps watch folders every 30 s (file-system notifications are unreliable on network
   shares), waits for each release to settle, plans, executes (or dry-runs) and queues a library scan; releases needing
   review are logged and recorded in `review.jsonl` and not retried until they change.
