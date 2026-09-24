@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.3] - 2026-09-24
+
 ### Added
 - New episodes follow their show: an episode of a series that's already on the server is filed into that series'
   folder, whichever library it's in (a library chosen in review still wins). Works even when the watch folder has no
