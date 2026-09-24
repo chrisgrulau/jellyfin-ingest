@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Background service: sweeps watch folders every 30 s (file-system notifications are unreliable on network
+  shares), waits for each release to settle, plans, executes (or dry-runs) and queues a library scan; releases needing
+  review are logged and recorded in `review.jsonl` and not retried until they change.
+- "Purge Ingest quarantine" scheduled task (daily) removing dated quarantine folders past the retention period.
+- Settings page: watch folders with a picker for the target library and library folder, quarantine folder,
+  retention, settle time, dry run, scan after ingest.
 - Planning: release classification (video / subtitle / sample / clutter), subtitle pairing across common release
   layouts with language, SDH, forced and commentary detection, extras filed under their film or series, dated
   quarantine for clutter; a release is filed completely or not at all.

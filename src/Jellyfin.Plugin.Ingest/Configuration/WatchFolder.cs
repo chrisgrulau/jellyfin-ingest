@@ -16,6 +16,11 @@ public class WatchFolder
     public string TargetLibraryId { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the library folder to file into, for libraries with several folders. Empty = the library's first folder.
+    /// </summary>
+    public string TargetPath { get; set; } = string.Empty;
+
+    /// <summary>
     /// Gets or sets a value indicating whether this folder is being watched.
     /// </summary>
     public bool Enabled { get; set; } = true;

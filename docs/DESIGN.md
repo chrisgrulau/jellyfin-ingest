@@ -16,7 +16,7 @@ Working notes for Jellyfin Ingest. Descriptive of intent; will be updated as the
 
 | Component | Jellyfin integration |
 |---|---|
-| **Watcher** | `IHostedService`. `FileSystemWatcher` per folder plus a periodic sweep (watchers miss events on network shares). Ignores the quarantine folder and temp/partial files (`.part`, `.!qb`, `~$*`). |
+| **Watcher** | `IHostedService` sweeping each watch folder every 30 s. File-system notifications are deliberately not used: they are unreliable on network and virtualised shares, and a sweep is needed as a safety net anyway. Ignores hidden entries, the quarantine folder and partial downloads (`.part`, `.!qb`, `.crdownload`, `~$*`). |
 | **Settler** | A release is processed only after every file in it has had a stable size for the settle time. |
 | **Classifier** | `Emby.Naming` (`EpisodeResolver`, `VideoResolver`) for title / year / season / episode / edition parsing, then `IProviderManager` remote search against the libraries' configured providers. Scores candidates (title similarity, year, episode existence); below the threshold → review. |
 | **Planner** | Pure function: `(classification, library root, options) → planned operations`. No I/O, fully unit-testable. |

@@ -94,15 +94,15 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 ## Roadmap
 
 - [x] Repository scaffolding
-- [x] Plugin skeleton: configuration model and settings page
-- [ ] Folder watcher with settle-time detection
+- [x] Plugin skeleton and settings page (watch folders with library picker, quarantine, retention, dry run, settle time)
+- [x] Watch-folder service (periodic sweep, settle-time detection, partial-download and hidden-file handling)
 - [x] Release-name parser (episode codes incl. `1x04`, `Lantern1E4`, `Season 1 Episode 4`, multi-episode, specials; title/year split; editions; extras; release-tag stripping)
 - [x] Identification: provider lookup through Jellyfin, fuzzy title matching, confidence scoring, library-aware tie-breaking
 - [x] Naming engine (movies, episodes, multi-episode, specials, editions, extras, subtitle sidecars)
 - [x] Subtitle pairing and language/flag detection (incl. commentary tracks, content-based language fallback)
 - [x] Planner (all-or-nothing per release) and executor with dry-run, never-overwrite, size verification and a JSON-lines action log
-- [ ] Quarantine + scheduled purge task
-- [ ] Targeted library scan
+- [x] Quarantine + scheduled purge task
+- [x] Library scan after ingest
 - [x] Unit tests for parsing and naming; CI
 - [ ] Release packaging and plugin repository manifest
 

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics.CodeAnalysis;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.Ingest.Configuration;
@@ -9,9 +10,10 @@ namespace Jellyfin.Plugin.Ingest.Configuration;
 public class PluginConfiguration : BasePluginConfiguration
 {
     /// <summary>
-    /// Gets the folders to watch for new media.
+    /// Gets or sets the folders to watch for new media.
     /// </summary>
-    public Collection<WatchFolder> WatchFolders { get; } = [];
+    [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "Jellyfin deserializes plugin configuration from JSON, which cannot populate a get-only collection.")]
+    public Collection<WatchFolder> WatchFolders { get; set; } = [];
 
     /// <summary>
     /// Gets or sets the quarantine folder for release clutter. Empty = <c>&lt;watch folder&gt;/.ingest-quarantine</c>.

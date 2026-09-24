@@ -5,23 +5,40 @@
   <title>Ingest</title>
 </head>
 <body>
-  <div id="IngestConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+  <div id="IngestConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
+    <style>
+      #IngestConfigPage .ingest-row { display: grid; grid-template-columns: minmax(12em, 2fr) minmax(10em, 1fr) minmax(10em, 1.4fr) auto auto; gap: .75em; align-items: end; padding: .75em 0; border-bottom: 1px solid rgba(128,128,128,.25); }
+      #IngestConfigPage .ingest-row .inputContainer, #IngestConfigPage .ingest-row .selectContainer { margin: 0; }
+      #IngestConfigPage .ingest-banner { padding: .75em 1em; border-radius: 4px; margin: 1em 0; background: rgba(255,170,0,.15); }
+      #IngestConfigPage .ingest-banner[hidden] { display: none; }
+      @media (max-width: 720px) { #IngestConfigPage .ingest-row { grid-template-columns: 1fr; } }
+    </style>
     <div data-role="content">
       <div class="content-primary">
-        <h2>Ingest</h2>
-        <p>Watch folders are picked here once the watcher is implemented. Until then only the general settings are editable.</p>
+        <h2 class="sectionTitle">Ingest</h2>
+        <p>New media dropped into a watch folder is identified, renamed to Jellyfin's naming standard and moved into the chosen library with its subtitles. Anything else in the release is quarantined and deleted after the retention period. Releases that can't be identified confidently are left where they are; see the Jellyfin log.</p>
+
+        <div class="ingest-banner" id="DryRunBanner">
+          <strong>Dry run is on.</strong> Ingest logs what it would do and moves nothing. Check the log, then turn dry run off.
+        </div>
+
         <form id="IngestConfigForm">
+          <h3 class="sectionTitle">Watch folders</h3>
+          <div id="WatchFolders"></div>
+          <button is="emby-button" type="button" class="raised button-alt" id="AddWatchFolder"><span>Add watch folder</span></button>
+
+          <h3 class="sectionTitle" style="margin-top:2em">Settings</h3>
           <div class="inputContainer">
             <label class="inputLabel inputLabelUnfocused" for="QuarantinePath">Quarantine folder</label>
             <input id="QuarantinePath" name="QuarantinePath" type="text" is="emby-input" />
-            <div class="fieldDescription">Leave empty to use &lt;watch folder&gt;/.ingest-quarantine.</div>
+            <div class="fieldDescription">Leave empty to use a hidden <code>.ingest-quarantine</code> folder inside each watch folder (same disk, so moves are instant).</div>
           </div>
           <div class="inputContainer">
-            <label class="inputLabel inputLabelUnfocused" for="QuarantineRetentionDays">Quarantine retention (days)</label>
+            <label class="inputLabel inputLabelUnfocused" for="QuarantineRetentionDays">Keep quarantined items for (days)</label>
             <input id="QuarantineRetentionDays" name="QuarantineRetentionDays" type="number" min="1" is="emby-input" />
           </div>
           <div class="inputContainer">
-            <label class="inputLabel inputLabelUnfocused" for="SettleSeconds">Settle time (seconds)</label>
+            <label class="inputLabel inputLabelUnfocused" for="SettleSeconds">Wait until a release has stopped changing for (seconds)</label>
             <input id="SettleSeconds" name="SettleSeconds" type="number" min="5" is="emby-input" />
           </div>
           <div class="checkboxContainer checkboxContainer-withDescription">
@@ -43,31 +60,96 @@
       </div>
     </div>
     <script type="text/javascript">
-      var IngestConfig = { pluginUniqueId: '88d6ced9-052e-45f6-b21d-fc4eefa7998d' };
-      var fields = ['QuarantinePath', 'QuarantineRetentionDays', 'SettleSeconds'];
-      var toggles = ['DryRun', 'ScanLibraryAfterIngest'];
+      (function () {
+        var pluginId = '88d6ced9-052e-45f6-b21d-fc4eefa7998d';
+        var page = document.querySelector('#IngestConfigPage');
+        var libraries = [];
+        var rowCount = 0;
 
-      document.querySelector('#IngestConfigPage').addEventListener('pageshow', function () {
-        Dashboard.showLoadingMsg();
-        ApiClient.getPluginConfiguration(IngestConfig.pluginUniqueId).then(function (config) {
-          fields.forEach(function (f) { document.querySelector('#' + f).value = config[f]; });
-          toggles.forEach(function (f) { document.querySelector('#' + f).checked = config[f]; });
-          Dashboard.hideLoadingMsg();
-        });
-      });
+        function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
-      document.querySelector('#IngestConfigForm').addEventListener('submit', function (e) {
-        e.preventDefault();
-        Dashboard.showLoadingMsg();
-        ApiClient.getPluginConfiguration(IngestConfig.pluginUniqueId).then(function (config) {
-          config.QuarantinePath = document.querySelector('#QuarantinePath').value;
-          config.QuarantineRetentionDays = parseInt(document.querySelector('#QuarantineRetentionDays').value, 10);
-          config.SettleSeconds = parseInt(document.querySelector('#SettleSeconds').value, 10);
-          toggles.forEach(function (f) { config[f] = document.querySelector('#' + f).checked; });
-          ApiClient.updatePluginConfiguration(IngestConfig.pluginUniqueId, config).then(Dashboard.processPluginConfigurationUpdateResult);
+        function libraryOptions(selected) {
+          return '<option value="">Choose a library…</option>' + libraries.map(function (l) {
+            return '<option value="' + esc(l.ItemId) + '"' + (l.ItemId === selected ? ' selected' : '') + '>' + esc(l.Name) + ' (' + esc(l.CollectionType || 'mixed') + ')</option>';
+          }).join('');
+        }
+
+        function locationOptions(libraryId, selected) {
+          var lib = libraries.filter(function (l) { return l.ItemId === libraryId; })[0];
+          var locs = (lib && lib.Locations) || [];
+          return '<option value="">' + (locs.length ? 'First folder (' + esc(locs[0]) + ')' : '—') + '</option>' + locs.map(function (p) {
+            return '<option value="' + esc(p) + '"' + (p === selected ? ' selected' : '') + '>' + esc(p) + '</option>';
+          }).join('');
+        }
+
+        function addRow(w) {
+          w = w || { Path: '', TargetLibraryId: '', TargetPath: '', Enabled: true };
+          var n = rowCount++;
+          var row = document.createElement('div');
+          row.className = 'ingest-row';
+          row.innerHTML =
+            '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused" for="wf-path-' + n + '">Watch folder</label>' +
+            '<input is="emby-input" type="text" id="wf-path-' + n + '" class="wf-path" value="' + esc(w.Path) + '" placeholder="/media/incoming" /></div>' +
+            '<div class="selectContainer"><label class="selectLabel" for="wf-lib-' + n + '">Library</label>' +
+            '<select is="emby-select" id="wf-lib-' + n + '" class="wf-lib">' + libraryOptions(w.TargetLibraryId) + '</select></div>' +
+            '<div class="selectContainer"><label class="selectLabel" for="wf-loc-' + n + '">Library folder</label>' +
+            '<select is="emby-select" id="wf-loc-' + n + '" class="wf-loc">' + locationOptions(w.TargetLibraryId, w.TargetPath) + '</select></div>' +
+            '<label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" id="wf-on-' + n + '" class="wf-on"' + (w.Enabled ? ' checked' : '') + ' /><span>On</span></label>' +
+            '<button is="emby-button" type="button" class="raised button-cancel wf-remove" id="wf-del-' + n + '"><span>Remove</span></button>';
+          row.querySelector('.wf-lib').addEventListener('change', function (e) {
+            row.querySelector('.wf-loc').innerHTML = locationOptions(e.target.value, '');
+          });
+          row.querySelector('.wf-remove').addEventListener('click', function () { row.remove(); });
+          page.querySelector('#WatchFolders').appendChild(row);
+        }
+
+        function syncBanner() {
+          page.querySelector('#DryRunBanner').hidden = !page.querySelector('#DryRun').checked;
+        }
+
+        page.addEventListener('pageshow', function () {
+          Dashboard.showLoadingMsg();
+          Promise.all([ApiClient.getVirtualFolders(), ApiClient.getPluginConfiguration(pluginId)]).then(function (res) {
+            libraries = res[0] || [];
+            var config = res[1];
+            page.querySelector('#WatchFolders').innerHTML = '';
+            (config.WatchFolders || []).forEach(addRow);
+            if (!(config.WatchFolders || []).length) { addRow(); }
+            page.querySelector('#QuarantinePath').value = config.QuarantinePath || '';
+            page.querySelector('#QuarantineRetentionDays').value = config.QuarantineRetentionDays;
+            page.querySelector('#SettleSeconds').value = config.SettleSeconds;
+            page.querySelector('#DryRun').checked = config.DryRun;
+            page.querySelector('#ScanLibraryAfterIngest').checked = config.ScanLibraryAfterIngest;
+            syncBanner();
+            Dashboard.hideLoadingMsg();
+          });
         });
-        return false;
-      });
+
+        page.querySelector('#DryRun').addEventListener('change', syncBanner);
+        page.querySelector('#AddWatchFolder').addEventListener('click', function () { addRow(); });
+
+        page.querySelector('#IngestConfigForm').addEventListener('submit', function (e) {
+          e.preventDefault();
+          Dashboard.showLoadingMsg();
+          ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+            config.WatchFolders = Array.prototype.map.call(page.querySelectorAll('.ingest-row'), function (row) {
+              return {
+                Path: row.querySelector('.wf-path').value.trim(),
+                TargetLibraryId: row.querySelector('.wf-lib').value,
+                TargetPath: row.querySelector('.wf-loc').value,
+                Enabled: row.querySelector('.wf-on').checked
+              };
+            }).filter(function (w) { return w.Path; });
+            config.QuarantinePath = page.querySelector('#QuarantinePath').value.trim();
+            config.QuarantineRetentionDays = parseInt(page.querySelector('#QuarantineRetentionDays').value, 10) || 30;
+            config.SettleSeconds = parseInt(page.querySelector('#SettleSeconds').value, 10) || 60;
+            config.DryRun = page.querySelector('#DryRun').checked;
+            config.ScanLibraryAfterIngest = page.querySelector('#ScanLibraryAfterIngest').checked;
+            ApiClient.updatePluginConfiguration(pluginId, config).then(Dashboard.processPluginConfigurationUpdateResult);
+          });
+          return false;
+        });
+      })();
     </script>
   </div>
 </body>

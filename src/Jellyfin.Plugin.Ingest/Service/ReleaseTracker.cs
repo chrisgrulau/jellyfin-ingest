@@ -1,0 +1,107 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using Jellyfin.Plugin.Ingest.Planning;
+
+namespace Jellyfin.Plugin.Ingest.Service;
+
+/// <summary>
+/// Decides when a dropped release has finished arriving. A release is the top-level file or folder in a watch folder;
+/// it is "settled" once its file list and sizes have stayed unchanged for the settle time. A release that was already
+/// handled (e.g. left for review) is not offered again until its contents change.
+/// </summary>
+public sealed partial class ReleaseTracker
+{
+    private readonly Dictionary<string, (string Signature, DateTimeOffset Since)> _seen = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _handled = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Returns whether a top-level entry of a watch folder should be ignored entirely (hidden files, the quarantine
+    /// folder when it lives inside the watch folder, and in-progress downloads).
+    /// </summary>
+    /// <param name="name">The entry's name.</param>
+    /// <returns><c>true</c> to ignore it.</returns>
+    public static bool IsIgnored(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return name.StartsWith('.') || PartialDownload().IsMatch(name);
+    }
+
+    /// <summary>
+    /// A stable fingerprint of a release's contents (paths and sizes).
+    /// </summary>
+    /// <param name="files">The release's files.</param>
+    /// <returns>The signature.</returns>
+    public static string Signature(IEnumerable<ReleaseFile> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        var sb = new StringBuilder();
+        foreach (var f in files.OrderBy(f => f.RelativePath, StringComparer.Ordinal))
+        {
+            sb.Append(f.RelativePath).Append('\u0001').Append(f.Size.ToString(CultureInfo.InvariantCulture)).Append('\u0002');
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Records the current contents of the watch folder and returns the releases that are ready to process.
+    /// </summary>
+    /// <param name="snapshot">Release name → its files, as found by this sweep.</param>
+    /// <param name="now">Current time.</param>
+    /// <param name="settle">How long contents must stay unchanged.</param>
+    /// <returns>Names of settled, not-yet-handled releases.</returns>
+    public IReadOnlyList<string> Observe(IReadOnlyDictionary<string, IReadOnlyList<ReleaseFile>> snapshot, DateTimeOffset now, TimeSpan settle)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        // forget releases that disappeared (moved away, deleted)
+        foreach (var gone in _seen.Keys.Where(k => !snapshot.ContainsKey(k)).ToList())
+        {
+            _seen.Remove(gone);
+            _handled.Remove(gone);
+        }
+
+        var ready = new List<string>();
+        foreach (var (name, files) in snapshot)
+        {
+            if (files.Count == 0 || files.Any(f => PartialDownload().IsMatch(f.RelativePath)))
+            {
+                _seen.Remove(name);
+                continue;
+            }
+
+            var sig = Signature(files);
+            if (!_seen.TryGetValue(name, out var prev) || !string.Equals(prev.Signature, sig, StringComparison.Ordinal))
+            {
+                _seen[name] = (sig, now);
+                continue;
+            }
+
+            if (now - prev.Since >= settle && !(_handled.TryGetValue(name, out var done) && string.Equals(done, sig, StringComparison.Ordinal)))
+            {
+                ready.Add(name);
+            }
+        }
+
+        return ready;
+    }
+
+    /// <summary>
+    /// Marks a release as handled in its current state (it won't be offered again unless it changes).
+    /// </summary>
+    /// <param name="name">Release name.</param>
+    public void MarkHandled(string name)
+    {
+        if (_seen.TryGetValue(name, out var s))
+        {
+            _handled[name] = s.Signature;
+        }
+    }
+
+    [GeneratedRegex(@"\.(?:part|partial|!qb|!ut|crdownload|tmp|temp|download)$|^~\$", RegexOptions.IgnoreCase)]
+    private static partial Regex PartialDownload();
+}
