@@ -54,7 +54,7 @@ public class PlanningTests
     {
         var plan = await Planner().PlanAsync(Watch, "n00b-Lantern1E4",
             [F("n00b-Lantern1E4/n00b-Lantern1E4.mp4"), F("n00b-Lantern1E4/english.srt", 40_000), F("n00b-Lantern1E4/README.txt", 900), F("n00b-Lantern1E4/sample.mkv", 12_000_000)],
-            Tv, Quarantine, null, CancellationToken.None);
+            LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
 
         Assert.True(plan.IsReady);
         var series = Path.Combine("/lib/Shows", "Lantern (2001) [tvdbid-7] [tmdbid-9]", "Season 01");
@@ -67,7 +67,7 @@ public class PlanningTests
     [Fact]
     public async Task Unidentified_releases_are_left_untouched_for_review()
     {
-        var plan = await Planner().PlanAsync(Watch, "Mystery", [F("Mystery/Unknown.Thing.S01E01.mkv"), F("Mystery/info.txt", 10)], Tv, Quarantine, null, CancellationToken.None);
+        var plan = await Planner().PlanAsync(Watch, "Mystery", [F("Mystery/Unknown.Thing.S01E01.mkv"), F("Mystery/info.txt", 10)], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
 
         Assert.False(plan.IsReady);
         Assert.Empty(plan.Operations);
@@ -79,7 +79,7 @@ public class PlanningTests
     {
         var existing = Path.Combine("/lib/Shows", "Lantern (2001) [tvdbid-7] [tmdbid-9]", "Season 01", "Lantern S01E04 - Glass Harbour.mkv");
 
-        var plan = await Planner(p => p == existing).PlanAsync(Watch, "x", [F("x/Lantern.S01E04.mkv")], Tv, Quarantine, null, CancellationToken.None);
+        var plan = await Planner(p => p == existing).PlanAsync(Watch, "x", [F("x/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
 
         Assert.False(plan.IsReady);
         Assert.Contains("already exists", plan.Review[0].Reason, StringComparison.Ordinal);
@@ -88,7 +88,7 @@ public class PlanningTests
     [Fact]
     public async Task A_film_dropped_for_a_tv_library_goes_to_review()
     {
-        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], Tv, Quarantine, null, CancellationToken.None);
+        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
 
         Assert.False(plan.IsReady);
     }
@@ -96,7 +96,7 @@ public class PlanningTests
     [Fact]
     public async Task Extras_are_filed_under_their_film()
     {
-        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv"), F("r/Featurettes/Building the Rocket.mkv", 300_000_000)], Films, Quarantine, null, CancellationToken.None);
+        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv"), F("r/Featurettes/Building the Rocket.mkv", 300_000_000)], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
 
         Assert.True(plan.IsReady);
         Assert.Contains(plan.Operations, o => o.Kind == OperationKind.Extra
@@ -200,7 +200,7 @@ public class PlanningTests
     public async Task Files_as_the_title_chosen_in_review_without_searching()
     {
         var chosen = new MetadataCandidate { Name = "Harbour Lights", Year = 2011, ProviderIds = new Dictionary<string, string> { ["Tvdb"] = "55", ["Tmdb"] = "66" } };
-        var plan = await Planner().PlanAsync(Watch, "hl", [F("hl/Harbour.Lights.S02E03.mkv")], Tv, Quarantine, chosen, CancellationToken.None);
+        var plan = await Planner().PlanAsync(Watch, "hl", [F("hl/Harbour.Lights.S02E03.mkv")], LibraryTargets.Of(Tv), Quarantine, new ChosenMatch(chosen, Tv), CancellationToken.None);
 
         Assert.True(plan.IsReady);
         Assert.Equal("/lib/Shows/Harbour Lights (2011) [tvdbid-55] [tmdbid-66]/Season 02/Harbour Lights S02E03.mkv", plan.Operations[0].Destination);
@@ -209,10 +209,67 @@ public class PlanningTests
     [Fact]
     public async Task Review_items_carry_the_candidates_considered()
     {
-        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.1080p.mkv")], Films, Quarantine, null, CancellationToken.None);
+        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.1080p.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
 
         Assert.False(plan.IsReady);
         var item = Assert.Single(plan.Review);
         Assert.Equal(["123", "124"], item.Candidates.Select(c => c.Candidate.ProviderIds["Tmdb"]));
+    }
+
+    [Fact]
+    public async Task Routes_films_and_episodes_to_their_own_library()
+    {
+        var both = new LibraryTargets(Tv, Films);
+        var film = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], both, Quarantine, null, CancellationToken.None);
+        var episode = await Planner().PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], both, Quarantine, null, CancellationToken.None);
+
+        Assert.StartsWith("/lib/Movies/Rocket Club (2019) [tmdbid-123]/", film.Operations[0].Destination, StringComparison.Ordinal);
+        Assert.StartsWith("/lib/Shows/Lantern (2001) ", episode.Operations[0].Destination, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_film_without_a_film_library_keeps_its_match_for_review()
+    {
+        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        var item = Assert.Single(plan.Review);
+        Assert.Contains("no film library", item.Reason, StringComparison.Ordinal);
+        Assert.Equal("123", item.Candidates[0].Candidate.ProviderIds["Tmdb"]);
+        Assert.False(item.Candidates[0].Candidate.IsSeries);
+    }
+
+    [Fact]
+    public async Task A_film_chosen_in_review_goes_to_the_chosen_library()
+    {
+        var gay = new LibraryTarget("/lib/Other Movies", IsTv: false);
+        var chosen = new ChosenMatch(new MetadataCandidate { Name = "Rocket Club", Year = 2019, ProviderIds = new Dictionary<string, string> { ["Tmdb"] = "123" } }, gay);
+        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], new LibraryTargets(Tv, Films), Quarantine, chosen, CancellationToken.None);
+
+        Assert.StartsWith("/lib/Other Movies/Rocket Club (2019) [tmdbid-123]/", plan.Operations[0].Destination, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_main_subtitle_is_the_default_when_a_language_has_several()
+    {
+        var en = new Jellyfin.Plugin.Ingest.Naming.SubtitleTrack { Language = "en" };
+        var subs = new PairedSubtitle[]
+        {
+            new("r/Commentary.en.srt", en with { Title = "Commentary" }),
+            new("r/en.sdh.srt", en with { HearingImpaired = true }),
+            new("r/en.srt", en),
+            new("r/en.forced.srt", en with { Forced = true }),
+            new("r/fr.srt", new Jellyfin.Plugin.Ingest.Naming.SubtitleTrack { Language = "fr" }),
+        };
+
+        var result = IngestPlanner.WithMainTrackDefault(subs);
+
+        Assert.Equal(["r/en.srt"], result.Where(s => s.Track.Default).Select(s => s.RelativePath));
+    }
+
+    [Fact]
+    public void A_single_subtitle_per_language_is_left_alone()
+    {
+        var subs = new PairedSubtitle[] { new("r/en.srt", new Jellyfin.Plugin.Ingest.Naming.SubtitleTrack { Language = "en" }) };
+        Assert.False(Assert.Single(IngestPlanner.WithMainTrackDefault(subs)).Track.Default);
     }
 }

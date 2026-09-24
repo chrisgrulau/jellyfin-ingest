@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using Jellyfin.Plugin.Ingest.Identification;
+using Jellyfin.Plugin.Ingest.Planning;
 
 namespace Jellyfin.Plugin.Ingest.Service;
 
@@ -34,6 +35,9 @@ public enum ActivityStatus
 
     /// <summary>Expired quarantine was deleted.</summary>
     Purged,
+
+    /// <summary>A person made a review decision (chose a title, asked for a retry or quarantine).</summary>
+    Decision,
 }
 
 /// <summary>
@@ -90,9 +94,6 @@ public sealed record PendingReview
     /// <summary>Gets the release name inside the watch folder.</summary>
     public required string Release { get; init; }
 
-    /// <summary>Gets a value indicating whether the watch folder files into a TV library.</summary>
-    public bool IsTv { get; init; }
-
     /// <summary>Gets when the release was last planned.</summary>
     public required DateTimeOffset Time { get; init; }
 
@@ -102,8 +103,8 @@ public sealed record PendingReview
     /// <summary>Gets the distinct titles considered across the release's files, best first.</summary>
     public IReadOnlyList<ScoredCandidate> Candidates { get; init; } = [];
 
-    /// <summary>Gets the title chosen in review, if any; used instead of searching when the release is planned again.</summary>
-    public MetadataCandidate? Chosen { get; init; }
+    /// <summary>Gets the title and library chosen in review, if any; used instead of searching when the release is planned again.</summary>
+    public ChosenMatch? Chosen { get; init; }
 
     /// <summary>Gets the pending request.</summary>
     public ReviewRequest Request { get; init; }
@@ -208,6 +209,29 @@ public sealed class IngestStateStore
     }
 
     /// <summary>
+    /// Records an activity entry unless the latest entry for the same release says exactly the same (a restart plans
+    /// every waiting release again; repeating identical dry-run results is noise). The outcome of a review decision is
+    /// always recorded, so the person who decided sees what it led to.
+    /// </summary>
+    /// <param name="entry">The entry.</param>
+    /// <returns><c>true</c> if it was recorded.</returns>
+    public bool RecordUnlessRepeat(ActivityEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        lock (_lock)
+        {
+            var last = Load().Activity.FirstOrDefault(a => a.Release == entry.Release && a.WatchFolder == entry.WatchFolder);
+            if (last is not null && last.Status == entry.Status && last.Summary == entry.Summary && last.Details.SequenceEqual(entry.Details))
+            {
+                return false;
+            }
+
+            Record(entry);
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Adds or refreshes a release's review. A title chosen earlier is kept; any request is cleared (it has been acted on).
     /// </summary>
     /// <param name="review">The review (its <see cref="PendingReview.Chosen"/> and <see cref="PendingReview.Request"/> are ignored).</param>
@@ -251,9 +275,9 @@ public sealed class IngestStateStore
     /// Asks for a release to be planned again, optionally as a chosen title.
     /// </summary>
     /// <param name="id">Review id.</param>
-    /// <param name="chosen">The chosen title, or <c>null</c> to keep searching (clears an earlier choice).</param>
+    /// <param name="chosen">The chosen title and library, or <c>null</c> to keep searching (clears an earlier choice).</param>
     /// <returns><c>false</c> if there is no such review.</returns>
-    public bool RequestRetry(string id, MetadataCandidate? chosen)
+    public bool RequestRetry(string id, ChosenMatch? chosen)
         => Update(id, r => r with { Chosen = chosen, Request = ReviewRequest.Retry });
 
     /// <summary>
@@ -265,11 +289,20 @@ public sealed class IngestStateStore
         => Update(id, r => r with { Request = ReviewRequest.Quarantine });
 
     /// <summary>
-    /// Clears a review's pending request, keeping everything else (used when a dry run plans a reviewed release).
+    /// Clears a review's pending request, keeping everything else.
     /// </summary>
     /// <param name="id">Review id.</param>
     public void ClearRequest(string id)
         => Update(id, r => r with { Request = ReviewRequest.None });
+
+    /// <summary>
+    /// Marks a review as planned in dry run: its old reasons no longer apply, so they are replaced by a note and the
+    /// request is cleared. The choice is kept so the release files the same way once dry run is off.
+    /// </summary>
+    /// <param name="id">Review id.</param>
+    /// <param name="note">What was planned.</param>
+    public void MarkPlannedInDryRun(string id, string note)
+        => Update(id, r => r with { Request = ReviewRequest.None, Items = [new PendingReviewItem(r.Release, note)] });
 
     /// <summary>
     /// Removes a review (the release was filed, quarantined or has gone from the watch folder).
@@ -340,6 +373,16 @@ public sealed class IngestStateStore
         }
 
         _state ??= new StateFile();
+
+        // A choice saved in an older format can come back incomplete; drop it rather than plan with it.
+        for (var i = 0; i < _state.Reviews.Count; i++)
+        {
+            if (_state.Reviews[i].Chosen is { } c && (c.Candidate is null || c.Target is null))
+            {
+                _state.Reviews[i] = _state.Reviews[i] with { Chosen = null };
+            }
+        }
+
         return _state;
     }
 

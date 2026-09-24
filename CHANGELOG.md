@@ -6,19 +6,38 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
-- Settings page **Needs review** section: each waiting release with its reasons and the candidate titles (score and
-  TMDb / TheTVDB / IMDb links). *Use this* files the release as that title on the next sweep; *Retry* plans it again
-  (e.g. after renaming files or clearing a destination); *Quarantine release* moves the whole release to quarantine.
-  A choice made while dry run is on is kept, so the release files the same way once dry run is turned off.
-- Settings page **Recent activity** panel (filterable): filed, dry run, needs review, failed, quarantined and purged,
-  each with what went where or why not. Kept across restarts (last 300 entries).
-- Admin-only API used by the page: `GET /Ingest/Status`, `POST /Ingest/Reviews/{id}/Choose/{n}`, `…/Retry`,
-  `…/Quarantine`.
+- **Destinations per watch folder:** each watch folder files into one or more libraries, at most one per kind: a Shows
+  library, a Movies library, or a single Mixed Movies and Shows library (which takes both). Each release goes to the
+  destination for its kind, so one drop folder can take both films and shows. Overlapping destinations are refused
+  by the settings page and ignored (with a log warning) by the service. Other library types (music, books, home
+  videos …) are never offered.
+- **Setup required:** until at least one enabled watch folder with at least one destination is saved, the settings
+  page shows a setup prompt and Save refuses an incomplete setup; nothing is watched until then.
+- Settings page **Needs review** section: each waiting release with its reasons and the candidate titles (score,
+  top-match / IMDb-only / in-library tags, TMDb / TheTVDB / IMDb links) and a *File into* library picker offering
+  only libraries of the right kind (e.g. either of two Movies libraries for a film).
+  - *Use this* files the release as that title into that library on the next sweep.
+  - *Search for a different title* (title, year, film or show) when the suggestions are wrong or empty.
+  - *Retry* plans it again (e.g. after renaming files or clearing a destination); *Quarantine release* moves the
+    whole release to quarantine.
+  - A film found in a folder with no film destination (or vice versa) keeps its match for review instead of losing it.
+  - A choice made while dry run is on is kept, so the release files the same way once dry run is turned off.
+- Settings page **Recent activity** panel (filterable): filed, dry run, needs review, decisions (who chose what),
+  failed, quarantined and purged, each with what went where or why not. Kept across restarts (last 300 entries);
+  identical repeats (e.g. a dry run re-planned after a restart) aren't recorded twice.
+- Admin-only API used by the page: `GET /Ingest/Status`, `GET /Ingest/Search`, `POST /Ingest/Reviews/{id}/Choose`,
+  `…/Retry`, `…/Quarantine`.
+
+- When a video has several subtitles in one language (main, SDH, commentary …), the main one is filed as
+  `.default` so Jellyfin doesn't pick a titled extra that happens to sort first.
 
 ### Changed
+- CI actions are pinned to full commit SHAs (with the version in a comment; Dependabot keeps them current).
 - Reviews and activity are stored in `state.json` in the plugin's data folder (replaces `review.jsonl`).
 - A release whose planning throws (e.g. a provider outage) is reported as failed and left for review instead of
   stopping the sweep and being retried every 30 s.
+- A 0.1.0-alpha.1 configuration (single target library) keeps working and is converted to a destination on the next
+  save.
 
 ### Added (0.1.0-alpha.1)
 - Background service: sweeps watch folders every 30 s (file-system notifications are unreliable on network

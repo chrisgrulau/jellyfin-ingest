@@ -21,6 +21,9 @@ public sealed record MetadataCandidate
     /// <summary>Gets the provider that returned the hit (informational).</summary>
     public string? Source { get; init; }
 
+    /// <summary>Gets a value indicating whether the hit is a series (otherwise a film).</summary>
+    public bool IsSeries { get; init; }
+
     /// <summary>Gets the position in the provider's own result list (0 = its best match), if known.</summary>
     public int? ProviderRank { get; init; }
 }

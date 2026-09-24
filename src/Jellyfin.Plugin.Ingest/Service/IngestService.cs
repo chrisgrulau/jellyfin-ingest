@@ -10,6 +10,7 @@ using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Planning;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -89,6 +90,29 @@ public sealed partial class IngestService : IHostedService, IDisposable
             : configuration.QuarantinePath;
     }
 
+    /// <summary>
+    /// Reduces Jellyfin's libraries to what routing needs.
+    /// </summary>
+    /// <param name="libraries">The server's libraries.</param>
+    /// <returns>The libraries.</returns>
+    public static IReadOnlyList<MediaLibrary> Libraries(IEnumerable<VirtualFolderInfo> libraries)
+        => [.. (libraries ?? throw new ArgumentNullException(nameof(libraries)))
+            .Where(l => !string.IsNullOrEmpty(l.ItemId))
+            .Select(l => new MediaLibrary(l.ItemId, l.Name ?? l.ItemId, LibraryRouting.KindOf(l.CollectionType?.ToString()), l.Locations ?? []))];
+
+    /// <summary>
+    /// A watch folder's configured destinations (a configuration from 0.1.0-alpha.1 has a single library instead).
+    /// </summary>
+    /// <param name="watch">The watch folder.</param>
+    /// <returns>The destinations, in order.</returns>
+    public static IReadOnlyList<DestinationSetting> DestinationsOf(WatchFolder watch)
+    {
+        ArgumentNullException.ThrowIfNull(watch);
+        return watch.Destinations.Count > 0
+            ? [.. watch.Destinations.Select(d => new DestinationSetting(d.LibraryId, d.Path))]
+            : [new DestinationSetting(watch.TargetLibraryId, watch.TargetPath)];
+    }
+
     private async Task RunAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -128,7 +152,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
 
         var config = plugin.Configuration;
-        var libraries = _libraryManager.GetVirtualFolders();
+        var libraries = Libraries(_libraryManager.GetVirtualFolders());
         foreach (var watch in config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)))
         {
             if (!Directory.Exists(watch.Path))
@@ -137,15 +161,21 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 continue;
             }
 
-            var library = libraries.FirstOrDefault(l => string.Equals(l.ItemId, watch.TargetLibraryId, StringComparison.OrdinalIgnoreCase));
-            var root = !string.IsNullOrWhiteSpace(watch.TargetPath) ? watch.TargetPath : library?.Locations?.FirstOrDefault();
-            if (library is null || string.IsNullOrWhiteSpace(root))
+            var destinations = DestinationsOf(watch);
+            var routing = LibraryRouting.Route(destinations, libraries);
+            foreach (var problem in routing.Problems)
+            {
+                LogRoutingProblem(_logger, watch.Path, problem);
+            }
+
+            var targets = routing.Targets;
+            if (targets.Tv is null && targets.Films is null)
             {
                 LogNoLibrary(_logger, watch.Path);
                 continue;
             }
 
-            var isTv = string.Equals(library.CollectionType?.ToString(), "tvshows", StringComparison.OrdinalIgnoreCase);
+            var libraryIds = destinations.Select(d => Guid.TryParse(d.LibraryId, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty).ToList();
             var quarantine = QuarantineFor(config, watch);
             var snapshot = Snapshot(watch.Path, quarantine);
             if (!_trackers.TryGetValue(watch.Path, out var tracker))
@@ -172,7 +202,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    await IngestAsync(plugin.DataFolderPath, config, watch, release, snapshot[release], new LibraryTarget(root, isTv), library.ItemId, quarantine, ct).ConfigureAwait(false);
+                    await IngestAsync(plugin.DataFolderPath, config, watch, release, snapshot[release], targets, libraryIds, quarantine, ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -218,8 +248,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
         WatchFolder watch,
         string release,
         IReadOnlyList<ReleaseFile> files,
-        LibraryTarget target,
-        string libraryId,
+        LibraryTargets targets,
+        IReadOnlyList<Guid> libraryIds,
         string quarantine,
         CancellationToken ct)
     {
@@ -227,9 +257,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var previous = _state.GetReview(id);
         var identifier = new MediaIdentifier(
             new JellyfinMetadataLookup(_providerManager),
-            new JellyfinLibraryIndex(_libraryManager, Guid.TryParse(libraryId, out var libraryGuid) ? libraryGuid : null));
+            new JellyfinLibraryIndex(_libraryManager, libraryIds));
         var planner = new IngestPlanner(identifier, p => File.Exists(p) || Directory.Exists(p), ReadSmallText, _clock);
-        var plan = await planner.PlanAsync(watch.Path, release, files, target, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
+        var plan = await planner.PlanAsync(watch.Path, release, files, targets, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
 
         Directory.CreateDirectory(dataFolder);
         if (!plan.IsReady)
@@ -259,7 +289,6 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 Id = id,
                 WatchFolder = watch.Path,
                 Release = release,
-                IsTv = target.IsTv,
                 Time = _clock.GetUtcNow(),
                 Items = items,
                 Candidates = DistinctCandidates(plan.Review),
@@ -283,7 +312,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
             return;
         }
 
-        _state.Record(new ActivityEntry
+        _state.RecordUnlessRepeat(new ActivityEntry
         {
             Time = _clock.GetUtcNow(),
             Status = config.DryRun ? ActivityStatus.DryRun : ActivityStatus.Filed,
@@ -293,10 +322,10 @@ public sealed partial class IngestService : IHostedService, IDisposable
             Details = Describe(watch.Path, report.Completed),
         });
 
-        if (config.DryRun && previous?.Chosen is not null)
+        if (config.DryRun && previous?.Chosen is { } chosen)
         {
             // Keep the decision so the release files the same way once dry run is turned off.
-            _state.ClearRequest(id);
+            _state.MarkPlannedInDryRun(id, $"Dry run: planned as {chosen.Candidate.Name}{(chosen.Candidate.Year is { } y ? $" ({y})" : string.Empty)}; it will be filed once dry run is off.");
         }
         else
         {
@@ -477,6 +506,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest watch folder does not exist: {Path}")]
     private static partial void LogMissingWatchFolder(ILogger logger, string path);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest watch folder {Path}: {Problem}")]
+    private static partial void LogRoutingProblem(ILogger logger, string path, string problem);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest watch folder {Path} has no valid target library")]
     private static partial void LogNoLibrary(ILogger logger, string path);

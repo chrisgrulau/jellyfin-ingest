@@ -18,17 +18,17 @@ public sealed class JellyfinLibraryIndex : ILibraryIndex
     public const double MinimumSimilarity = 0.70;
 
     private readonly ILibraryManager _library;
-    private readonly Guid? _libraryId;
+    private readonly IReadOnlyList<Guid> _libraryIds;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="JellyfinLibraryIndex"/> class.
     /// </summary>
     /// <param name="library">Jellyfin's library manager.</param>
-    /// <param name="libraryId">Restrict to this library (collection folder); <c>null</c> for all libraries.</param>
-    public JellyfinLibraryIndex(ILibraryManager library, Guid? libraryId)
+    /// <param name="libraryIds">Restrict to these libraries (collection folders); empty for all libraries.</param>
+    public JellyfinLibraryIndex(ILibraryManager library, IReadOnlyList<Guid> libraryIds)
     {
         _library = library ?? throw new ArgumentNullException(nameof(library));
-        _libraryId = libraryId;
+        _libraryIds = libraryIds ?? throw new ArgumentNullException(nameof(libraryIds));
     }
 
     /// <inheritdoc />
@@ -47,9 +47,9 @@ public sealed class JellyfinLibraryIndex : ILibraryIndex
             Recursive = true,
             IsVirtualItem = false,
         };
-        if (_libraryId is { } id)
+        if (_libraryIds.Count > 0)
         {
-            query.TopParentIds = [id];
+            query.TopParentIds = [.. _libraryIds];
         }
 
         return [.. _library.GetItemList(query)

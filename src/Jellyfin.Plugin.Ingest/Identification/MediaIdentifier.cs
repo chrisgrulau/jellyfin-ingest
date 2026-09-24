@@ -305,7 +305,7 @@ public sealed class MediaIdentifier
             hits = [.. hits, .. more];
         }
 
-        return hits;
+        return [.. hits.Select(h => h with { IsSeries = series })];
     }
 
     private async Task<IdentificationResult> IdentifyMovieAsync(ParsedRelease release, CancellationToken ct)

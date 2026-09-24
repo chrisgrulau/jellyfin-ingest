@@ -50,7 +50,8 @@ library) and only files automatically when the best is **≥ 0.80** and **clearl
 
 Score = title similarity (max of an edit-distance ratio and a word-overlap score, on normalised titles)
 + year agreement (+0.10 exact, +0.05 off by one, −0.25 otherwise) + 0.20 if already in the library
-+ a small nudge for the provider's own top results − a penalty when sequel numbers disagree.
++ a small nudge for the provider's own top results − a penalty when sequel numbers disagree
+− 0.20 for a title known only by an IMDb id (no TMDb or TheTVDB id; typically an OMDb hit).
 
 The thresholds were tuned against a private set of real release names with known ids (kept out of the repository):
 a clear majority are identified automatically, higher when the destination library already has the title, and the

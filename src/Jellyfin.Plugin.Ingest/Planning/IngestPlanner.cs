@@ -12,11 +12,38 @@ using Jellyfin.Plugin.Ingest.Parsing;
 namespace Jellyfin.Plugin.Ingest.Planning;
 
 /// <summary>
-/// Where a watch folder's media goes.
+/// A library folder media can be filed into.
 /// </summary>
-/// <param name="Root">Absolute path of the library folder (e.g. the "TV Series" folder).</param>
+/// <param name="Root">Absolute path of the library folder (e.g. a Shows library's folder).</param>
 /// <param name="IsTv">Whether the library holds shows (otherwise films).</param>
 public sealed record LibraryTarget(string Root, bool IsTv);
+
+/// <summary>
+/// Where a watch folder's media goes: episodes to <see cref="Tv"/>, films to <see cref="Films"/>. Either may be
+/// missing, in which case media of that kind is left for review.
+/// </summary>
+/// <param name="Tv">The TV library folder, if any.</param>
+/// <param name="Films">The film library folder, if any.</param>
+public sealed record LibraryTargets(LibraryTarget? Tv, LibraryTarget? Films)
+{
+    /// <summary>
+    /// Wraps a single library.
+    /// </summary>
+    /// <param name="target">The library.</param>
+    /// <returns>Targets with just that library.</returns>
+    public static LibraryTargets Of(LibraryTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        return target.IsTv ? new(target, null) : new(null, target);
+    }
+}
+
+/// <summary>
+/// A decision made in review: file the release as this title, into this library.
+/// </summary>
+/// <param name="Candidate">The chosen title.</param>
+/// <param name="Target">The chosen library folder (its kind must match the title's).</param>
+public sealed record ChosenMatch(MetadataCandidate Candidate, LibraryTarget Target);
 
 /// <summary>
 /// Turns a dropped release into an <see cref="IngestPlan"/>. It reads nothing but names (plus, via callbacks, whether a
@@ -50,24 +77,24 @@ public sealed class IngestPlanner
     /// <param name="watchFolder">Absolute path of the watch folder.</param>
     /// <param name="releaseName">The release's top-level file or folder name inside the watch folder.</param>
     /// <param name="files">Every file of the release, relative to the watch folder.</param>
-    /// <param name="target">Destination library.</param>
+    /// <param name="targets">Destination libraries.</param>
     /// <param name="quarantineRoot">Absolute quarantine folder.</param>
-    /// <param name="chosen">A title a person picked for this release in review; used instead of searching.</param>
+    /// <param name="chosen">A title and library a person picked for this release in review; used instead of searching.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The plan; nothing in it has been done yet.</returns>
     public async Task<IngestPlan> PlanAsync(
         string watchFolder,
         string releaseName,
         IReadOnlyList<ReleaseFile> files,
-        LibraryTarget target,
+        LibraryTargets targets,
         string quarantineRoot,
-        MetadataCandidate? chosen,
+        ChosenMatch? chosen,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(watchFolder);
         ArgumentException.ThrowIfNullOrWhiteSpace(releaseName);
         ArgumentNullException.ThrowIfNull(files);
-        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(targets);
         ArgumentException.ThrowIfNullOrWhiteSpace(quarantineRoot);
 
         string Abs(string rel) => Path.Combine(watchFolder, rel);
@@ -92,18 +119,25 @@ public sealed class IngestPlanner
         var owners = new HashSet<string>(StringComparer.Ordinal);
         foreach (var video in mains)
         {
+            // Only a TV library to file into: a name without an episode code is most likely a show; otherwise a film
+            var preferTv = targets.Tv is not null && targets.Films is null;
             var result = chosen is null
-                ? await _identifier.IdentifyAsync(parsed[video], target.IsTv, cancellationToken).ConfigureAwait(false)
-                : await _identifier.IdentifyAsChosenAsync(parsed[video], chosen, target.IsTv, cancellationToken).ConfigureAwait(false);
+                ? await _identifier.IdentifyAsync(parsed[video], preferTv, cancellationToken).ConfigureAwait(false)
+                : await _identifier.IdentifyAsChosenAsync(parsed[video], chosen.Candidate, chosen.Target.IsTv, cancellationToken).ConfigureAwait(false);
             if (result.Status != IdentificationStatus.Identified)
             {
                 review.Add(new ReviewItem(Abs(video), result.Reason) { Candidates = result.Candidates });
                 continue;
             }
 
-            if (target.IsTv != (result.Episode is not null))
+            var isEpisode = result.Episode is not null;
+            var target = chosen?.Target ?? (isEpisode ? targets.Tv : targets.Films);
+            if (target is null)
             {
-                review.Add(new ReviewItem(Abs(video), target.IsTv ? "Identified as a film, but this watch folder files into a TV library." : "Identified as a TV episode, but this watch folder files into a film library."));
+                var reason = isEpisode
+                    ? $"Identified as an episode of '{result.Episode!.Series.Title}', but this watch folder has no TV library. Choose a library below."
+                    : $"Identified as the film '{result.Movie!.Title}', but this watch folder has no film library. Choose a library below.";
+                review.Add(new ReviewItem(Abs(video), reason) { Candidates = result.Candidates });
                 continue;
             }
 
@@ -158,7 +192,7 @@ public sealed class IngestPlanner
         {
             var dir = Path.GetDirectoryName(destinations[video])!;
             var stem = Path.GetFileNameWithoutExtension(destinations[video]);
-            foreach (var sub in subs)
+            foreach (var sub in WithMainTrackDefault(subs))
             {
                 var name = SubtitleNamer.SidecarName(stem, sub.Track, Path.GetExtension(sub.RelativePath), n => Taken(Path.Combine(dir, n)));
                 var destination = Path.Combine(dir, name);
@@ -183,5 +217,34 @@ public sealed class IngestPlanner
         }
 
         return new IngestPlan { ReleaseName = releaseName, Operations = ops };
+    }
+
+    /// <summary>
+    /// When a video has several subtitles in one language (main, SDH, commentary …) and none is marked default,
+    /// marks the main one default. Otherwise Jellyfin picks whichever sorts first by file name, which is usually a
+    /// titled extra such as "Alternate 2" or "Commentary".
+    /// </summary>
+    /// <param name="subs">A video's subtitles.</param>
+    /// <returns>The same subtitles, with at most one default per language.</returns>
+    public static IReadOnlyList<PairedSubtitle> WithMainTrackDefault(IReadOnlyList<PairedSubtitle> subs)
+    {
+        ArgumentNullException.ThrowIfNull(subs);
+
+        var result = subs.ToList();
+        foreach (var group in result.Where(s => !s.Track.Forced).GroupBy(s => s.Track.Language ?? string.Empty, StringComparer.Ordinal).ToList())
+        {
+            if (group.Count() < 2 || group.Any(s => s.Track.Default))
+            {
+                continue;
+            }
+
+            var main = group
+                .OrderBy(s => !string.IsNullOrEmpty(s.Track.Title))
+                .ThenBy(s => s.Track.HearingImpaired)
+                .First();
+            result[result.IndexOf(main)] = main with { Track = main.Track with { Default = true } };
+        }
+
+        return result;
     }
 }

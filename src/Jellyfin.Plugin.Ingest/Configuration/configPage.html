@@ -7,22 +7,47 @@
 <body>
   <div id="IngestConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
     <style>
-      #IngestConfigPage .ingest-row { display: grid; grid-template-columns: minmax(12em, 2fr) minmax(10em, 1fr) minmax(10em, 1.4fr) auto auto; gap: .75em; align-items: end; padding: .75em 0; border-bottom: 1px solid rgba(128,128,128,.25); }
+      #IngestConfigPage .ingest-row { padding: 1em; margin: .75em 0; border-radius: 6px; border: 1px solid rgba(128,128,128,.25); }
+      #IngestConfigPage .ingest-row.invalid { border-color: rgba(220,53,69,.8); }
+      #IngestConfigPage .wf-top { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 1em; align-items: end; }
+      #IngestConfigPage .wf-dests { margin-top: .75em; }
+      #IngestConfigPage .wf-dest { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 1em; align-items: end; margin: .5em 0; }
       #IngestConfigPage .ingest-row .inputContainer, #IngestConfigPage .ingest-row .selectContainer { margin: 0; }
+      #IngestConfigPage .ingest-row .emby-button { margin: 0; }
+      #IngestConfigPage .wf-hint { margin: .25em 0 0; }
+      #IngestConfigPage .wf-error { color: #ff6b76; margin: .5em 0 0; }
+      #IngestConfigPage .wf-error:empty { display: none; }
       #IngestConfigPage .ingest-banner { padding: .75em 1em; border-radius: 4px; margin: 1em 0; background: rgba(255,170,0,.15); }
       #IngestConfigPage .ingest-banner[hidden] { display: none; }
+      #IngestConfigPage .ingest-banner.setup { background: rgba(0,164,220,.18); }
       #IngestConfigPage .ingest-card { padding: 1em; margin: .75em 0; border-radius: 6px; background: rgba(128,128,128,.10); }
       #IngestConfigPage .ingest-card h4 { margin: 0 0 .25em; word-break: break-word; }
+      #IngestConfigPage .ingest-card a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+      #IngestConfigPage .ingest-links a + a { margin-left: .6em; }
       #IngestConfigPage .ingest-muted { opacity: .7; font-size: .9em; }
       #IngestConfigPage .ingest-reasons { margin: .5em 0; padding-left: 1.2em; }
       #IngestConfigPage .ingest-reasons li { word-break: break-word; }
-      #IngestConfigPage .ingest-cands { width: 100%; border-collapse: collapse; margin: .5em 0; }
-      #IngestConfigPage .ingest-cands td { padding: .35em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; }
-      #IngestConfigPage .ingest-cands td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-      #IngestConfigPage .ingest-cands a { color: inherit; margin-right: .5em; }
-      #IngestConfigPage .ingest-actions { display: flex; flex-wrap: wrap; gap: .5em; margin-top: .5em; }
-      #IngestConfigPage .ingest-actions .emby-button, #IngestConfigPage .ingest-cands .emby-button { margin: 0; }
-      #IngestConfigPage .ingest-chosen { padding: .4em .75em; border-radius: 4px; background: rgba(0,164,220,.15); margin: .5em 0; }
+      #IngestConfigPage .ingest-pick { max-width: 56em; margin: .75em 0; }
+      #IngestConfigPage .ingest-into { display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1em; margin-bottom: .25em; }
+      #IngestConfigPage .ingest-into select { min-width: 14em; max-width: 100%; padding: .35em .5em; background: rgba(0,0,0,.25); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
+      #IngestConfigPage .ingest-into select option { background: #202020; }
+      #IngestConfigPage .ingest-cands { width: 100%; border-collapse: collapse; }
+      #IngestConfigPage .ingest-cands td { padding: .4em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; }
+      #IngestConfigPage .ingest-cands td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%; }
+      #IngestConfigPage .ingest-cands tr[hidden] { display: none; }
+      #IngestConfigPage .ingest-cands .emby-button { margin: 0; }
+      #IngestConfigPage .ingest-tag { display: inline-block; font-size: .72em; letter-spacing: .04em; text-transform: uppercase; padding: .1em .45em; border-radius: 3px; margin-left: .5em; vertical-align: .1em; background: rgba(128,128,128,.25); }
+      #IngestConfigPage .ingest-tag.top { background: rgba(82,181,75,.28); }
+      #IngestConfigPage .ingest-more { background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; padding: .4em .5em; font: inherit; opacity: .8; }
+      #IngestConfigPage .ingest-actions { display: flex; flex-wrap: wrap; gap: .5em; margin-top: .75em; }
+      #IngestConfigPage .ingest-actions .emby-button { margin: 0; }
+      #IngestConfigPage .ingest-chosen { padding: .5em .75em; border-radius: 4px; background: rgba(0,164,220,.15); border-left: 3px solid rgba(0,164,220,.7); margin: .5em 0; }
+      #IngestConfigPage .ingest-search summary { cursor: pointer; margin-top: .75em; opacity: .85; }
+      #IngestConfigPage .ingest-search form { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; margin: .5em 0; }
+      #IngestConfigPage .ingest-search input, #IngestConfigPage .ingest-search select { padding: .4em .5em; background: rgba(0,0,0,.25); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
+      #IngestConfigPage .ingest-search input[name=q] { flex: 1 1 14em; min-width: 0; }
+      #IngestConfigPage .ingest-search input[name=y] { width: 5.5em; }
+      #IngestConfigPage .ingest-search .emby-button { margin: 0; }
       #IngestConfigPage .ingest-filters { display: flex; flex-wrap: wrap; gap: .4em; margin: .5em 0 1em; }
       #IngestConfigPage .ingest-filters button { border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; border-radius: 999px; padding: .25em .8em; cursor: pointer; font: inherit; }
       #IngestConfigPage .ingest-filters button[aria-pressed="true"] { background: rgba(0,164,220,.25); border-color: rgba(0,164,220,.6); }
@@ -36,19 +61,25 @@
       #IngestConfigPage .badge.Filed { background: rgba(82,181,75,.25); }
       #IngestConfigPage .badge.DryRun { background: rgba(255,170,0,.22); }
       #IngestConfigPage .badge.NeedsReview { background: rgba(0,164,220,.25); }
+      #IngestConfigPage .badge.Decision { background: rgba(150,110,220,.28); }
       #IngestConfigPage .badge.Failed { background: rgba(220,53,69,.30); }
       #IngestConfigPage .badge.Quarantined, #IngestConfigPage .badge.Purged { background: rgba(128,128,128,.30); }
       #IngestConfigPage .ingest-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; flex-wrap: wrap; }
       @media (max-width: 720px) {
-        #IngestConfigPage .ingest-row { grid-template-columns: 1fr; }
+        #IngestConfigPage .wf-top, #IngestConfigPage .wf-dest { grid-template-columns: 1fr; }
         #IngestConfigPage .ingest-activity > li { grid-template-columns: 1fr; }
         #IngestConfigPage .ingest-activity .what { grid-column: 1; }
+        #IngestConfigPage .ingest-cands td.links { display: none; }
       }
     </style>
     <div data-role="content">
       <div class="content-primary">
         <h2 class="sectionTitle">Ingest</h2>
         <p>New media dropped into a watch folder is identified, renamed to Jellyfin's naming standard and moved into the chosen library with its subtitles. Anything else in the release is quarantined and deleted after the retention period. Releases that can't be identified confidently are left where they are and listed under <em>Needs review</em>.</p>
+
+        <div class="ingest-banner setup" id="SetupBanner" hidden>
+          <strong>Ingest isn't set up yet.</strong> Add a watch folder and at least one destination library under <a href="#" id="GoToSetup" style="color:inherit">Watch folders</a>, then save. Nothing is watched until then.
+        </div>
 
         <div class="ingest-banner" id="DryRunBanner">
           <strong>Dry run is on.</strong> Ingest records what it would do and moves nothing. Check <em>Recent activity</em>, then turn dry run off.
@@ -65,7 +96,8 @@
         <ul class="ingest-activity" id="Activity"></ul>
 
         <form id="IngestConfigForm">
-          <h3 class="sectionTitle" style="margin-top:2em">Watch folders</h3>
+          <h3 class="sectionTitle" style="margin-top:2em" id="WatchFoldersHead">Watch folders</h3>
+          <p class="ingest-muted">Each release is filed by type into the watch folder's destination for that kind: shows into a Shows library, films into a Movies library, or both into a Mixed Movies and Shows library. A watch folder can have one destination per kind, so a mixed library must be its only destination. Media with no destination of its kind is left for review. To split films between two Movies libraries, use a watch folder for each.</p>
           <div id="WatchFolders"></div>
           <button is="emby-button" type="button" class="raised button-alt" id="AddWatchFolder"><span>Add watch folder</span></button>
 
@@ -86,7 +118,7 @@
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
               <input id="DryRun" name="DryRun" type="checkbox" is="emby-checkbox" />
-              <span>Dry run (log only, move nothing)</span>
+              <span>Dry run (record only, move nothing)</span>
             </label>
           </div>
           <div class="checkboxContainer checkboxContainer-withDescription">
@@ -106,63 +138,129 @@
         var pluginId = '88d6ced9-052e-45f6-b21d-fc4eefa7998d';
         var page = document.querySelector('#IngestConfigPage');
         var libraries = [];
+        var config = { WatchFolders: [] };
         var rowCount = 0;
 
         function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
-        function libraryOptions(selected) {
-          return '<option value="">Choose a library…</option>' + libraries.map(function (l) {
-            return '<option value="' + esc(l.ItemId) + '"' + (l.ItemId === selected ? ' selected' : '') + '>' + esc(l.Name) + ' (' + esc(l.CollectionType || 'mixed') + ')</option>';
-          }).join('');
-        }
+        // ---- libraries ----
+        // Ingest files films and shows only: Movies, Shows and Mixed Movies and Shows libraries
+        function isMixedLib(l) { return !l.CollectionType || l.CollectionType === 'mixed'; }
+        function isTvLib(l) { return l.CollectionType === 'tvshows' || isMixedLib(l); }
+        function isFilmLib(l) { return l.CollectionType === 'movies' || isMixedLib(l); }
+        function mediaLibs() { return libraries.filter(function (l) { return isTvLib(l) || isFilmLib(l); }); }
+        function libById(id) { return libraries.filter(function (l) { return l.ItemId === id; })[0]; }
+        function kindLabel(l) { return isMixedLib(l) ? 'films and shows' : isTvLib(l) ? 'shows' : 'films'; }
 
         function locationOptions(libraryId, selected) {
-          var lib = libraries.filter(function (l) { return l.ItemId === libraryId; })[0];
+          var lib = libById(libraryId);
           var locs = (lib && lib.Locations) || [];
           return '<option value="">' + (locs.length ? 'First folder (' + esc(locs[0]) + ')' : '—') + '</option>' + locs.map(function (p) {
             return '<option value="' + esc(p) + '"' + (p === selected ? ' selected' : '') + '>' + esc(p) + '</option>';
           }).join('');
         }
 
+        // ---- watch folder rows ----
+        // Kinds a library covers: a Movies library films, a Shows library shows, a mixed library both.
+        function kinds(l) { return l ? { tv: isTvLib(l), film: isFilmLib(l) } : { tv: false, film: false }; }
+        function overlaps(a, b) { return (a.tv && b.tv) || (a.film && b.film); }
+
+        function destinationsOf(w) {
+          if (w.Destinations && w.Destinations.length) { return w.Destinations; }
+          return w.TargetLibraryId ? [{ LibraryId: w.TargetLibraryId, Path: w.TargetPath }] : [];
+        }
+
+        // Rebuilds each destination's library list so it only offers libraries that don't overlap the row's others.
+        function refreshDestinations(row) {
+          var dests = Array.prototype.slice.call(row.querySelectorAll('.wf-dest'));
+          var covered = { tv: false, film: false };
+          dests.forEach(function (d) {
+            var sel = d.querySelector('.wf-lib');
+            var others = { tv: false, film: false };
+            dests.forEach(function (o) { if (o !== d) { var k = kinds(libById(o.querySelector('.wf-lib').value)); others.tv = others.tv || k.tv; others.film = others.film || k.film; } });
+            var current = sel.value;
+            sel.innerHTML = '<option value="">Choose a library…</option>' + mediaLibs().filter(function (l) { return l.ItemId === current || !overlaps(kinds(l), others); }).map(function (l) {
+              return '<option value="' + esc(l.ItemId) + '"' + (l.ItemId === current ? ' selected' : '') + '>' + esc(l.Name) + ' (' + kindLabel(l) + ')</option>';
+            }).join('');
+            var k = kinds(libById(current)); covered.tv = covered.tv || k.tv; covered.film = covered.film || k.film;
+          });
+          var full = covered.tv && covered.film;
+          row.querySelector('.wf-add-dest').hidden = full || !mediaLibs().some(function (l) { return !overlaps(kinds(l), covered); });
+          row.querySelector('.wf-hint').textContent = !dests.length ? 'Add a destination library.'
+            : full ? 'Shows and films both have a destination.'
+            : covered.tv ? 'Films dropped here will be left for review. Add a Movies library to file them too.'
+            : covered.film ? 'Shows dropped here will be left for review. Add a Shows library to file them too.'
+            : '';
+        }
+
+        function addDestination(row, d) {
+          d = d || { LibraryId: '', Path: '' };
+          var n = rowCount++;
+          var el = document.createElement('div');
+          el.className = 'wf-dest';
+          el.innerHTML =
+            '<div class="selectContainer"><label class="selectLabel" for="wf-lib-' + n + '">Destination library</label>' +
+            '<select is="emby-select" id="wf-lib-' + n + '" class="wf-lib"><option value="' + esc(d.LibraryId) + '" selected></option></select></div>' +
+            '<div class="selectContainer"><label class="selectLabel" for="wf-loc-' + n + '">Library folder</label>' +
+            '<select is="emby-select" id="wf-loc-' + n + '" class="wf-loc">' + locationOptions(d.LibraryId, d.Path) + '</select></div>' +
+            '<button is="emby-button" type="button" class="raised button-cancel wf-del-dest"><span>Remove</span></button>';
+          el.querySelector('.wf-lib').addEventListener('change', function (e) {
+            el.querySelector('.wf-loc').innerHTML = locationOptions(e.target.value, '');
+            refreshDestinations(row);
+          });
+          el.querySelector('.wf-del-dest').addEventListener('click', function () { el.remove(); refreshDestinations(row); });
+          row.querySelector('.wf-dests').appendChild(el);
+          refreshDestinations(row);
+        }
+
         function addRow(w) {
-          w = w || { Path: '', TargetLibraryId: '', TargetPath: '', Enabled: true };
+          w = w || { Path: '', Destinations: [], Enabled: true };
           var n = rowCount++;
           var row = document.createElement('div');
           row.className = 'ingest-row';
           row.innerHTML =
-            '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused" for="wf-path-' + n + '">Watch folder</label>' +
+            '<div class="wf-top"><div class="inputContainer"><label class="inputLabel inputLabelUnfocused" for="wf-path-' + n + '">Watch folder</label>' +
             '<input is="emby-input" type="text" id="wf-path-' + n + '" class="wf-path" value="' + esc(w.Path) + '" placeholder="/media/incoming" /></div>' +
-            '<div class="selectContainer"><label class="selectLabel" for="wf-lib-' + n + '">Library</label>' +
-            '<select is="emby-select" id="wf-lib-' + n + '" class="wf-lib">' + libraryOptions(w.TargetLibraryId) + '</select></div>' +
-            '<div class="selectContainer"><label class="selectLabel" for="wf-loc-' + n + '">Library folder</label>' +
-            '<select is="emby-select" id="wf-loc-' + n + '" class="wf-loc">' + locationOptions(w.TargetLibraryId, w.TargetPath) + '</select></div>' +
             '<label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" id="wf-on-' + n + '" class="wf-on"' + (w.Enabled ? ' checked' : '') + ' /><span>On</span></label>' +
-            '<button is="emby-button" type="button" class="raised button-cancel wf-remove" id="wf-del-' + n + '"><span>Remove</span></button>';
-          row.querySelector('.wf-lib').addEventListener('change', function (e) {
-            row.querySelector('.wf-loc').innerHTML = locationOptions(e.target.value, '');
-          });
+            '<button is="emby-button" type="button" class="raised button-cancel wf-remove"><span>Remove folder</span></button></div>' +
+            '<div class="wf-dests"></div>' +
+            '<button is="emby-button" type="button" class="raised button-alt wf-add-dest"><span>Add destination</span></button>' +
+            '<p class="ingest-muted wf-hint"></p><p class="wf-error"></p>';
           row.querySelector('.wf-remove').addEventListener('click', function () { row.remove(); });
+          row.querySelector('.wf-add-dest').addEventListener('click', function () { addDestination(row); });
           page.querySelector('#WatchFolders').appendChild(row);
+          var dests = destinationsOf(w);
+          if (dests.length) { dests.forEach(function (d) { addDestination(row, d); }); } else { addDestination(row); }
+        }
+
+        // A usable setup has at least one enabled watch folder with at least one destination.
+        function isSetUp(c) {
+          return (c.WatchFolders || []).some(function (w) { return w.Enabled && w.Path && destinationsOf(w).some(function (d) { return d.LibraryId; }); });
         }
 
         function syncBanner() {
           page.querySelector('#DryRunBanner').hidden = !page.querySelector('#DryRun').checked;
+          page.querySelector('#SetupBanner').hidden = isSetUp(config);
         }
 
-        // ---- Needs review / Recent activity ----
+        // ---- Needs review ----
         var statusTimer = null;
         var activity = [];
+        var reviews = [];
         var filter = 'All';
         var confirmQuarantine = {};
-        var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged']];
+        var expanded = {};
+        var searchResults = {};
+        var busyCard = null;
+        var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Decision', 'Decisions'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged']];
         var labels = {}; filters.forEach(function (f) { labels[f[0]] = f[1]; });
+        var SHOWN = 5;
 
         function when(iso) {
           var d = new Date(iso);
-          var today = new Date();
-          var sameDay = d.toDateString() === today.toDateString();
-          return sameDay ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          var sameDay = d.toDateString() === new Date().toDateString();
+          var t = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          return sameDay ? t : d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + t;
         }
 
         function links(ids, isTv) {
@@ -171,12 +269,53 @@
           if (ids.Tmdb) { out.push('<a target="_blank" rel="noopener" href="https://www.themoviedb.org/' + (isTv ? 'tv' : 'movie') + '/' + encodeURIComponent(ids.Tmdb) + '">TMDb</a>'); }
           if (ids.Tvdb) { out.push('<a target="_blank" rel="noopener" href="https://thetvdb.com/dereferrer/series/' + encodeURIComponent(ids.Tvdb) + '">TVDB</a>'); }
           if (ids.Imdb) { out.push('<a target="_blank" rel="noopener" href="https://www.imdb.com/title/' + encodeURIComponent(ids.Imdb) + '/">IMDb</a>'); }
-          return out.join('');
+          return '<span class="ingest-links">' + out.join('') + '</span>';
         }
 
         function title(c) { return esc(c.Name) + (c.Year ? ' (' + esc(c.Year) + ')' : ''); }
+        function imdbOnly(c) { var ids = c.ProviderIds || {}; return c.Source !== 'Library' && !ids.Tmdb && !ids.Tvdb; }
 
-        function renderReviews(reviews) {
+        function defaultLibrary(watchPath, isTv) {
+          var w = (config.WatchFolders || []).filter(function (x) { return x.Path === watchPath; })[0];
+          var fits = function (id) { var l = libById(id); return l && (isTv ? isTvLib(l) : isFilmLib(l)); };
+          var own = w ? destinationsOf(w).filter(function (d) { return fits(d.LibraryId); })[0] : null;
+          if (own) { return own.LibraryId; }
+          var any = mediaLibs().filter(function (l) { return isTv ? isTvLib(l) : isFilmLib(l); })[0];
+          return any ? any.ItemId : '';
+        }
+
+        function libraryFor(root) {
+          var l = libraries.filter(function (x) { return (x.Locations || []).indexOf(root) >= 0; })[0];
+          return l ? l.Name : root;
+        }
+
+        // A candidate table with its own "File into" picker; kind decides which libraries are offered.
+        function pickTable(r, cands, list) {
+          if (!cands.length) { return ''; }
+          var isTv = !!cands[0].Candidate.IsSeries;
+          var key = r.Id + ':' + list;
+          var selected = defaultLibrary(r.WatchFolder, isTv);
+          var opts = mediaLibs().filter(function (l) { return isTv ? isTvLib(l) : isFilmLib(l); }).map(function (l) {
+            return '<option value="' + esc(l.ItemId) + '"' + (l.ItemId === selected ? ' selected' : '') + '>' + esc(l.Name) + '</option>';
+          }).join('');
+          var rows = cands.map(function (sc, i) {
+            var c = sc.Candidate;
+            var tags = (i === 0 && list === 'suggested' ? '<span class="ingest-tag top">Top match</span>' : '') +
+              (imdbOnly(c) ? '<span class="ingest-tag" title="Only IMDb knows this title; Jellyfin may not find artwork or episode data">IMDb only</span>' : '') +
+              (c.Source === 'Library' ? '<span class="ingest-tag" title="Already in your library">In library</span>' : '');
+            return '<tr' + (i >= SHOWN && !expanded[key] ? ' hidden' : '') + '><td>' + title(c) + tags + '</td><td class="links">' + links(c.ProviderIds, c.IsSeries) + '</td>' +
+              '<td class="num">' + Math.round(Math.min(1, sc.Score) * 100) + '%</td>' +
+              '<td class="num"><button is="emby-button" type="button" class="raised button-submit ingest-choose" data-list="' + list + '" data-i="' + i + '"><span>Use this</span></button></td></tr>';
+          }).join('');
+          var more = cands.length > SHOWN && !expanded[key]
+            ? '<button type="button" class="ingest-more" data-key="' + esc(key) + '">Show ' + (cands.length - SHOWN) + ' more</button>' : '';
+          return '<div class="ingest-pick" data-list="' + list + '">' +
+            '<div class="ingest-into"><strong>' + (list === 'suggested' ? 'Possible matches' : 'Search results') + '</strong>' +
+            '<label>File into <select class="ingest-lib">' + (opts || '<option value="">No ' + (isTv ? 'TV' : 'film') + ' library</option>') + '</select></label></div>' +
+            '<table class="ingest-cands"><tbody>' + rows + '</tbody></table>' + more + '</div>';
+        }
+
+        function renderReviews() {
           var box = page.querySelector('#Reviews');
           page.querySelector('#ReviewCount').textContent = reviews.length ? '(' + reviews.length + ')' : '';
           if (!reviews.length) { box.innerHTML = '<p class="ingest-muted">Nothing waiting. Releases Ingest can\'t file confidently will appear here.</p>'; return; }
@@ -188,26 +327,31 @@
               '<ul class="ingest-reasons">' + (r.Items || []).map(function (i) {
                 return '<li>' + (i.Source !== r.Release ? '<span class="ingest-muted">' + esc(i.Source) + ':</span> ' : '') + esc(i.Reason) + '</li>';
               }).join('') + '</ul>';
-            if (r.Chosen) { html += '<div class="ingest-chosen">Will file as <strong>' + title(r.Chosen) + '</strong> ' + links(r.Chosen.ProviderIds, r.IsTv) + '</div>'; }
-            if (pending) {
-              html += '<p class="ingest-muted">' + (r.Request === 'Quarantine' ? 'Quarantining' : 'Planning again') + ' on the next sweep (within 30 seconds)…</p>';
-            } else {
-              if ((r.Candidates || []).length) {
-                html += '<table class="ingest-cands"><tbody>' + r.Candidates.map(function (sc, i) {
-                  return '<tr><td>' + title(sc.Candidate) + '</td><td>' + links(sc.Candidate.ProviderIds, r.IsTv) + '</td>' +
-                    '<td class="num">' + Math.round(Math.min(1, sc.Score) * 100) + '%</td>' +
-                    '<td class="num"><button is="emby-button" type="button" class="raised button-submit ingest-choose" data-i="' + i + '"><span>Use this</span></button></td></tr>';
-                }).join('') + '</tbody></table>';
-              }
-              html += '<div class="ingest-actions">' +
-                '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>Retry</span></button>' +
-                '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>' +
-                '</div>';
+            if (r.Chosen) {
+              html += '<div class="ingest-chosen">Chosen: <strong>' + title(r.Chosen.Candidate) + '</strong> into <strong>' + esc(libraryFor(r.Chosen.Target.Root)) + '</strong> &nbsp;' + links(r.Chosen.Candidate.ProviderIds, r.Chosen.Candidate.IsSeries) +
+                (config.DryRun ? '<div class="ingest-muted">Dry run is on, so it has only been planned (see Recent activity). It will be filed once dry run is off.</div>' : '') + '</div>';
             }
+            if (pending) {
+              return html + '<p class="ingest-muted">' + (r.Request === 'Quarantine' ? 'Quarantining' : 'Planning again') + ' on the next sweep (within 30 seconds)…</p></div>';
+            }
+            html += pickTable(r, r.Candidates || [], 'suggested');
+            var sr = searchResults[r.Id];
+            if (sr && sr.results) { html += sr.results.length ? pickTable(r, sr.results, 'search') : '<p class="ingest-muted">No results for “' + esc(sr.q) + '”.</p>'; }
+            var guessTv = (r.Candidates || []).length ? !!r.Candidates[0].Candidate.IsSeries : !!(libById(defaultLibrary(r.WatchFolder, true)) && !defaultLibrary(r.WatchFolder, false));
+            html += '<details class="ingest-search"' + (sr || !(r.Candidates || []).length ? ' open' : '') + '><summary>Search for a different title</summary>' +
+              '<form><input name="q" type="text" placeholder="Title" value="' + esc(sr ? sr.q : '') + '" required />' +
+              '<input name="y" type="number" min="1880" max="2100" placeholder="Year" value="' + esc(sr ? sr.y : '') + '" />' +
+              '<select name="k"><option value="film"' + ((sr ? sr.k === 'film' : !guessTv) ? ' selected' : '') + '>Film</option><option value="tv"' + ((sr ? sr.k === 'tv' : guessTv) ? ' selected' : '') + '>Show</option></select>' +
+              '<button is="emby-button" type="submit" class="raised button-alt"><span>Search</span></button></form></details>';
+            html += '<div class="ingest-actions">' +
+              '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>' + (r.Chosen ? 'Clear choice and retry' : 'Retry') + '</span></button>' +
+              '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>' +
+              '</div>';
             return html + '</div>';
           }).join('');
         }
 
+        // ---- Recent activity ----
         function renderActivity() {
           page.querySelector('#ActivityFilters').innerHTML = filters.map(function (f) {
             var n = f[0] === 'All' ? activity.length : activity.filter(function (a) { return a.Status === f[0]; }).length;
@@ -216,9 +360,9 @@
           var shown = activity.filter(function (a) { return filter === 'All' || a.Status === filter; });
           var list = page.querySelector('#Activity');
           if (!shown.length) { list.innerHTML = '<li><span class="what ingest-muted">No activity yet.</span></li>'; return; }
-          list.innerHTML = shown.map(function (a) {
+          list.innerHTML = shown.map(function (a, i) {
             var details = (a.Details || []);
-            return '<li><span class="when">' + when(a.Time) + '</span><div class="what">' +
+            return '<li data-k="' + esc(a.Time + a.Release) + '"><span class="when">' + when(a.Time) + '</span><div class="what">' +
               '<span class="badge ' + esc(a.Status) + '">' + esc(labels[a.Status] || a.Status) + '</span><strong>' + esc(a.Release) + '</strong>' +
               '<div>' + esc(a.Summary) + '</div>' +
               (details.length ? '<details><summary>' + details.length + ' detail' + (details.length === 1 ? '' : 's') + '</summary><ul>' + details.map(function (d) { return '<li>' + esc(d) + '</li>'; }).join('') + '</ul></details>' : '') +
@@ -227,58 +371,98 @@
         }
 
         function loadStatus() {
+          // don't redraw under someone typing in a search box
+          var active = document.activeElement;
+          if (active && page.contains(active) && active.closest('.ingest-search')) { return Promise.resolve(); }
           return ApiClient.getJSON(ApiClient.getUrl('Ingest/Status', { limit: 150 })).then(function (s) {
-            var open = Array.prototype.map.call(page.querySelectorAll('#Activity details[open] summary'), function (x) { return x.parentNode.parentNode.querySelector('strong').textContent; });
+            var open = Array.prototype.map.call(page.querySelectorAll('#Activity details[open]'), function (d) { return d.closest('li').getAttribute('data-k'); });
             activity = s.Activity || [];
-            renderReviews(s.Reviews || []);
+            reviews = s.Reviews || [];
+            renderReviews();
             renderActivity();
-            Array.prototype.forEach.call(page.querySelectorAll('#Activity li'), function (li) {
-              var name = li.querySelector('strong');
-              var d = li.querySelector('details');
-              if (d && name && open.indexOf(name.textContent) >= 0) { d.open = true; }
+            open.forEach(function (k) {
+              var li = Array.prototype.filter.call(page.querySelectorAll('#Activity > li'), function (x) { return x.getAttribute('data-k') === k; })[0];
+              var d = li && li.querySelector('details');
+              if (d) { d.open = true; }
             });
           });
         }
 
-        function post(path) {
-          return ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl(path) }).then(loadStatus, function () {
-            Dashboard.alert('That review has changed or gone; refreshing.');
+        function failed(xhr) {
+          var p = xhr && xhr.text ? xhr.text() : Promise.resolve('');
+          return p.then(function (t) {
+            Dashboard.alert(t && t.length < 300 ? t.replace(/^"|"$/g, '') : 'That review has changed or gone; refreshing.');
             return loadStatus();
-          });
+          }, loadStatus);
         }
 
+        function post(path, body) {
+          var req = { type: 'POST', url: ApiClient.getUrl(path) };
+          if (body) { req.data = JSON.stringify(body); req.contentType = 'application/json'; }
+          return ApiClient.ajax(req).then(loadStatus, failed);
+        }
+
+        function reviewById(id) { return reviews.filter(function (r) { return r.Id === id; })[0]; }
+
         page.querySelector('#Reviews').addEventListener('click', function (e) {
-          var btn = e.target.closest('button');
           var card = e.target.closest('.ingest-card');
-          if (!btn || !card) { return; }
+          if (!card) { return; }
           var id = card.getAttribute('data-id');
-          if (btn.classList.contains('ingest-choose')) { post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose/' + btn.getAttribute('data-i')); }
-          else if (btn.classList.contains('ingest-retry')) { post('Ingest/Reviews/' + encodeURIComponent(id) + '/Retry'); }
-          else if (btn.classList.contains('ingest-quarantine')) {
+          var more = e.target.closest('.ingest-more');
+          if (more) { expanded[more.getAttribute('data-key')] = true; renderReviews(); return; }
+          var btn = e.target.closest('button');
+          if (!btn) { return; }
+          if (btn.classList.contains('ingest-choose')) {
+            var r = reviewById(id);
+            var list = btn.getAttribute('data-list');
+            var cands = list === 'search' ? (searchResults[id] || {}).results : r && r.Candidates;
+            var cand = cands && cands[parseInt(btn.getAttribute('data-i'), 10)];
+            var lib = btn.closest('.ingest-pick').querySelector('.ingest-lib').value;
+            if (!cand) { return; }
+            if (!lib) { Dashboard.alert('There is no library of the right kind to file this into.'); return; }
+            delete searchResults[id];
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose', { Candidate: cand.Candidate, LibraryId: lib });
+          } else if (btn.classList.contains('ingest-retry')) {
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Retry');
+          } else if (btn.classList.contains('ingest-quarantine')) {
             if (!confirmQuarantine[id]) { confirmQuarantine[id] = true; btn.querySelector('span').textContent = 'Confirm: quarantine whole release'; return; }
             delete confirmQuarantine[id];
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Quarantine');
           }
         });
 
+        page.querySelector('#Reviews').addEventListener('submit', function (e) {
+          e.preventDefault();
+          var card = e.target.closest('.ingest-card');
+          var id = card.getAttribute('data-id');
+          var f = e.target;
+          var q = f.q.value.trim();
+          if (!q) { return; }
+          var params = { name: q, series: f.k.value === 'tv' };
+          if (f.y.value) { params.year = f.y.value; }
+          busyCard = id;
+          Dashboard.showLoadingMsg();
+          ApiClient.getJSON(ApiClient.getUrl('Ingest/Search', params)).then(function (results) {
+            searchResults[id] = { q: q, y: f.y.value, k: f.k.value, results: results || [] };
+            if (document.activeElement) { document.activeElement.blur(); }
+            renderReviews();
+          }, function () { Dashboard.alert('Search failed; check the Jellyfin log.'); }).then(function () { busyCard = null; Dashboard.hideLoadingMsg(); });
+        });
+
         page.querySelector('#ActivityFilters').addEventListener('click', function (e) {
           var b = e.target.closest('button');
           if (b) { filter = b.getAttribute('data-f'); renderActivity(); }
         });
-        page.querySelector('#RefreshStatus').addEventListener('click', loadStatus);
+        page.querySelector('#RefreshStatus').addEventListener('click', function () { if (document.activeElement) { document.activeElement.blur(); } loadStatus(); });
 
         page.addEventListener('pagehide', function () { if (statusTimer) { clearInterval(statusTimer); statusTimer = null; } });
 
-        page.addEventListener('pageshow', function () {
-          loadStatus();
-          if (!statusTimer) { statusTimer = setInterval(function () { if (!document.hidden) { loadStatus(); } }, 15000); }
-        });
-
+        // ---- load / save ----
         page.addEventListener('pageshow', function () {
           Dashboard.showLoadingMsg();
           Promise.all([ApiClient.getVirtualFolders(), ApiClient.getPluginConfiguration(pluginId)]).then(function (res) {
             libraries = res[0] || [];
-            var config = res[1];
+            config = res[1];
             page.querySelector('#WatchFolders').innerHTML = '';
             (config.WatchFolders || []).forEach(addRow);
             if (!(config.WatchFolders || []).length) { addRow(); }
@@ -289,30 +473,69 @@
             page.querySelector('#ScanLibraryAfterIngest').checked = config.ScanLibraryAfterIngest;
             syncBanner();
             Dashboard.hideLoadingMsg();
+            loadStatus();
+            if (!statusTimer) { statusTimer = setInterval(function () { if (!document.hidden && !busyCard) { loadStatus(); } }, 15000); }
           });
         });
 
         page.querySelector('#DryRun').addEventListener('change', syncBanner);
         page.querySelector('#AddWatchFolder').addEventListener('click', function () { addRow(); });
 
+        page.querySelector('#GoToSetup').addEventListener('click', function (e) {
+          e.preventDefault();
+          page.querySelector('#WatchFoldersHead').scrollIntoView({ behavior: 'smooth' });
+        });
+
+        // Reads the rows back, checking each one; returns null (with the problems shown on the rows) if any is invalid.
+        function readRows() {
+          var ok = true;
+          var seen = {};
+          var folders = Array.prototype.map.call(page.querySelectorAll('.ingest-row'), function (row) {
+            var path = row.querySelector('.wf-path').value.trim();
+            var dests = Array.prototype.map.call(row.querySelectorAll('.wf-dest'), function (d) {
+              return { LibraryId: d.querySelector('.wf-lib').value, Path: d.querySelector('.wf-loc').value };
+            }).filter(function (d) { return d.LibraryId; });
+            var error = '';
+            if (!path && !dests.length) { row.remove(); return null; }
+            if (!path) { error = 'Enter the folder to watch.'; }
+            else if (!/^(\/|[A-Za-z]:[\\/])/.test(path)) { error = 'Use a full path, e.g. /media/incoming.'; }
+            else if (seen[path]) { error = 'This folder is already watched above.'; }
+            else if (!dests.length) { error = 'Choose at least one destination library.'; }
+            seen[path] = true;
+            row.querySelector('.wf-error').textContent = error;
+            row.classList.toggle('invalid', !!error);
+            if (error) { ok = false; }
+            return { Path: path, Destinations: dests, TargetLibraryId: '', TargetPath: '', Enabled: row.querySelector('.wf-on').checked };
+          }).filter(Boolean);
+          if (!ok) { return null; }
+          if (!folders.length) { addRow(); return null; }
+          return folders;
+        }
+
         page.querySelector('#IngestConfigForm').addEventListener('submit', function (e) {
           e.preventDefault();
+          var folders = readRows();
+          if (!folders) {
+            Dashboard.alert('Ingest needs at least one watch folder with at least one destination library. Fix the highlighted folders, then save.');
+            var bad = page.querySelector('.ingest-row.invalid') || page.querySelector('.ingest-row');
+            if (bad) { bad.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+            return false;
+          }
+
           Dashboard.showLoadingMsg();
-          ApiClient.getPluginConfiguration(pluginId).then(function (config) {
-            config.WatchFolders = Array.prototype.map.call(page.querySelectorAll('.ingest-row'), function (row) {
-              return {
-                Path: row.querySelector('.wf-path').value.trim(),
-                TargetLibraryId: row.querySelector('.wf-lib').value,
-                TargetPath: row.querySelector('.wf-loc').value,
-                Enabled: row.querySelector('.wf-on').checked
-              };
-            }).filter(function (w) { return w.Path; });
-            config.QuarantinePath = page.querySelector('#QuarantinePath').value.trim();
-            config.QuarantineRetentionDays = parseInt(page.querySelector('#QuarantineRetentionDays').value, 10) || 30;
-            config.SettleSeconds = parseInt(page.querySelector('#SettleSeconds').value, 10) || 60;
-            config.DryRun = page.querySelector('#DryRun').checked;
-            config.ScanLibraryAfterIngest = page.querySelector('#ScanLibraryAfterIngest').checked;
-            ApiClient.updatePluginConfiguration(pluginId, config).then(Dashboard.processPluginConfigurationUpdateResult);
+          ApiClient.getPluginConfiguration(pluginId).then(function (current) {
+            current.WatchFolders = folders;
+            current.QuarantinePath = page.querySelector('#QuarantinePath').value.trim();
+            current.QuarantineRetentionDays = parseInt(page.querySelector('#QuarantineRetentionDays').value, 10) || 30;
+            current.SettleSeconds = parseInt(page.querySelector('#SettleSeconds').value, 10) || 60;
+            current.DryRun = page.querySelector('#DryRun').checked;
+            current.ScanLibraryAfterIngest = page.querySelector('#ScanLibraryAfterIngest').checked;
+            config = current;
+            ApiClient.updatePluginConfiguration(pluginId, current).then(function (r) {
+              Dashboard.processPluginConfigurationUpdateResult(r);
+              syncBanner();
+              renderReviews();
+            });
           });
           return false;
         });
