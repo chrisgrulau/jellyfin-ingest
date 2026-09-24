@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Ingest"
 guid: "88d6ced9-052e-45f6-b21d-fc4eefa7998d"
-version: "0.1.1.0"
+version: "0.1.2.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -15,6 +15,6 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Ingest.dll"
 changelog: >
-  0.1.0-alpha.2: destinations per watch folder (shows / films / mixed), a Needs review screen with library choice
-  and title search, a Recent activity panel, TMDb/TheTVDB preferred over OMDb-only matches, the year taken from
-  the release folder, and the main subtitle marked default when a language has several.
+  0.1.0-alpha.3: new episodes join their show in whichever library it lives; episodes and films already on the
+  server are never filed twice (sent to review with the existing file); changing dry run or destinations re-plans
+  waiting releases without a restart.
