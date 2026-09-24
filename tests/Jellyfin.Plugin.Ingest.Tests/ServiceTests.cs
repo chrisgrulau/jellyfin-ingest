@@ -89,4 +89,19 @@ public class ServiceTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public void Forgetting_everything_offers_handled_releases_again()
+    {
+        var t = new ReleaseTracker();
+        var snap = Snap(("r", "r/a.mkv", 100));
+        t.Observe(snap, T0, Settle);
+        Assert.Equal(["r"], t.Observe(snap, T0.AddSeconds(61), Settle));
+        t.MarkHandled("r");
+        Assert.Empty(t.Observe(snap, T0.AddSeconds(90), Settle));
+
+        t.ForgetAll();
+
+        Assert.Equal(["r"], t.Observe(snap, T0.AddSeconds(120), Settle));
+    }
 }

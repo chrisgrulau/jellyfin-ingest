@@ -130,4 +130,17 @@ public static class LibraryRouting
 
         return new RoutingResult(new LibraryTargets(tv, films), problems);
     }
+
+    /// <summary>
+    /// A fingerprint of the settings that decide what happens to a watch folder's releases (dry run and destinations);
+    /// when it changes, releases already handled are planned again.
+    /// </summary>
+    /// <param name="dryRun">Whether dry run is on.</param>
+    /// <param name="destinations">The watch folder's destinations.</param>
+    /// <returns>The fingerprint.</returns>
+    public static string SettingsFingerprint(bool dryRun, IEnumerable<DestinationSetting> destinations)
+    {
+        ArgumentNullException.ThrowIfNull(destinations);
+        return string.Join('\u0001', destinations.Select(d => d.LibraryId + "\u0002" + d.Path).Prepend(dryRun ? "dry" : "live"));
+    }
 }

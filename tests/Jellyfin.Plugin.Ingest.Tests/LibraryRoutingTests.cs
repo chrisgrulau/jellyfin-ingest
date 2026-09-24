@@ -66,4 +66,17 @@ public class LibraryRoutingTests
         Assert.Equal(new LibraryTargets(null, null), r.Targets);
         Assert.Equal(2, r.Problems.Count);
     }
+
+    [Fact]
+    public void The_settings_fingerprint_changes_with_dry_run_and_destinations()
+    {
+        DestinationSetting[] one = [new("t", null)];
+        DestinationSetting[] two = [new("t", null), new("m", null)];
+        var before = LibraryRouting.SettingsFingerprint(true, one);
+
+        Assert.Equal(before, LibraryRouting.SettingsFingerprint(true, [new("t", null)]));
+        Assert.NotEqual(before, LibraryRouting.SettingsFingerprint(false, one));
+        Assert.NotEqual(before, LibraryRouting.SettingsFingerprint(true, two));
+        Assert.NotEqual(before, LibraryRouting.SettingsFingerprint(true, [new("t", "/lib/TV2")]));
+    }
 }

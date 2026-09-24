@@ -47,7 +47,7 @@ plugin page, where you pick the right title (and library) with one click or sear
 
 | Area | Behaviour |
 |---|---|
-| Watch folders | Any number. Each has one or more destinations, at most one per kind: a Shows library, a Movies library, or a single Mixed Movies and Shows library. Releases go to the destination for their kind. |
+| Watch folders | Any number. Each has one or more destinations, at most one per kind: a Shows library, a Movies library, or a single Mixed Movies and Shows library. Releases go to the destination for their kind; new episodes of a show already on the server join it in whichever library it's in. |
 | Identification | Own release-name parser + your configured metadata providers; TMDb/TheTVDB matches preferred over IMDb-only ones; titles already in the library preferred; a confidence threshold and a clear lead over the runner-up before anything moves. |
 | Naming | Movies: `Title (Year) [tmdbid-N]/Title (Year) [tmdbid-N].ext` (editions as ` - Label`). Shows: `Series (Year) [tvdbid-N] [tmdbid-N]/Season NN/Series SNNEMM - Title.ext`, multi-episode `S01E01-E02`, specials in `Season 00`. Reserved characters (`< > : " / \ \| ? *`) removed. |
 | Subtitles | Matched by name, by folder (`Subs/`), or by being the only video in the release; renamed `<video>[.Title].<lang>[.default][.sdh][.forced].srt`. When a language has several tracks, the main one is marked default. |
@@ -111,7 +111,7 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Destinations per watch folder; review screen (library choice, title search); activity panel
 - [x] Unit tests; CI; release packaging (pre-releases)
 - [ ] Plugin repository manifest
-- [ ] New episodes of a show you already have follow it to the library it's in
+- [x] New episodes of a show you already have follow it to the library it's in
 
 Design notes live in [`docs/DESIGN.md`](docs/DESIGN.md).
 

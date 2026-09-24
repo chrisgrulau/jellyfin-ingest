@@ -44,8 +44,19 @@ public class PlanningTests
             => Task.FromResult<string?>(season == 1 && episode == 4 ? "Glass Harbour" : null);
     }
 
-    private static IngestPlanner Planner(Func<string, bool>? exists = null)
-        => new(new MediaIdentifier(new Lookup()), exists ?? (_ => false), _ => null, new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)));
+    private static IngestPlanner Planner(Func<string, bool>? exists = null, ISeriesLocator? series = null)
+        => new(new MediaIdentifier(new Lookup()), exists ?? (_ => false), _ => null, new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)), series);
+
+    private sealed class Locator(string? folder) : ISeriesLocator
+    {
+        public List<IReadOnlyDictionary<string, string>> Asked { get; } = [];
+
+        public string? FindSeriesFolder(IReadOnlyDictionary<string, string> seriesProviderIds)
+        {
+            Asked.Add(seriesProviderIds);
+            return folder;
+        }
+    }
 
     private static ReleaseFile F(string rel, long size = 500_000_000) => new(rel, size);
 
@@ -271,5 +282,45 @@ public class PlanningTests
     {
         var subs = new PairedSubtitle[] { new("r/en.srt", new Jellyfin.Plugin.Ingest.Naming.SubtitleTrack { Language = "en" }) };
         Assert.False(Assert.Single(IngestPlanner.WithMainTrackDefault(subs)).Track.Default);
+    }
+
+    [Fact]
+    public async Task A_new_episode_joins_its_show_in_whichever_library_it_lives()
+    {
+        var elsewhere = "/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]";
+        var locator = new Locator(elsewhere);
+        var plan = await Planner(series: locator).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.Equal(Path.Combine(elsewhere, "Season 01", "Lantern S01E04 - Glass Harbour.mkv"), Assert.Single(plan.Operations).Destination);
+        Assert.Equal("7", locator.Asked[0]["Tvdb"]);
+    }
+
+    [Fact]
+    public async Task A_show_already_on_the_server_is_followed_even_without_a_tv_destination()
+    {
+        var elsewhere = "/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]";
+        var plan = await Planner(series: new Locator(elsewhere)).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.IsReady);
+        Assert.StartsWith(elsewhere, plan.Operations[0].Destination, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_new_show_goes_to_the_watch_folders_destination()
+    {
+        var plan = await Planner(series: new Locator(null)).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.StartsWith("/lib/Shows/Lantern (2001) ", plan.Operations[0].Destination, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_library_chosen_in_review_wins_over_following_the_show()
+    {
+        var locator = new Locator("/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]");
+        var chosen = new ChosenMatch(new MetadataCandidate { Name = "Lantern", Year = 2001, IsSeries = true, ProviderIds = new Dictionary<string, string> { ["Tvdb"] = "7", ["Tmdb"] = "9" } }, Tv);
+        var plan = await Planner(series: locator).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, chosen, CancellationToken.None);
+
+        Assert.StartsWith("/lib/Shows/", plan.Operations[0].Destination, StringComparison.Ordinal);
+        Assert.Empty(locator.Asked);
     }
 }

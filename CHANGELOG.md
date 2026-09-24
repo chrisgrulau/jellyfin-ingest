@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- New episodes follow their show: an episode of a series that's already on the server is filed into that series'
+  folder, whichever library it's in (a library chosen in review still wins). Works even when the watch folder has no
+  TV destination.
+- Changing a watch folder's outcome-deciding settings (turning dry run off, changing destinations) plans every release
+  still waiting in it again; no restart needed.
+
+### Changed
+- Identification counts titles in any library as "already in the library", not only the watch folder's destinations.
+
 ## [0.1.0-alpha.2] - 2026-09-24
 
 ### Added
