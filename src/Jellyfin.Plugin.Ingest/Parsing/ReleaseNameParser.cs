@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Naming;
 
 namespace Jellyfin.Plugin.Ingest.Parsing;
@@ -42,6 +43,9 @@ public static partial class ReleaseNameParser
         (ShortWord(), ExtraType.ShortFilm),
     ];
 
+    /// <summary>How closely a folder's title must match the file's for the folder's year to be used.</summary>
+    public const double FolderTitleSimilarity = 0.90;
+
     /// <summary>
     /// Parses a file name or path. When the file name alone has no usable title (e.g. <c>S01E04.mkv</c>),
     /// the parent folder name supplies it.
@@ -69,6 +73,21 @@ public static partial class ReleaseNameParser
                 Season = parsed.Season ?? fromParent.Season,
                 Kind = parsed.Kind == MediaKind.Unknown ? fromParent.Kind : parsed.Kind,
             };
+        }
+        else if (parsed.Year is null && titleFolder.Length > 0)
+        {
+            // Packs often carry the year on the folder only ("Show (2022) Season 1/Show.S01E01.mkv"). Take it when
+            // the folder names the same title, never from an unrelated folder the file happens to sit in.
+            var fromParent = ParseName(titleFolder);
+            var folderTitle = TrailingSeason().Replace(fromParent.Title, string.Empty).Trim();
+            if (fromParent.Year is { } folderYear && TitleMatcher.Similarity(parsed.Title, folderTitle) >= FolderTitleSimilarity)
+            {
+                parsed = parsed with
+                {
+                    Year = folderYear,
+                    Kind = parsed.Kind == MediaKind.Unknown ? fromParent.Kind : parsed.Kind,
+                };
+            }
         }
 
         if (parsed.Extra == ExtraType.None && parent.Length > 0 && ExtraFromFolder(parent) is { } folderExtra)

@@ -185,4 +185,32 @@ public class MediaIdentifierTests
         var only = Assert.Single(merged);
         Assert.Equal("200", only.ProviderIds["Tvdb"]);
     }
+    [Fact]
+    public async Task Prefers_a_tmdb_match_over_same_named_imdb_only_hits()
+    {
+        var lookup = new FakeLookup();
+        lookup.Series.Add(C("Night Shift Club", 2022, "300", "400"));
+        lookup.Series.Add(new MetadataCandidate { Name = "Night Shift Club", Year = 2014, ProviderIds = new Dictionary<string, string> { ["Imdb"] = "tt0000001" }, ProviderRank = 0 });
+        lookup.Series.Add(new MetadataCandidate { Name = "Night Shift Club", Year = 2019, ProviderIds = new Dictionary<string, string> { ["Imdb"] = "tt0000002" }, ProviderRank = 1 });
+        lookup.Episodes[(1, 1)] = "Opening";
+
+        var r = await Identify(lookup, "Night.Shift.Club.S01E01.mkv");
+
+        Assert.Equal(IdentificationStatus.Identified, r.Status);
+        Assert.Equal("300", r.Episode!.Series.TmdbId);
+    }
+
+    [Fact]
+    public void Imdb_only_hits_score_lower_but_library_hits_do_not()
+    {
+        var imdbOnly = new MetadataCandidate { Name = "Quiet Harbour", Year = 2010, ProviderIds = new Dictionary<string, string> { ["Imdb"] = "tt0000003" } };
+        var tmdb = C("Quiet Harbour", 2010, "500");
+        Assert.True(MediaIdentifier.IsImdbOnly(imdbOnly));
+        Assert.False(MediaIdentifier.IsImdbOnly(tmdb));
+        Assert.False(MediaIdentifier.IsImdbOnly(imdbOnly with { Source = MediaIdentifier.LibrarySource }));
+        Assert.Equal(
+            MediaIdentifier.Score("Quiet Harbour", 2010, tmdb) - MediaIdentifier.ImdbOnlyPenalty,
+            MediaIdentifier.Score("Quiet Harbour", 2010, imdbOnly),
+            precision: 6);
+    }
 }

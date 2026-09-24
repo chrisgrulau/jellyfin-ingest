@@ -28,6 +28,13 @@ public sealed class MediaIdentifier
     /// <summary>Bonus for a candidate that is already in the destination library (strong evidence: new episodes of shows you have).</summary>
     public const double InLibraryBonus = 0.20;
 
+    /// <summary>
+    /// Penalty for a candidate known only by an IMDb id (typically an OMDb hit). Jellyfin names and fetches metadata by
+    /// TMDb/TheTVDB ids, and OMDb's IMDb search often returns obscure same-named titles that would otherwise tie with
+    /// the real match.
+    /// </summary>
+    public const double ImdbOnlyPenalty = 0.20;
+
     /// <summary>The <see cref="MetadataCandidate.Source"/> value used for library hits.</summary>
     public const string LibrarySource = "Library";
 
@@ -97,6 +104,11 @@ public sealed class MediaIdentifier
         // Providers rank by relevance and popularity: a small nudge stops an obscure exact-name title beating the famous one
         score += candidate.ProviderRank switch { 0 => 0.05, 1 => 0.025, _ => 0 };
         score -= NumberMismatchPenalty(title, candidate.Name);
+        if (IsImdbOnly(candidate))
+        {
+            score -= ImdbOnlyPenalty;
+        }
+
         return Math.Max(0, score);
     }
 
@@ -116,6 +128,19 @@ public sealed class MediaIdentifier
         }
 
         return na.Count > 0 && nb.Count > 0 ? 0.30 : 0.15;
+    }
+
+    /// <summary>
+    /// Whether a candidate lacks both a TMDb and a TheTVDB id (and isn't already in the library).
+    /// </summary>
+    /// <param name="candidate">Provider hit.</param>
+    /// <returns><c>true</c> when only IMDb (or nothing) identifies it.</returns>
+    public static bool IsImdbOnly(MetadataCandidate candidate)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        return !string.Equals(candidate.Source, LibrarySource, StringComparison.Ordinal)
+            && !candidate.ProviderIds.ContainsKey("Tmdb")
+            && !candidate.ProviderIds.ContainsKey("Tvdb");
     }
 
     private static HashSet<string> Numbers(string title)

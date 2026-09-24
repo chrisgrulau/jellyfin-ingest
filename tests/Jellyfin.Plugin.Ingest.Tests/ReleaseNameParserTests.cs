@@ -96,4 +96,28 @@ public class ReleaseNameParserTests
     {
         Assert.Equal(MediaKind.Unknown, ReleaseNameParser.ParseName("Something Undated").Kind);
     }
+    [Theory]
+    [InlineData("Show Name (2022) Season 1/Show.Name.S01E01.1080p.WEB.mkv", 2022, MediaKind.Episode)]
+    [InlineData("Show.Name.2022.S01.1080p.WEB-GRP/Show.Name.S01E01.1080p.WEB-GRP.mkv", 2022, MediaKind.Episode)]
+    [InlineData("Movie.Title.2019.1080p.BluRay-GRP/movie.title.1080p-grp.mkv", 2019, MediaKind.Movie)]
+    public void Takes_the_year_from_a_folder_with_the_same_title(string path, int year, MediaKind kind)
+    {
+        var p = ReleaseNameParser.Parse(path);
+        Assert.Equal(year, p.Year);
+        Assert.Equal(kind, p.Kind);
+    }
+
+    [Fact]
+    public void Ignores_the_year_of_an_unrelated_folder()
+    {
+        var p = ReleaseNameParser.Parse("Downloads 2024/Show.Name.S01E01.mkv");
+        Assert.Null(p.Year);
+        Assert.Equal("Show Name", p.Title);
+    }
+
+    [Fact]
+    public void Keeps_the_file_year_over_the_folder_year()
+    {
+        Assert.Equal(2005, ReleaseNameParser.Parse("Show Name (2004)/Show.Name.2005.S01E01.mkv").Year);
+    }
 }
