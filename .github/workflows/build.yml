@@ -28,7 +28,19 @@ jobs:
         run: dotnet build Jellyfin.Plugin.Ingest.sln --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test Jellyfin.Plugin.Ingest.sln --configuration Release --no-build --verbosity normal
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test --solution Jellyfin.Plugin.Ingest.sln --configuration Release --no-build 2>&1 | tee test-output.log
+
+      - name: Annotate failed tests
+        if: failure()
+        shell: python
+        run: |
+          # Surface the end of the test output as an annotation (readable on the PR without opening logs)
+          tail = open("test-output.log", encoding="utf-8", errors="replace").read().splitlines()[-60:]
+          body = "%0A".join(l.replace("%", "%25").replace("\r", "") for l in tail)
+          print(f"::error title=dotnet test failed (last lines of output)::{body}")
 
       - name: Package
         run: |

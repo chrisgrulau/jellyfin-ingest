@@ -94,15 +94,16 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 ## Roadmap
 
 - [x] Repository scaffolding
-- [ ] Plugin skeleton: configuration model and settings page
+- [x] Plugin skeleton: configuration model and settings page
 - [ ] Folder watcher with settle-time detection
-- [ ] Identification (filename parsing + provider lookup) with confidence scoring
-- [ ] Naming engine (movies, episodes, multi-episode, specials, editions, extras)
+- [x] Release-name parser (episode codes incl. `1x04`, `Lantern1E4`, `Season 1 Episode 4`, multi-episode, specials; title/year split; editions; extras; release-tag stripping)
+- [ ] Identification (provider lookup) with confidence scoring
+- [x] Naming engine (movies, episodes, multi-episode, specials, editions, extras, subtitle sidecars)
 - [ ] Subtitle pairing and language/flag detection
 - [ ] Mover with dry-run, collision handling and activity log
 - [ ] Quarantine + scheduled purge task
 - [ ] Targeted library scan
-- [ ] Unit tests for parsing and naming; CI
+- [x] Unit tests for parsing and naming; CI
 - [ ] Release packaging and plugin repository manifest
 
 Design notes live in [`docs/DESIGN.md`](docs/DESIGN.md).
