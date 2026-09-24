@@ -55,7 +55,7 @@ public sealed class IngestPlanner
     private readonly Func<string, bool> _exists;
     private readonly Func<string, string?> _readText;
     private readonly TimeProvider _clock;
-    private readonly ISeriesLocator? _series;
+    private readonly IExistingMedia? _existing;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IngestPlanner"/> class.
@@ -64,10 +64,10 @@ public sealed class IngestPlanner
     /// <param name="exists">Returns whether an absolute path already exists (destinations are never overwritten).</param>
     /// <param name="readText">Reads a subtitle file's text for language detection; may return <c>null</c>.</param>
     /// <param name="clock">Clock for dating quarantine folders.</param>
-    /// <param name="series">Finds shows already on the server, so new episodes join them (optional).</param>
-    public IngestPlanner(MediaIdentifier identifier, Func<string, bool> exists, Func<string, string?> readText, TimeProvider clock, ISeriesLocator? series = null)
+    /// <param name="existing">What's already on the server, so new episodes join their show and nothing is filed twice (optional).</param>
+    public IngestPlanner(MediaIdentifier identifier, Func<string, bool> exists, Func<string, string?> readText, TimeProvider clock, IExistingMedia? existing = null)
     {
-        _series = series;
+        _existing = existing;
         _identifier = identifier ?? throw new ArgumentNullException(nameof(identifier));
         _exists = exists ?? throw new ArgumentNullException(nameof(exists));
         _readText = readText ?? throw new ArgumentNullException(nameof(readText));
@@ -120,6 +120,7 @@ public sealed class IngestPlanner
         // 1. main videos
         var destinations = new Dictionary<string, string>(StringComparer.Ordinal);
         var owners = new HashSet<string>(StringComparer.Ordinal);
+        var plannedEpisodes = new HashSet<(string Series, int Season, int Episode)>();
         foreach (var video in mains)
         {
             // Only a TV library to file into: a name without an episode code is most likely a show; otherwise a film
@@ -133,54 +134,70 @@ public sealed class IngestPlanner
                 continue;
             }
 
-            var isEpisode = result.Episode is not null;
-
-            // A new episode of a show that's already on the server joins it, whichever library it's in (unless a
-            // person chose the library in review).
-            var existingSeries = chosen is null && result.Episode is { } found && _series is not null
-                ? _series.FindSeriesFolder(ProviderIds(found.Series))
-                : null;
-            if (existingSeries is not null)
+            var ext = Path.GetExtension(video);
+            string destination, owner;
+            if (result.Episode is { } ep)
             {
-                var joinedEpisode = result.Episode!;
-                var joined = Path.Combine(existingSeries, MediaNamer.SeasonFolderName(joinedEpisode.Season), MediaNamer.EpisodeFileName(joinedEpisode, Path.GetExtension(video)));
-                if (Taken(joined))
+                // A new episode of a show that's already on the server joins it, whichever library it's in (unless a
+                // person chose the library in review).
+                var existingSeries = chosen is null ? _existing?.FindSeriesFolder(ProviderIds(ep.Series)) : null;
+                var target = existingSeries is null ? chosen?.Target ?? targets.Tv : null;
+                if (existingSeries is null && target is null)
                 {
-                    review.Add(new ReviewItem(Abs(video), $"Destination already exists: {joined}") { Candidates = result.Candidates });
+                    review.Add(new ReviewItem(Abs(video), $"Identified as an episode of '{ep.Series.Title}', but this watch folder has no TV library. Choose a library below.") { Candidates = result.Candidates });
                     continue;
                 }
 
-                planned.Add(joined);
-                destinations[video] = joined;
-                owners.Add(existingSeries);
-                ops.Add(new PlannedOperation(OperationKind.Video, Abs(video), joined));
-                continue;
-            }
+                owner = existingSeries ?? Path.Combine(target!.Root, MediaNamer.SeriesFolderName(ep.Series));
 
-            var target = chosen?.Target ?? (isEpisode ? targets.Tv : targets.Films);
-            if (target is null)
+                // An existing show keeps its own season folder naming rather than getting a second "Season NN"
+                var seasonFolder = (existingSeries is null ? null : _existing?.FindSeasonFolder(existingSeries, ep.Season))
+                    ?? Path.Combine(owner, MediaNamer.SeasonFolderName(ep.Season));
+                destination = Path.Combine(seasonFolder, MediaNamer.EpisodeFileName(ep, ext));
+
+                // The same episode already on the server (any library, any name or container) or twice in this release
+                var keys = Enumerable.Range(ep.Episode, (ep.EndingEpisode ?? ep.Episode) - ep.Episode + 1).Select(n => (owner, ep.Season, n)).ToList();
+                var duplicate = keys.Select(k => _existing?.FindEpisode(ProviderIds(ep.Series), owner, ep.Season, k.n)).FirstOrDefault(d => d is not null);
+                if (duplicate is not null || keys.Any(plannedEpisodes.Contains))
+                {
+                    var code = MediaNamer.EpisodeCode(ep.Season, ep.Episode, ep.EndingEpisode);
+                    review.Add(new ReviewItem(Abs(video), duplicate is not null
+                        ? $"{ep.Series.Title} {code} is already on the server: {duplicate}"
+                        : $"{ep.Series.Title} {code} appears more than once in this release.") { Candidates = result.Candidates });
+                    continue;
+                }
+
+                keys.ForEach(k => plannedEpisodes.Add(k));
+            }
+            else
             {
-                var reason = isEpisode
-                    ? $"Identified as an episode of '{result.Episode!.Series.Title}', but this watch folder has no TV library. Choose a library below."
-                    : $"Identified as the film '{result.Movie!.Title}', but this watch folder has no film library. Choose a library below.";
-                review.Add(new ReviewItem(Abs(video), reason) { Candidates = result.Candidates });
-                continue;
+                var movie = result.Movie!;
+                var target = chosen?.Target ?? targets.Films;
+                if (target is null)
+                {
+                    review.Add(new ReviewItem(Abs(video), $"Identified as the film '{movie.Title}', but this watch folder has no film library. Choose a library below.") { Candidates = result.Candidates });
+                    continue;
+                }
+
+                owner = Path.Combine(target.Root, MediaNamer.MovieFolderName(movie));
+                destination = Path.Combine(target.Root, MediaNamer.MovieRelativePath(movie, ext));
+                var duplicate = _existing?.FindMovie(MovieIds(movie), movie.Edition, destination);
+                if (duplicate is not null)
+                {
+                    review.Add(new ReviewItem(Abs(video), $"{movie.Title}{(movie.Edition is null ? string.Empty : " (" + movie.Edition + ")")} is already on the server: {duplicate}") { Candidates = result.Candidates });
+                    continue;
+                }
             }
 
-            var ext = Path.GetExtension(video);
-            var relative = result.Episode is { } ep ? MediaNamer.EpisodeRelativePath(ep, ext) : MediaNamer.MovieRelativePath(result.Movie!, ext);
-            var destination = Path.Combine(target.Root, relative);
             if (Taken(destination))
             {
-                review.Add(new ReviewItem(Abs(video), $"Destination already exists: {destination}"));
+                review.Add(new ReviewItem(Abs(video), $"Destination already exists: {destination}") { Candidates = result.Candidates });
                 continue;
             }
 
             planned.Add(destination);
             destinations[video] = destination;
-            owners.Add(result.Episode is { } e
-                ? Path.Combine(target.Root, MediaNamer.SeriesFolderName(e.Series))
-                : Path.Combine(target.Root, MediaNamer.MovieFolderName(result.Movie!)));
+            owners.Add(owner);
             ops.Add(new PlannedOperation(OperationKind.Video, Abs(video), destination));
         }
 
@@ -243,6 +260,22 @@ public sealed class IngestPlanner
         }
 
         return new IngestPlan { ReleaseName = releaseName, Operations = ops };
+    }
+
+    private static Dictionary<string, string> MovieIds(MovieIdentity movie)
+    {
+        var ids = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(movie.TmdbId))
+        {
+            ids["Tmdb"] = movie.TmdbId;
+        }
+
+        if (!string.IsNullOrEmpty(movie.ImdbId))
+        {
+            ids["Imdb"] = movie.ImdbId;
+        }
+
+        return ids;
     }
 
     private static Dictionary<string, string> ProviderIds(SeriesIdentity series)

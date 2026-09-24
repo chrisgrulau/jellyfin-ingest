@@ -269,7 +269,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var identifier = new MediaIdentifier(
             new JellyfinMetadataLookup(_providerManager),
             new JellyfinLibraryIndex(_libraryManager, []));
-        var planner = new IngestPlanner(identifier, p => File.Exists(p) || Directory.Exists(p), ReadSmallText, _clock, new JellyfinSeriesLocator(_libraryManager));
+        var planner = new IngestPlanner(identifier, p => File.Exists(p) || Directory.Exists(p), ReadSmallText, _clock, new JellyfinExistingMedia(_libraryManager));
         var plan = await planner.PlanAsync(watch.Path, release, files, targets, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
 
         Directory.CreateDirectory(dataFolder);
