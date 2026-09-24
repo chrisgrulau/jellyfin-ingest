@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Ingest</title>
+</head>
+<body>
+  <div id="IngestConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+    <div data-role="content">
+      <div class="content-primary">
+        <h2>Ingest</h2>
+        <p>Watch folders are picked here once the watcher is implemented. Until then only the general settings are editable.</p>
+        <form id="IngestConfigForm">
+          <div class="inputContainer">
+            <label class="inputLabel inputLabelUnfocused" for="QuarantinePath">Quarantine folder</label>
+            <input id="QuarantinePath" name="QuarantinePath" type="text" is="emby-input" />
+            <div class="fieldDescription">Leave empty to use &lt;watch folder&gt;/.ingest-quarantine.</div>
+          </div>
+          <div class="inputContainer">
+            <label class="inputLabel inputLabelUnfocused" for="QuarantineRetentionDays">Quarantine retention (days)</label>
+            <input id="QuarantineRetentionDays" name="QuarantineRetentionDays" type="number" min="1" is="emby-input" />
+          </div>
+          <div class="inputContainer">
+            <label class="inputLabel inputLabelUnfocused" for="SettleSeconds">Settle time (seconds)</label>
+            <input id="SettleSeconds" name="SettleSeconds" type="number" min="5" is="emby-input" />
+          </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="DryRun" name="DryRun" type="checkbox" is="emby-checkbox" />
+              <span>Dry run (log only, move nothing)</span>
+            </label>
+          </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="ScanLibraryAfterIngest" name="ScanLibraryAfterIngest" type="checkbox" is="emby-checkbox" />
+              <span>Scan the library after ingesting</span>
+            </label>
+          </div>
+          <div>
+            <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script type="text/javascript">
+      var IngestConfig = { pluginUniqueId: '88d6ced9-052e-45f6-b21d-fc4eefa7998d' };
+      var fields = ['QuarantinePath', 'QuarantineRetentionDays', 'SettleSeconds'];
+      var toggles = ['DryRun', 'ScanLibraryAfterIngest'];
+
+      document.querySelector('#IngestConfigPage').addEventListener('pageshow', function () {
+        Dashboard.showLoadingMsg();
+        ApiClient.getPluginConfiguration(IngestConfig.pluginUniqueId).then(function (config) {
+          fields.forEach(function (f) { document.querySelector('#' + f).value = config[f]; });
+          toggles.forEach(function (f) { document.querySelector('#' + f).checked = config[f]; });
+          Dashboard.hideLoadingMsg();
+        });
+      });
+
+      document.querySelector('#IngestConfigForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        Dashboard.showLoadingMsg();
+        ApiClient.getPluginConfiguration(IngestConfig.pluginUniqueId).then(function (config) {
+          config.QuarantinePath = document.querySelector('#QuarantinePath').value;
+          config.QuarantineRetentionDays = parseInt(document.querySelector('#QuarantineRetentionDays').value, 10);
+          config.SettleSeconds = parseInt(document.querySelector('#SettleSeconds').value, 10);
+          toggles.forEach(function (f) { config[f] = document.querySelector('#' + f).checked; });
+          ApiClient.updatePluginConfiguration(IngestConfig.pluginUniqueId, config).then(Dashboard.processPluginConfigurationUpdateResult);
+        });
+        return false;
+      });
+    </script>
+  </div>
+</body>
+</html>

@@ -1,0 +1,58 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+# Least privilege by default; only the release job may write
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore Jellyfin.Plugin.Ingest.sln
+
+      - name: Build
+        run: dotnet build Jellyfin.Plugin.Ingest.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Jellyfin.Plugin.Ingest.sln --configuration Release --no-build --verbosity normal
+
+      - name: Package
+        run: |
+          mkdir -p artifacts
+          cp src/Jellyfin.Plugin.Ingest/bin/Release/net10.0/Jellyfin.Plugin.Ingest.dll artifacts/
+          (cd artifacts && zip -q ../jellyfin-plugin-ingest.zip Jellyfin.Plugin.Ingest.dll)
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jellyfin-plugin-ingest
+          path: jellyfin-plugin-ingest.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: jellyfin-plugin-ingest
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" jellyfin-plugin-ingest.zip --repo "$GITHUB_REPOSITORY" --generate-notes
