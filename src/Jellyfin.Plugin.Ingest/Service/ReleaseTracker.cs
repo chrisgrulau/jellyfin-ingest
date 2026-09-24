@@ -102,6 +102,12 @@ public sealed partial class ReleaseTracker
         }
     }
 
+    /// <summary>
+    /// Offers a handled release again on the next sweep even though it hasn't changed (e.g. after a review decision).
+    /// </summary>
+    /// <param name="name">Release name.</param>
+    public void Forget(string name) => _handled.Remove(name);
+
     [GeneratedRegex(@"\.(?:part|partial|!qb|!ut|crdownload|tmp|temp|download)$|^~\$", RegexOptions.IgnoreCase)]
     private static partial Regex PartialDownload();
 }

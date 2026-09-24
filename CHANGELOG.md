@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Settings page **Needs review** section: each waiting release with its reasons and the candidate titles (score and
+  TMDb / TheTVDB / IMDb links). *Use this* files the release as that title on the next sweep; *Retry* plans it again
+  (e.g. after renaming files or clearing a destination); *Quarantine release* moves the whole release to quarantine.
+  A choice made while dry run is on is kept, so the release files the same way once dry run is turned off.
+- Settings page **Recent activity** panel (filterable): filed, dry run, needs review, failed, quarantined and purged,
+  each with what went where or why not. Kept across restarts (last 300 entries).
+- Admin-only API used by the page: `GET /Ingest/Status`, `POST /Ingest/Reviews/{id}/Choose/{n}`, `…/Retry`,
+  `…/Quarantine`.
+
+### Changed
+- Reviews and activity are stored in `state.json` in the plugin's data folder (replaces `review.jsonl`).
+- A release whose planning throws (e.g. a provider outage) is reported as failed and left for review instead of
+  stopping the sweep and being retried every 30 s.
+
+### Added (0.1.0-alpha.1)
 - Background service: sweeps watch folders every 30 s (file-system notifications are unreliable on network
   shares), waits for each release to settle, plans, executes (or dry-runs) and queues a library scan; releases needing
   review are logged and recorded in `review.jsonl` and not retried until they change.

@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Ingest.Configuration;
@@ -30,6 +30,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
     private readonly ILogger<IngestService> _logger;
+    private readonly IngestStateStore _state;
     private readonly Dictionary<string, ReleaseTracker> _trackers = new(StringComparer.Ordinal);
     private readonly TimeProvider _clock = TimeProvider.System;
     private CancellationTokenSource? _stopping;
@@ -40,9 +41,11 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// </summary>
     /// <param name="libraryManager">Jellyfin library manager.</param>
     /// <param name="providerManager">Jellyfin provider manager.</param>
+    /// <param name="state">Reviews and activity shown on the dashboard.</param>
     /// <param name="logger">Logger.</param>
-    public IngestService(ILibraryManager libraryManager, IProviderManager providerManager, ILogger<IngestService> logger)
+    public IngestService(ILibraryManager libraryManager, IProviderManager providerManager, IngestStateStore state, ILogger<IngestService> logger)
     {
+        _state = state ?? throw new ArgumentNullException(nameof(state));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
         _providerManager = providerManager ?? throw new ArgumentNullException(nameof(providerManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -151,10 +154,38 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 _trackers[watch.Path] = tracker;
             }
 
+            _state.PruneReviews(watch.Path, snapshot.Keys);
+            foreach (var review in _state.Snapshot().Reviews.Where(r => r.WatchFolder == watch.Path && r.Request != ReviewRequest.None))
+            {
+                if (review.Request == ReviewRequest.Quarantine && snapshot.TryGetValue(review.Release, out var releaseFiles))
+                {
+                    QuarantineRelease(config, watch, review, releaseFiles, quarantine);
+                }
+                else
+                {
+                    tracker.Forget(review.Release);
+                }
+            }
+
             foreach (var release in tracker.Observe(snapshot, _clock.GetUtcNow(), TimeSpan.FromSeconds(Math.Max(5, config.SettleSeconds))))
             {
                 ct.ThrowIfCancellationRequested();
-                await IngestAsync(plugin.DataFolderPath, config, watch, release, snapshot[release], new LibraryTarget(root, isTv), library.ItemId, quarantine, ct).ConfigureAwait(false);
+                try
+                {
+                    await IngestAsync(plugin.DataFolderPath, config, watch, release, snapshot[release], new LibraryTarget(root, isTv), library.ItemId, quarantine, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+#pragma warning disable CA1031 // One bad release (provider outage, unreadable file) mustn't stop the others; it is reported.
+                catch (Exception ex)
+#pragma warning restore CA1031
+                {
+                    LogReleaseFailed(_logger, release, ex);
+                    ReportFailure(watch, release, ex.Message, []);
+                }
+
                 tracker.MarkHandled(release);
             }
         }
@@ -192,24 +223,47 @@ public sealed partial class IngestService : IHostedService, IDisposable
         string quarantine,
         CancellationToken ct)
     {
+        var id = IngestStateStore.ReviewId(watch.Path, release);
+        var previous = _state.GetReview(id);
         var identifier = new MediaIdentifier(
             new JellyfinMetadataLookup(_providerManager),
-            new JellyfinLibraryIndex(_libraryManager, Guid.TryParse(libraryId, out var id) ? id : null));
+            new JellyfinLibraryIndex(_libraryManager, Guid.TryParse(libraryId, out var libraryGuid) ? libraryGuid : null));
         var planner = new IngestPlanner(identifier, p => File.Exists(p) || Directory.Exists(p), ReadSmallText, _clock);
-        var plan = await planner.PlanAsync(watch.Path, release, files, target, quarantine, ct).ConfigureAwait(false);
+        var plan = await planner.PlanAsync(watch.Path, release, files, target, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
 
         Directory.CreateDirectory(dataFolder);
         if (!plan.IsReady)
         {
-            foreach (var item in plan.Review)
+            var items = plan.Review.Select(r => new PendingReviewItem(Path.GetRelativePath(watch.Path, r.Source), r.Reason)).ToList();
+            foreach (var item in items)
             {
                 LogNeedsReview(_logger, release, item.Source, item.Reason);
             }
 
-            await File.AppendAllLinesAsync(
-                Path.Combine(dataFolder, "review.jsonl"),
-                [JsonSerializer.Serialize(new { time = _clock.GetUtcNow(), watchFolder = watch.Path, release, items = plan.Review })],
-                ct).ConfigureAwait(false);
+            // Only report a review once per distinct set of reasons (restarts and retries plan the release again).
+            if (previous is null || previous.Request != ReviewRequest.None || !previous.Items.SequenceEqual(items))
+            {
+                _state.Record(new ActivityEntry
+                {
+                    Time = _clock.GetUtcNow(),
+                    Status = ActivityStatus.NeedsReview,
+                    Release = release,
+                    WatchFolder = watch.Path,
+                    Summary = items.Count == 1 ? items[0].Reason : $"{items.Count} files need a decision.",
+                    Details = [.. items.Select(i => $"{i.Source}: {i.Reason}")],
+                });
+            }
+
+            _state.PutReview(new PendingReview
+            {
+                Id = id,
+                WatchFolder = watch.Path,
+                Release = release,
+                IsTv = target.IsTv,
+                Time = _clock.GetUtcNow(),
+                Items = items,
+                Candidates = DistinctCandidates(plan.Review),
+            });
             return;
         }
 
@@ -223,13 +277,182 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
         if (!report.Succeeded)
         {
-            LogExecutionFailed(_logger, release, report.Error ?? "unknown error");
+            var error = report.Error ?? "unknown error";
+            LogExecutionFailed(_logger, release, error);
+            ReportFailure(watch, release, $"Stopped after {report.Completed.Count} of {plan.Operations.Count} moves: {error}", report.Completed);
             return;
+        }
+
+        _state.Record(new ActivityEntry
+        {
+            Time = _clock.GetUtcNow(),
+            Status = config.DryRun ? ActivityStatus.DryRun : ActivityStatus.Filed,
+            Release = release,
+            WatchFolder = watch.Path,
+            Summary = Summarise(report.Completed, config.DryRun),
+            Details = Describe(watch.Path, report.Completed),
+        });
+
+        if (config.DryRun && previous?.Chosen is not null)
+        {
+            // Keep the decision so the release files the same way once dry run is turned off.
+            _state.ClearRequest(id);
+        }
+        else
+        {
+            _state.RemoveReview(id);
         }
 
         if (!config.DryRun && config.ScanLibraryAfterIngest)
         {
             _libraryManager.QueueLibraryScan();
+        }
+    }
+
+    /// <summary>
+    /// A one-line summary of what an ingest did (or would do).
+    /// </summary>
+    /// <param name="operations">Completed operations.</param>
+    /// <param name="dryRun">Whether nothing was actually moved.</param>
+    /// <returns>E.g. <c>Filed 1 video and 2 subtitles; quarantined 3 files.</c>.</returns>
+    public static string Summarise(IReadOnlyCollection<PlannedOperation> operations, bool dryRun)
+    {
+        ArgumentNullException.ThrowIfNull(operations);
+
+        static string Count(int n, string noun) => n == 1 ? $"1 {noun}" : $"{n} {noun}s";
+        var filed = new List<string>();
+        foreach (var (kind, noun) in new[] { (OperationKind.Video, "video"), (OperationKind.Extra, "extra"), (OperationKind.Subtitle, "subtitle") })
+        {
+            var n = operations.Count(o => o.Kind == kind);
+            if (n > 0)
+            {
+                filed.Add(Count(n, noun));
+            }
+        }
+
+        var parts = new List<string>();
+        if (filed.Count > 0)
+        {
+            var list = filed.Count == 1 ? filed[0] : string.Join(", ", filed.Take(filed.Count - 1)) + " and " + filed[^1];
+            parts.Add((dryRun ? "Would file " : "Filed ") + list);
+        }
+
+        var quarantined = operations.Count(o => o.Kind == OperationKind.Quarantine);
+        if (quarantined > 0)
+        {
+            parts.Add((dryRun ? "would quarantine " : "quarantined ") + Count(quarantined, "file"));
+        }
+
+        var text = string.Join("; ", parts);
+        return text.Length == 0 ? "Nothing to do." : char.ToUpperInvariant(text[0]) + text[1..] + ".";
+    }
+
+    /// <summary>
+    /// The distinct candidates across a plan's review items, best score first.
+    /// </summary>
+    /// <param name="items">Review items.</param>
+    /// <returns>Candidates, one per title.</returns>
+    public static IReadOnlyList<ScoredCandidate> DistinctCandidates(IEnumerable<ReviewItem> items)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+
+        var best = new List<ScoredCandidate>();
+        foreach (var c in items.SelectMany(i => i.Candidates).OrderByDescending(c => c.Score))
+        {
+            if (!best.Any(b => MediaIdentifier.Merge([b.Candidate, c.Candidate]).Count == 1))
+            {
+                best.Add(c);
+            }
+        }
+
+        return best;
+    }
+
+    private static List<string> Describe(string watchFolder, IEnumerable<PlannedOperation> operations)
+        => [.. operations.Select(o => $"{o.Kind}: {Path.GetRelativePath(watchFolder, o.Source)} → {o.Destination}")];
+
+    private void ReportFailure(WatchFolder watch, string release, string error, IReadOnlyList<PlannedOperation> completed)
+    {
+        _state.Record(new ActivityEntry
+        {
+            Time = _clock.GetUtcNow(),
+            Status = ActivityStatus.Failed,
+            Release = release,
+            WatchFolder = watch.Path,
+            Summary = error,
+            Details = Describe(watch.Path, completed),
+        });
+        _state.PutReview(new PendingReview
+        {
+            Id = IngestStateStore.ReviewId(watch.Path, release),
+            WatchFolder = watch.Path,
+            Release = release,
+            Time = _clock.GetUtcNow(),
+            Items = [new PendingReviewItem(release, error)],
+        });
+    }
+
+    private void QuarantineRelease(PluginConfiguration config, WatchFolder watch, PendingReview review, IReadOnlyList<ReleaseFile> files, string quarantine)
+    {
+        var dated = Path.Combine(quarantine, _clock.GetLocalNow().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        var fs = new PhysicalFileOperations();
+        var moved = new List<string>();
+        string? error = null;
+        if (!config.DryRun)
+        {
+            foreach (var file in files)
+            {
+                var destination = Path.Combine(dated, file.RelativePath);
+                for (var n = 2; fs.Exists(destination); n++)
+                {
+                    destination = Path.Combine(dated, string.Create(CultureInfo.InvariantCulture, $"{file.RelativePath} ({n})"));
+                }
+
+                try
+                {
+                    fs.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    fs.Move(Path.Combine(watch.Path, file.RelativePath), destination);
+                    moved.Add($"{file.RelativePath} → {destination}");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    error = ex.Message;
+                    break;
+                }
+            }
+
+            var root = Path.Combine(watch.Path, review.Release);
+            if (error is null && Directory.Exists(root))
+            {
+                fs.DeleteEmptyDirectories(root);
+            }
+        }
+
+        if (error is not null)
+        {
+            LogExecutionFailed(_logger, review.Release, error);
+            ReportFailure(watch, review.Release, $"Quarantine stopped after {moved.Count} of {files.Count} files: {error}", []);
+            return;
+        }
+
+        _state.Record(new ActivityEntry
+        {
+            Time = _clock.GetUtcNow(),
+            Status = config.DryRun ? ActivityStatus.DryRun : ActivityStatus.Quarantined,
+            Release = review.Release,
+            WatchFolder = watch.Path,
+            Summary = string.Create(
+                CultureInfo.InvariantCulture,
+                $"{(config.DryRun ? "Would quarantine" : "Quarantined")} the whole release ({files.Count} file{(files.Count == 1 ? string.Empty : "s")}) to {dated}."),
+            Details = moved,
+        });
+        if (config.DryRun)
+        {
+            _state.ClearRequest(review.Id);
+        }
+        else
+        {
+            _state.RemoveReview(review.Id);
         }
     }
 
@@ -263,6 +486,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: {Prefix} {Kind} {Source} -> {Destination}")]
     private static partial void LogOperation(ILogger logger, string prefix, OperationKind kind, string source, string destination);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Ingest of {Release} failed")]
+    private static partial void LogReleaseFailed(ILogger logger, string release, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Ingest of {Release} stopped: {Error}")]
     private static partial void LogExecutionFailed(ILogger logger, string release, string error);

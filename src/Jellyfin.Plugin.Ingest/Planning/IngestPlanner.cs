@@ -52,6 +52,7 @@ public sealed class IngestPlanner
     /// <param name="files">Every file of the release, relative to the watch folder.</param>
     /// <param name="target">Destination library.</param>
     /// <param name="quarantineRoot">Absolute quarantine folder.</param>
+    /// <param name="chosen">A title a person picked for this release in review; used instead of searching.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The plan; nothing in it has been done yet.</returns>
     public async Task<IngestPlan> PlanAsync(
@@ -60,6 +61,7 @@ public sealed class IngestPlanner
         IReadOnlyList<ReleaseFile> files,
         LibraryTarget target,
         string quarantineRoot,
+        MetadataCandidate? chosen,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(watchFolder);
@@ -90,10 +92,12 @@ public sealed class IngestPlanner
         var owners = new HashSet<string>(StringComparer.Ordinal);
         foreach (var video in mains)
         {
-            var result = await _identifier.IdentifyAsync(parsed[video], target.IsTv, cancellationToken).ConfigureAwait(false);
+            var result = chosen is null
+                ? await _identifier.IdentifyAsync(parsed[video], target.IsTv, cancellationToken).ConfigureAwait(false)
+                : await _identifier.IdentifyAsChosenAsync(parsed[video], chosen, target.IsTv, cancellationToken).ConfigureAwait(false);
             if (result.Status != IdentificationStatus.Identified)
             {
-                review.Add(new ReviewItem(Abs(video), result.Reason));
+                review.Add(new ReviewItem(Abs(video), result.Reason) { Candidates = result.Candidates });
                 continue;
             }
 

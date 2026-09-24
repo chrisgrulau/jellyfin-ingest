@@ -11,19 +11,61 @@
       #IngestConfigPage .ingest-row .inputContainer, #IngestConfigPage .ingest-row .selectContainer { margin: 0; }
       #IngestConfigPage .ingest-banner { padding: .75em 1em; border-radius: 4px; margin: 1em 0; background: rgba(255,170,0,.15); }
       #IngestConfigPage .ingest-banner[hidden] { display: none; }
-      @media (max-width: 720px) { #IngestConfigPage .ingest-row { grid-template-columns: 1fr; } }
+      #IngestConfigPage .ingest-card { padding: 1em; margin: .75em 0; border-radius: 6px; background: rgba(128,128,128,.10); }
+      #IngestConfigPage .ingest-card h4 { margin: 0 0 .25em; word-break: break-word; }
+      #IngestConfigPage .ingest-muted { opacity: .7; font-size: .9em; }
+      #IngestConfigPage .ingest-reasons { margin: .5em 0; padding-left: 1.2em; }
+      #IngestConfigPage .ingest-reasons li { word-break: break-word; }
+      #IngestConfigPage .ingest-cands { width: 100%; border-collapse: collapse; margin: .5em 0; }
+      #IngestConfigPage .ingest-cands td { padding: .35em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; }
+      #IngestConfigPage .ingest-cands td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      #IngestConfigPage .ingest-cands a { color: inherit; margin-right: .5em; }
+      #IngestConfigPage .ingest-actions { display: flex; flex-wrap: wrap; gap: .5em; margin-top: .5em; }
+      #IngestConfigPage .ingest-actions .emby-button, #IngestConfigPage .ingest-cands .emby-button { margin: 0; }
+      #IngestConfigPage .ingest-chosen { padding: .4em .75em; border-radius: 4px; background: rgba(0,164,220,.15); margin: .5em 0; }
+      #IngestConfigPage .ingest-filters { display: flex; flex-wrap: wrap; gap: .4em; margin: .5em 0 1em; }
+      #IngestConfigPage .ingest-filters button { border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; border-radius: 999px; padding: .25em .8em; cursor: pointer; font: inherit; }
+      #IngestConfigPage .ingest-filters button[aria-pressed="true"] { background: rgba(0,164,220,.25); border-color: rgba(0,164,220,.6); }
+      #IngestConfigPage .ingest-activity { list-style: none; margin: 0; padding: 0; }
+      #IngestConfigPage .ingest-activity > li { display: grid; grid-template-columns: 7.5em 1fr; gap: .25em 1em; padding: .6em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
+      #IngestConfigPage .ingest-activity .when { font-variant-numeric: tabular-nums; font-size: .85em; opacity: .75; grid-column: 1; }
+      #IngestConfigPage .ingest-activity .what { grid-column: 2; min-width: 0; word-break: break-word; }
+      #IngestConfigPage .ingest-activity details { margin-top: .25em; font-size: .85em; }
+      #IngestConfigPage .ingest-activity details ul { margin: .25em 0; padding-left: 1.2em; opacity: .85; }
+      #IngestConfigPage .badge { display: inline-block; font-size: .72em; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: .15em .55em; border-radius: 3px; margin-right: .5em; vertical-align: .1em; }
+      #IngestConfigPage .badge.Filed { background: rgba(82,181,75,.25); }
+      #IngestConfigPage .badge.DryRun { background: rgba(255,170,0,.22); }
+      #IngestConfigPage .badge.NeedsReview { background: rgba(0,164,220,.25); }
+      #IngestConfigPage .badge.Failed { background: rgba(220,53,69,.30); }
+      #IngestConfigPage .badge.Quarantined, #IngestConfigPage .badge.Purged { background: rgba(128,128,128,.30); }
+      #IngestConfigPage .ingest-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; flex-wrap: wrap; }
+      @media (max-width: 720px) {
+        #IngestConfigPage .ingest-row { grid-template-columns: 1fr; }
+        #IngestConfigPage .ingest-activity > li { grid-template-columns: 1fr; }
+        #IngestConfigPage .ingest-activity .what { grid-column: 1; }
+      }
     </style>
     <div data-role="content">
       <div class="content-primary">
         <h2 class="sectionTitle">Ingest</h2>
-        <p>New media dropped into a watch folder is identified, renamed to Jellyfin's naming standard and moved into the chosen library with its subtitles. Anything else in the release is quarantined and deleted after the retention period. Releases that can't be identified confidently are left where they are; see the Jellyfin log.</p>
+        <p>New media dropped into a watch folder is identified, renamed to Jellyfin's naming standard and moved into the chosen library with its subtitles. Anything else in the release is quarantined and deleted after the retention period. Releases that can't be identified confidently are left where they are and listed under <em>Needs review</em>.</p>
 
         <div class="ingest-banner" id="DryRunBanner">
-          <strong>Dry run is on.</strong> Ingest logs what it would do and moves nothing. Check the log, then turn dry run off.
+          <strong>Dry run is on.</strong> Ingest records what it would do and moves nothing. Check <em>Recent activity</em>, then turn dry run off.
         </div>
 
+        <div class="ingest-head">
+          <h3 class="sectionTitle">Needs review <span class="ingest-muted" id="ReviewCount"></span></h3>
+          <button is="emby-button" type="button" class="raised button-alt" id="RefreshStatus"><span>Refresh</span></button>
+        </div>
+        <div id="Reviews"></div>
+
+        <h3 class="sectionTitle" style="margin-top:2em">Recent activity</h3>
+        <div class="ingest-filters" id="ActivityFilters" role="group" aria-label="Filter activity"></div>
+        <ul class="ingest-activity" id="Activity"></ul>
+
         <form id="IngestConfigForm">
-          <h3 class="sectionTitle">Watch folders</h3>
+          <h3 class="sectionTitle" style="margin-top:2em">Watch folders</h3>
           <div id="WatchFolders"></div>
           <button is="emby-button" type="button" class="raised button-alt" id="AddWatchFolder"><span>Add watch folder</span></button>
 
@@ -106,6 +148,131 @@
         function syncBanner() {
           page.querySelector('#DryRunBanner').hidden = !page.querySelector('#DryRun').checked;
         }
+
+        // ---- Needs review / Recent activity ----
+        var statusTimer = null;
+        var activity = [];
+        var filter = 'All';
+        var confirmQuarantine = {};
+        var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged']];
+        var labels = {}; filters.forEach(function (f) { labels[f[0]] = f[1]; });
+
+        function when(iso) {
+          var d = new Date(iso);
+          var today = new Date();
+          var sameDay = d.toDateString() === today.toDateString();
+          return sameDay ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function links(ids, isTv) {
+          ids = ids || {};
+          var out = [];
+          if (ids.Tmdb) { out.push('<a target="_blank" rel="noopener" href="https://www.themoviedb.org/' + (isTv ? 'tv' : 'movie') + '/' + encodeURIComponent(ids.Tmdb) + '">TMDb</a>'); }
+          if (ids.Tvdb) { out.push('<a target="_blank" rel="noopener" href="https://thetvdb.com/dereferrer/series/' + encodeURIComponent(ids.Tvdb) + '">TVDB</a>'); }
+          if (ids.Imdb) { out.push('<a target="_blank" rel="noopener" href="https://www.imdb.com/title/' + encodeURIComponent(ids.Imdb) + '/">IMDb</a>'); }
+          return out.join('');
+        }
+
+        function title(c) { return esc(c.Name) + (c.Year ? ' (' + esc(c.Year) + ')' : ''); }
+
+        function renderReviews(reviews) {
+          var box = page.querySelector('#Reviews');
+          page.querySelector('#ReviewCount').textContent = reviews.length ? '(' + reviews.length + ')' : '';
+          if (!reviews.length) { box.innerHTML = '<p class="ingest-muted">Nothing waiting. Releases Ingest can\'t file confidently will appear here.</p>'; return; }
+          box.innerHTML = reviews.map(function (r) {
+            var pending = r.Request && r.Request !== 'None';
+            var html = '<div class="ingest-card" data-id="' + esc(r.Id) + '">' +
+              '<h4>' + esc(r.Release) + '</h4>' +
+              '<div class="ingest-muted">' + esc(r.WatchFolder) + ' · ' + when(r.Time) + '</div>' +
+              '<ul class="ingest-reasons">' + (r.Items || []).map(function (i) {
+                return '<li>' + (i.Source !== r.Release ? '<span class="ingest-muted">' + esc(i.Source) + ':</span> ' : '') + esc(i.Reason) + '</li>';
+              }).join('') + '</ul>';
+            if (r.Chosen) { html += '<div class="ingest-chosen">Will file as <strong>' + title(r.Chosen) + '</strong> ' + links(r.Chosen.ProviderIds, r.IsTv) + '</div>'; }
+            if (pending) {
+              html += '<p class="ingest-muted">' + (r.Request === 'Quarantine' ? 'Quarantining' : 'Planning again') + ' on the next sweep (within 30 seconds)…</p>';
+            } else {
+              if ((r.Candidates || []).length) {
+                html += '<table class="ingest-cands"><tbody>' + r.Candidates.map(function (sc, i) {
+                  return '<tr><td>' + title(sc.Candidate) + '</td><td>' + links(sc.Candidate.ProviderIds, r.IsTv) + '</td>' +
+                    '<td class="num">' + Math.round(Math.min(1, sc.Score) * 100) + '%</td>' +
+                    '<td class="num"><button is="emby-button" type="button" class="raised button-submit ingest-choose" data-i="' + i + '"><span>Use this</span></button></td></tr>';
+                }).join('') + '</tbody></table>';
+              }
+              html += '<div class="ingest-actions">' +
+                '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>Retry</span></button>' +
+                '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>' +
+                '</div>';
+            }
+            return html + '</div>';
+          }).join('');
+        }
+
+        function renderActivity() {
+          page.querySelector('#ActivityFilters').innerHTML = filters.map(function (f) {
+            var n = f[0] === 'All' ? activity.length : activity.filter(function (a) { return a.Status === f[0]; }).length;
+            return '<button type="button" data-f="' + f[0] + '" aria-pressed="' + (filter === f[0]) + '">' + f[1] + ' <span class="ingest-muted">' + n + '</span></button>';
+          }).join('');
+          var shown = activity.filter(function (a) { return filter === 'All' || a.Status === filter; });
+          var list = page.querySelector('#Activity');
+          if (!shown.length) { list.innerHTML = '<li><span class="what ingest-muted">No activity yet.</span></li>'; return; }
+          list.innerHTML = shown.map(function (a) {
+            var details = (a.Details || []);
+            return '<li><span class="when">' + when(a.Time) + '</span><div class="what">' +
+              '<span class="badge ' + esc(a.Status) + '">' + esc(labels[a.Status] || a.Status) + '</span><strong>' + esc(a.Release) + '</strong>' +
+              '<div>' + esc(a.Summary) + '</div>' +
+              (details.length ? '<details><summary>' + details.length + ' detail' + (details.length === 1 ? '' : 's') + '</summary><ul>' + details.map(function (d) { return '<li>' + esc(d) + '</li>'; }).join('') + '</ul></details>' : '') +
+              '</div></li>';
+          }).join('');
+        }
+
+        function loadStatus() {
+          return ApiClient.getJSON(ApiClient.getUrl('Ingest/Status', { limit: 150 })).then(function (s) {
+            var open = Array.prototype.map.call(page.querySelectorAll('#Activity details[open] summary'), function (x) { return x.parentNode.parentNode.querySelector('strong').textContent; });
+            activity = s.Activity || [];
+            renderReviews(s.Reviews || []);
+            renderActivity();
+            Array.prototype.forEach.call(page.querySelectorAll('#Activity li'), function (li) {
+              var name = li.querySelector('strong');
+              var d = li.querySelector('details');
+              if (d && name && open.indexOf(name.textContent) >= 0) { d.open = true; }
+            });
+          });
+        }
+
+        function post(path) {
+          return ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl(path) }).then(loadStatus, function () {
+            Dashboard.alert('That review has changed or gone; refreshing.');
+            return loadStatus();
+          });
+        }
+
+        page.querySelector('#Reviews').addEventListener('click', function (e) {
+          var btn = e.target.closest('button');
+          var card = e.target.closest('.ingest-card');
+          if (!btn || !card) { return; }
+          var id = card.getAttribute('data-id');
+          if (btn.classList.contains('ingest-choose')) { post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose/' + btn.getAttribute('data-i')); }
+          else if (btn.classList.contains('ingest-retry')) { post('Ingest/Reviews/' + encodeURIComponent(id) + '/Retry'); }
+          else if (btn.classList.contains('ingest-quarantine')) {
+            if (!confirmQuarantine[id]) { confirmQuarantine[id] = true; btn.querySelector('span').textContent = 'Confirm: quarantine whole release'; return; }
+            delete confirmQuarantine[id];
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Quarantine');
+          }
+        });
+
+        page.querySelector('#ActivityFilters').addEventListener('click', function (e) {
+          var b = e.target.closest('button');
+          if (b) { filter = b.getAttribute('data-f'); renderActivity(); }
+        });
+        page.querySelector('#RefreshStatus').addEventListener('click', loadStatus);
+
+        page.addEventListener('pagehide', function () { if (statusTimer) { clearInterval(statusTimer); statusTimer = null; } });
+
+        page.addEventListener('pageshow', function () {
+          loadStatus();
+          if (!statusTimer) { statusTimer = setInterval(function () { if (!document.hidden) { loadStatus(); } }, 15000); }
+        });
 
         page.addEventListener('pageshow', function () {
           Dashboard.showLoadingMsg();

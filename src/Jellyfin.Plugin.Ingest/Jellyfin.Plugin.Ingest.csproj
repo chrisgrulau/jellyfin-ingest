@@ -7,6 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Dashboard API controller -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Provided by the Jellyfin server at runtime: compile against them, don't ship them -->
     <PackageReference Include="Jellyfin.Controller" Version="12.*" ExcludeAssets="runtime" />
     <PackageReference Include="Jellyfin.Model" Version="12.*" ExcludeAssets="runtime" />

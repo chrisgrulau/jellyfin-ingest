@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using Jellyfin.Plugin.Ingest.Identification;
 
 namespace Jellyfin.Plugin.Ingest.Planning;
 
@@ -34,7 +35,11 @@ public sealed record PlannedOperation(OperationKind Kind, string Source, string 
 /// </summary>
 /// <param name="Source">The file concerned (absolute path).</param>
 /// <param name="Reason">Why it can't be filed automatically.</param>
-public sealed record ReviewItem(string Source, string Reason);
+public sealed record ReviewItem(string Source, string Reason)
+{
+    /// <summary>Gets the titles identification considered, best first (empty when identification isn't the problem).</summary>
+    public IReadOnlyList<ScoredCandidate> Candidates { get; init; } = [];
+}
 
 /// <summary>
 /// Everything that will happen to one dropped release. A release is all-or-nothing: if anything needs review,

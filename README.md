@@ -52,7 +52,7 @@ Anything it cannot identify confidently is left where it is and reported, never 
 | Subtitles | Matched by name, by folder (`Subs/`), or by being the only video in the release; renamed `<video>.<lang>[.sdh][.forced].srt`. |
 | Extras | Trailers, featurettes, deleted scenes … filed into Jellyfin's extras folders. |
 | Clutter | Moved to a quarantine folder (default or user-chosen), purged after N days (default 30). |
-| Safety | Dry-run mode, never overwrites, every action written to an activity log, collisions and low-confidence matches left for review. |
+| Safety | Dry-run mode, never overwrites, every action written to an activity log, collisions and low-confidence matches left for review on the settings page, where you pick the right title with one click. |
 | Library refresh | Scans only the affected library after an ingest. |
 
 ## Requirements

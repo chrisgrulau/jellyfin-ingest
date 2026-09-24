@@ -74,6 +74,52 @@ public sealed class MediaIdentifier
     }
 
     /// <summary>
+    /// Identifies a parsed release as a title a person has already chosen (from a review), skipping the search. Only
+    /// the episode title is still looked up.
+    /// </summary>
+    /// <param name="release">The parsed release name.</param>
+    /// <param name="chosen">The chosen candidate.</param>
+    /// <param name="isTv">Whether the chosen title is a series.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The identification result.</returns>
+    public async Task<IdentificationResult> IdentifyAsChosenAsync(ParsedRelease release, MetadataCandidate chosen, bool isTv, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(release);
+        ArgumentNullException.ThrowIfNull(chosen);
+
+        var reason = $"Chosen in review: '{chosen.Name}'.";
+        if (!isTv)
+        {
+            return new IdentificationResult
+            {
+                Status = IdentificationStatus.Identified,
+                Confidence = 1,
+                Reason = reason,
+                Movie = new MovieIdentity { Title = chosen.Name, Year = chosen.Year, TmdbId = Id(chosen, "Tmdb"), ImdbId = Id(chosen, "Imdb"), Edition = release.Edition },
+            };
+        }
+
+        if (release.Season is not { } season || release.Episode is not { } episode)
+        {
+            return new IdentificationResult
+            {
+                Status = IdentificationStatus.NeedsReview,
+                Reason = $"Series is '{chosen.Name}', but the season or episode number can't be read from the file name.",
+            };
+        }
+
+        var series = new SeriesIdentity { Title = chosen.Name, Year = chosen.Year, TvdbId = Id(chosen, "Tvdb"), TmdbId = Id(chosen, "Tmdb") };
+        var title = await _lookup.GetEpisodeTitleAsync(chosen.ProviderIds, season, episode, cancellationToken).ConfigureAwait(false);
+        return new IdentificationResult
+        {
+            Status = IdentificationStatus.Identified,
+            Confidence = 1,
+            Reason = reason,
+            Episode = new EpisodeIdentity { Series = series, Season = season, Episode = episode, EndingEpisode = release.EndingEpisode, Title = title ?? release.EpisodeTitle },
+        };
+    }
+
+    /// <summary>
     /// Scores one candidate against the parsed title and year. Scores can exceed 1 (bonuses stack on an exact title) so
     /// that ties between same-named titles are broken; confidence is reported capped at 1.
     /// </summary>

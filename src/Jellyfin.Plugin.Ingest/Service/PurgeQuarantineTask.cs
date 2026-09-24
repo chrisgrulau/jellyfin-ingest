@@ -14,13 +14,16 @@ namespace Jellyfin.Plugin.Ingest.Service;
 public sealed partial class PurgeQuarantineTask : IScheduledTask
 {
     private readonly ILogger<PurgeQuarantineTask> _logger;
+    private readonly IngestStateStore _state;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PurgeQuarantineTask"/> class.
     /// </summary>
+    /// <param name="state">Activity shown on the dashboard.</param>
     /// <param name="logger">Logger.</param>
-    public PurgeQuarantineTask(ILogger<PurgeQuarantineTask> logger)
+    public PurgeQuarantineTask(IngestStateStore state, ILogger<PurgeQuarantineTask> logger)
     {
+        _state = state ?? throw new ArgumentNullException(nameof(state));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -55,9 +58,24 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
         for (var i = 0; i < roots.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            foreach (var deleted in QuarantinePurger.Purge(roots[i], today, config.QuarantineRetentionDays))
+            var deleted = QuarantinePurger.Purge(roots[i], today, config.QuarantineRetentionDays);
+            foreach (var path in deleted)
             {
-                LogPurged(_logger, deleted);
+                LogPurged(_logger, path);
+            }
+
+            if (deleted.Count > 0)
+            {
+                _state.Record(new ActivityEntry
+                {
+                    Time = DateTimeOffset.UtcNow,
+                    Status = ActivityStatus.Purged,
+                    Release = roots[i],
+                    Summary = deleted.Count == 1
+                        ? $"Deleted 1 quarantine folder older than {config.QuarantineRetentionDays} days."
+                        : $"Deleted {deleted.Count} quarantine folders older than {config.QuarantineRetentionDays} days.",
+                    Details = deleted,
+                });
             }
 
             progress.Report(100.0 * (i + 1) / roots.Count);
