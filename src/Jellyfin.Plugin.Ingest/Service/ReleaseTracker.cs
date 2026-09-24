@@ -108,6 +108,11 @@ public sealed partial class ReleaseTracker
     /// <param name="name">Release name.</param>
     public void Forget(string name) => _handled.Remove(name);
 
+    /// <summary>
+    /// Offers every handled release again on the next sweep (e.g. after dry run is turned off or destinations change).
+    /// </summary>
+    public void ForgetAll() => _handled.Clear();
+
     [GeneratedRegex(@"\.(?:part|partial|!qb|!ut|crdownload|tmp|temp|download)$|^~\$", RegexOptions.IgnoreCase)]
     private static partial Regex PartialDownload();
 }

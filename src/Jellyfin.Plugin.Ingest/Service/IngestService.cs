@@ -33,6 +33,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private readonly ILogger<IngestService> _logger;
     private readonly IngestStateStore _state;
     private readonly Dictionary<string, ReleaseTracker> _trackers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _settings = new(StringComparer.Ordinal);
     private readonly TimeProvider _clock = TimeProvider.System;
     private CancellationTokenSource? _stopping;
     private Task? _loop;
@@ -175,7 +176,6 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 continue;
             }
 
-            var libraryIds = destinations.Select(d => Guid.TryParse(d.LibraryId, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty).ToList();
             var quarantine = QuarantineFor(config, watch);
             var snapshot = Snapshot(watch.Path, quarantine);
             if (!_trackers.TryGetValue(watch.Path, out var tracker))
@@ -183,6 +183,16 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 tracker = new ReleaseTracker();
                 _trackers[watch.Path] = tracker;
             }
+
+            // Settings that change the outcome (dry run, destinations) changed: plan everything waiting again.
+            var settings = LibraryRouting.SettingsFingerprint(config.DryRun, DestinationsOf(watch));
+            if (_settings.TryGetValue(watch.Path, out var before) && !string.Equals(before, settings, StringComparison.Ordinal))
+            {
+                LogReplanning(_logger, watch.Path);
+                tracker.ForgetAll();
+            }
+
+            _settings[watch.Path] = settings;
 
             _state.PruneReviews(watch.Path, snapshot.Keys);
             foreach (var review in _state.Snapshot().Reviews.Where(r => r.WatchFolder == watch.Path && r.Request != ReviewRequest.None))
@@ -202,7 +212,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    await IngestAsync(plugin.DataFolderPath, config, watch, release, snapshot[release], targets, libraryIds, quarantine, ct).ConfigureAwait(false);
+                    await IngestAsync(plugin.DataFolderPath, config, watch, release, snapshot[release], targets, quarantine, ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -249,16 +259,17 @@ public sealed partial class IngestService : IHostedService, IDisposable
         string release,
         IReadOnlyList<ReleaseFile> files,
         LibraryTargets targets,
-        IReadOnlyList<Guid> libraryIds,
         string quarantine,
         CancellationToken ct)
     {
         var id = IngestStateStore.ReviewId(watch.Path, release);
         var previous = _state.GetReview(id);
+        // Titles anywhere on the server count as "already in the library": a show kept in another library is still
+        // strong evidence, and its new episodes join it there.
         var identifier = new MediaIdentifier(
             new JellyfinMetadataLookup(_providerManager),
-            new JellyfinLibraryIndex(_libraryManager, libraryIds));
-        var planner = new IngestPlanner(identifier, p => File.Exists(p) || Directory.Exists(p), ReadSmallText, _clock);
+            new JellyfinLibraryIndex(_libraryManager, []));
+        var planner = new IngestPlanner(identifier, p => File.Exists(p) || Directory.Exists(p), ReadSmallText, _clock, new JellyfinSeriesLocator(_libraryManager));
         var plan = await planner.PlanAsync(watch.Path, release, files, targets, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
 
         Directory.CreateDirectory(dataFolder);
@@ -500,6 +511,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
             return null;
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest watch folder {Path}: settings changed, planning waiting releases again")]
+    private static partial void LogReplanning(ILogger logger, string path);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Ingest sweep failed")]
     private static partial void LogSweepFailed(ILogger logger, Exception exception);
