@@ -115,6 +115,7 @@
           <div class="inputContainer">
             <label class="inputLabel inputLabelUnfocused" for="SettleSeconds">Wait until a release has stopped changing for (seconds)</label>
             <input id="SettleSeconds" name="SettleSeconds" type="number" min="5" is="emby-input" />
+            <div class="fieldDescription">A release is processed once no file in it has been added, resized or written for this long. <strong>Download clients must not write straight into a watch folder:</strong> use their "incomplete" or temporary folder outside it (or an in-progress suffix such as <code>.part</code> or <code>.!qb</code>) and let them move finished downloads in. A download that stalls for longer than this can otherwise look finished.</div>
           </div>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
@@ -563,7 +564,7 @@
             current.WatchFolders = folders;
             current.QuarantinePath = quarantinePath;
             current.QuarantineRetentionDays = Math.max(1, parseInt(page.querySelector('#QuarantineRetentionDays').value, 10) || 30);
-            current.SettleSeconds = Math.max(5, parseInt(page.querySelector('#SettleSeconds').value, 10) || 60);
+            current.SettleSeconds = Math.max(5, parseInt(page.querySelector('#SettleSeconds').value, 10) || 300);
             current.DryRun = page.querySelector('#DryRun').checked;
             current.ScanLibraryAfterIngest = page.querySelector('#ScanLibraryAfterIngest').checked;
             config = current;

@@ -31,9 +31,10 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool DryRun { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets how long (seconds) every file in a release must keep the same size before it is processed.
+    /// Gets or sets how long (seconds) nothing in a release may change (no file added, resized or written) before it is
+    /// processed. Five minutes by default: long enough for a pause in a copy or download to be told apart from its end.
     /// </summary>
-    public int SettleSeconds { get; set; } = 60;
+    public int SettleSeconds { get; set; } = 300;
 
     /// <summary>
     /// Gets or sets a value indicating whether to scan the target library after an ingest.

@@ -39,7 +39,10 @@ public sealed partial class ReleaseTracker
     }
 
     /// <summary>
-    /// A stable fingerprint of a release's contents (paths and sizes).
+    /// A stable fingerprint of a release's contents: paths, sizes and last-write times. Any write changes it, so a release
+    /// only settles once nothing has been written for the whole settle time, even when files were created at full size
+    /// (pre-allocation, sparse files). Times are compared only with their own earlier values, never with the server's
+    /// clock, so clock differences on network shares don't matter.
     /// </summary>
     /// <param name="files">The release's files.</param>
     /// <returns>The signature.</returns>
@@ -49,7 +52,8 @@ public sealed partial class ReleaseTracker
         var sb = new StringBuilder();
         foreach (var f in files.OrderBy(f => f.RelativePath, StringComparer.Ordinal))
         {
-            sb.Append(f.RelativePath).Append('\u0001').Append(f.Size.ToString(CultureInfo.InvariantCulture)).Append('\u0002');
+            sb.Append(f.RelativePath).Append('\u0001').Append(f.Size.ToString(CultureInfo.InvariantCulture))
+                .Append('\u0001').Append((f.LastWriteUtc?.Ticks ?? 0).ToString(CultureInfo.InvariantCulture)).Append('\u0002');
         }
 
         return sb.ToString();
