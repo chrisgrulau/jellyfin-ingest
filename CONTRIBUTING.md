@@ -19,3 +19,17 @@ dotnet test
 
 Copy `src/Jellyfin.Plugin.Ingest/bin/Debug/net10.0/Jellyfin.Plugin.Ingest.dll` into
 `<jellyfin data>/plugins/Ingest_0.0.0.0/` on the test server and restart Jellyfin.
+
+## Versions and releases
+
+Jellyfin compares plugin versions as four numbers, so every release gets a version that is higher than the last:
+
+| Tag | Plugin version (`build.yaml`, csproj) | Published as |
+|---|---|---|
+| `v0.1.3-alpha` | `0.1.3.0` | pre-release |
+| `v0.1.4` | `0.1.4.0` | release |
+
+The tag is `v` + the first three numbers, plus an optional suffix (`-alpha`, `-beta`, `-rc1`) for pre-releases. CI refuses to
+release a tag that doesn't match the version in `build.yaml`. (Releases before 0.1.3 used `v0.1.0-alpha.N` tags for
+versions `0.1.N-1.0`.)
+

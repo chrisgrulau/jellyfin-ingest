@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.3-alpha] - 2026-09-25
+
 ### Added
 - Duplicate guard (PROC-01): an episode or film that's already on the server (any library, any file name or
   container, or not yet scanned) goes to review with the existing file's path instead of being filed as a second
