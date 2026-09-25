@@ -104,4 +104,23 @@ public class ServiceTests
 
         Assert.Equal(["r"], t.Observe(snap, T0.AddSeconds(120), Settle));
     }
+
+    [Theory]
+    [InlineData("lost+found")]
+    [InlineData(".Trash-1000")]
+    [InlineData("$RECYCLE.BIN")]
+    [InlineData("System Volume Information")]
+    [InlineData("@eaDir")]
+    [InlineData("#recycle")]
+    [InlineData("Thumbs.db")]
+    [InlineData("desktop.ini")]
+    [InlineData(".DS_Store")]
+    [InlineData("Show.S01E01.mkv.part")]
+    public void System_and_partial_entries_are_ignored(string name) => Assert.True(ReleaseTracker.IsIgnored(name));
+
+    [Theory]
+    [InlineData("Show.S01E01.mkv")]
+    [InlineData("Movie Title (2019)")]
+    [InlineData("Found Footage (2019)")]
+    public void Releases_are_not_ignored(string name) => Assert.False(ReleaseTracker.IsIgnored(name));
 }
