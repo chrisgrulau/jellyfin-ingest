@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- File-system, NAS and OS housekeeping entries in a watch folder (`lost+found`, `$RECYCLE.BIN`,
+  `System Volume Information`, `@eaDir`, `#recycle`, `Thumbs.db`, `desktop.ini` …) are ignored rather than treated
+  as releases. Hidden entries such as `.Trash-1000` already were.
+
 ## [0.1.0-alpha.3] - 2026-09-24
 
 ### Added

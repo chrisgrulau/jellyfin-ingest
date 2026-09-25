@@ -15,19 +15,27 @@ namespace Jellyfin.Plugin.Ingest.Service;
 /// </summary>
 public sealed partial class ReleaseTracker
 {
+    // File-system, NAS and OS housekeeping entries that are never media releases
+    private static readonly HashSet<string> SystemEntries = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "lost+found", "$RECYCLE.BIN", "RECYCLER", "System Volume Information", "@eaDir", "@Recycle", "@Recently-Snapshot",
+        "#recycle", "#snapshot", "Thumbs.db", "desktop.ini", "Network Trash Folder", "Temporary Items",
+    };
+
     private readonly Dictionary<string, (string Signature, DateTimeOffset Since)> _seen = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _handled = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Returns whether a top-level entry of a watch folder should be ignored entirely (hidden files, the quarantine
-    /// folder when it lives inside the watch folder, and in-progress downloads).
+    /// Returns whether a top-level entry of a watch folder should be ignored entirely (hidden files and folders such as
+    /// <c>.Trash-1000</c>, file-system / NAS / OS housekeeping such as <c>lost+found</c>, <c>$RECYCLE.BIN</c> or
+    /// <c>@eaDir</c>, and in-progress downloads).
     /// </summary>
     /// <param name="name">The entry's name.</param>
     /// <returns><c>true</c> to ignore it.</returns>
     public static bool IsIgnored(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
-        return name.StartsWith('.') || PartialDownload().IsMatch(name);
+        return name.StartsWith('.') || SystemEntries.Contains(name) || PartialDownload().IsMatch(name);
     }
 
     /// <summary>
