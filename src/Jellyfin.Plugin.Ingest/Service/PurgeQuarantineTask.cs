@@ -37,7 +37,7 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
     }
 
     /// <inheritdoc />
-    public string Name => "Purge Ingest quarantine";
+    public string Name => "Purge Shoal Ingest quarantine";
 
     /// <inheritdoc />
     public string Key => "IngestPurgeQuarantine";
@@ -46,7 +46,7 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
     public string Description => "Deletes release clutter quarantined by Ingest once it is older than the retention period.";
 
     /// <inheritdoc />
-    public string Category => "Ingest";
+    public string Category => "Shoal";
 
     /// <inheritdoc />
     public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
