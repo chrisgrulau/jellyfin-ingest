@@ -109,6 +109,20 @@ public sealed class PlanExecutor
             return new ExecutionReport { Completed = plan.Operations, DryRun = true };
         }
 
+        // Defence in depth: check every operation before touching anything, so a bad plan moves nothing at all
+        foreach (var op in plan.Operations)
+        {
+            if (!PathGuard.IsSameOrUnder(op.Source, releaseRoot))
+            {
+                return new ExecutionReport { Failed = op, Error = $"Refused: {op.Source} is outside the release being filed." };
+            }
+
+            if (!PathGuard.IsUnderAny(op.Destination, plan.AllowedRoots))
+            {
+                return new ExecutionReport { Failed = op, Error = $"Refused: {op.Destination} is outside the folders this release may be filed into." };
+            }
+        }
+
         var done = new List<PlannedOperation>();
         foreach (var op in plan.Operations)
         {

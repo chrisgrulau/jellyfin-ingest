@@ -58,7 +58,7 @@ public sealed class JellyfinLibraryIndex : ILibraryIndex
             {
                 Name = i.Name,
                 Year = i.ProductionYear,
-                ProviderIds = new Dictionary<string, string>(i.ProviderIds, StringComparer.OrdinalIgnoreCase),
+                ProviderIds = ProviderIdRules.Clean(i.ProviderIds),
                 Source = MediaIdentifier.LibrarySource,
             })];
     }

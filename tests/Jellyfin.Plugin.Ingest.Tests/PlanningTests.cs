@@ -44,8 +44,8 @@ public class PlanningTests
             => Task.FromResult<string?>(season == 1 && episode == 4 ? "Glass Harbour" : null);
     }
 
-    private static IngestPlanner Planner(Func<string, bool>? exists = null, IExistingMedia? existing = null)
-        => new(new MediaIdentifier(new Lookup()), exists ?? (_ => false), _ => null, new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)), existing);
+    private static IngestPlanner Planner(Func<string, bool>? exists = null, IExistingMedia? existing = null, IMetadataLookup? lookup = null)
+        => new(new MediaIdentifier(lookup ?? new Lookup()), exists ?? (_ => false), _ => null, new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)), existing, p => PathGuard.IsUnder(p, "/lib"));
 
     private sealed class Existing(string? seriesFolder = null) : IExistingMedia
     {
@@ -190,6 +190,7 @@ public class PlanningTests
         {
             ReleaseName = "r",
             Operations = [new PlannedOperation(OperationKind.Video, "/drop/r/a.mkv", "/lib/A/a.mkv"), new PlannedOperation(OperationKind.Quarantine, "/drop/r/x.txt", "/q/r/x.txt")],
+            AllowedRoots = ["/lib/A", "/q"],
         };
         var fs = new FakeFs();
         fs.Files["/drop/r/a.mkv"] = 100;
@@ -209,7 +210,7 @@ public class PlanningTests
     [Fact]
     public void Executor_stops_at_a_destination_that_appeared_after_planning()
     {
-        var plan = new IngestPlan { ReleaseName = "r", Operations = [new PlannedOperation(OperationKind.Video, "/drop/r/a.mkv", "/lib/A/a.mkv")] };
+        var plan = new IngestPlan { ReleaseName = "r", Operations = [new PlannedOperation(OperationKind.Video, "/drop/r/a.mkv", "/lib/A/a.mkv")], AllowedRoots = ["/lib/A"] };
         var fs = new FakeFs();
         fs.Files["/drop/r/a.mkv"] = 100;
         fs.Files["/lib/A/a.mkv"] = 5;
@@ -429,5 +430,52 @@ public class PlanningTests
 
         Assert.True(report.Succeeded);
         Assert.Equal("Directory not empty", report.Warning);
+    }
+
+    private sealed class HostileLookup : IMetadataLookup
+    {
+        public Task<IReadOnlyList<MetadataCandidate>> SearchSeriesAsync(string name, int? year, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<MetadataCandidate>>([]);
+
+        // A metadata plugin (or NFO edit) returning an id crafted to escape the library folder
+        public Task<IReadOnlyList<MetadataCandidate>> SearchMoviesAsync(string name, int? year, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<MetadataCandidate>>([new MetadataCandidate { Name = "Rocket Club", Year = 2019, ProviderIds = new Dictionary<string, string> { ["Tmdb"] = "1]/../../../../srv/x" } }]);
+
+        public Task<string?> GetEpisodeTitleAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, int episode, CancellationToken cancellationToken)
+            => Task.FromResult<string?>(null);
+    }
+
+    [Fact]
+    public async Task A_crafted_provider_id_cannot_move_a_file_out_of_the_library()
+    {
+        var plan = await Planner(lookup: new HostileLookup()).PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+
+        var video = Assert.Single(plan.Operations, o => o.Kind == OperationKind.Video);
+        Assert.True(PathGuard.IsUnder(video.Destination, "/lib/Movies"));
+        Assert.DoesNotContain("..", video.Destination, StringComparison.Ordinal);
+        Assert.DoesNotContain("tmdbid", video.Destination, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_existing_show_outside_every_library_is_not_joined()
+    {
+        var plan = await Planner(existing: new Existing("/srv/elsewhere/Lantern")).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.Contains("outside the library", Assert.Single(plan.Review).Reason, StringComparison.Ordinal);
+        Assert.Empty(plan.Operations);
+    }
+
+    [Fact]
+    public async Task The_executor_refuses_a_plan_that_leaves_its_folders_before_moving_anything()
+    {
+        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv"), F("r/info.nfo", 10)], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+        var tampered = plan with { Operations = [plan.Operations[0], plan.Operations[1] with { Destination = "/etc/cron.d/x" }] };
+        var fs = new TidyFails();
+
+        var report = new PlanExecutor(fs, new FixedClock(DateTimeOffset.UnixEpoch)).Execute(tampered, Watch + "/r", "/log", dryRun: false);
+
+        Assert.False(report.Succeeded);
+        Assert.Empty(report.Completed);
+        Assert.Contains("outside the folders", report.Error, StringComparison.Ordinal);
     }
 }

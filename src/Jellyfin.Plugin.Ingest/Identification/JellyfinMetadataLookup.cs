@@ -66,7 +66,7 @@ public sealed class JellyfinMetadataLookup : IMetadataLookup
             {
                 Name = r.Name ?? string.Empty,
                 Year = r.ProductionYear,
-                ProviderIds = new Dictionary<string, string>(r.ProviderIds, StringComparer.OrdinalIgnoreCase),
+                ProviderIds = ProviderIdRules.Clean(r.ProviderIds),
                 Source = r.SearchProviderName,
                 ProviderRank = i,
             })];

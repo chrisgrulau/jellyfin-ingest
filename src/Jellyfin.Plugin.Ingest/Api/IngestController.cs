@@ -67,12 +67,13 @@ public class IngestController : ControllerBase
     /// <param name="name">Title to search for.</param>
     /// <param name="year">Year, if known.</param>
     /// <param name="series">Search for shows (otherwise films).</param>
+    /// <param name="review">The review the search is for; its results are stored there so one can be chosen.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Scored candidates, best first.</returns>
     [HttpGet("Search")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<IReadOnlyList<ScoredCandidate>>> Search([FromQuery, Required] string name, [FromQuery] int? year, [FromQuery] bool series, CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<ScoredCandidate>>> Search([FromQuery, Required] string name, [FromQuery] int? year, [FromQuery] bool series, [FromQuery] string? review, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -83,18 +84,23 @@ public class IngestController : ControllerBase
         var hits = series
             ? await lookup.SearchSeriesAsync(name.Trim(), year, cancellationToken).ConfigureAwait(false)
             : await lookup.SearchMoviesAsync(name.Trim(), year, cancellationToken).ConfigureAwait(false);
-        return MediaIdentifier.Merge(hits)
+        List<ScoredCandidate> results = [.. MediaIdentifier.Merge(hits)
             .Select(c => new ScoredCandidate(c with { IsSeries = series }, MediaIdentifier.Score(name, year, c)))
             .OrderByDescending(c => c.Score)
-            .Take(MaxSearchResults)
-            .ToList();
+            .Take(MaxSearchResults)];
+        if (!string.IsNullOrEmpty(review))
+        {
+            _state.SetSearchResults(review, results);
+        }
+
+        return results;
     }
 
     /// <summary>
     /// Files a release as the given title, into the given library, on the next sweep.
     /// </summary>
     /// <param name="id">Review id.</param>
-    /// <param name="request">The chosen title (one of the review's candidates or a search result) and library.</param>
+    /// <param name="request">Which of the review's candidates (or stored search results) and which library.</param>
     /// <returns>No content.</returns>
     [HttpPost("Reviews/{id}/Choose")]
     [Consumes(MediaTypeNames.Application.Json)]
@@ -110,6 +116,13 @@ public class IngestController : ControllerBase
             return NotFound();
         }
 
+        // Only a candidate the server produced for this review can be chosen, never one sent by the browser
+        var candidate = ReviewChoice.Pick(review, request.List, request.Index);
+        if (candidate is null)
+        {
+            return BadRequest("That candidate is no longer available; refresh and choose again.");
+        }
+
         // A library the watch folder already files into keeps its configured folder; any other uses its first folder.
         var watch = IngestPlugin.Instance?.Configuration.WatchFolders.FirstOrDefault(w => w.Path == review.WatchFolder);
         var path = watch is null ? null
@@ -117,14 +130,14 @@ public class IngestController : ControllerBase
         var library = IngestService.Libraries(_libraryManager.GetVirtualFolders())
             .FirstOrDefault(l => string.Equals(l.Id, request.LibraryId, StringComparison.OrdinalIgnoreCase));
         var targets = library is null ? null : LibraryRouting.TargetsOf(library, path);
-        var target = request.Candidate.IsSeries ? targets?.Tv : targets?.Films;
+        var target = candidate.IsSeries ? targets?.Tv : targets?.Films;
         if (target is null)
         {
-            return BadRequest(request.Candidate.IsSeries ? "A show can only be filed into a Shows or mixed library." : "A film can only be filed into a Movies or mixed library.");
+            return BadRequest(candidate.IsSeries ? "A show can only be filed into a Shows or mixed library." : "A film can only be filed into a Movies or mixed library.");
         }
 
-        _state.RequestRetry(id, new ChosenMatch(request.Candidate, target));
-        RecordDecision(review, $"Chose {Describe(request.Candidate)}, to be filed into {library!.Name}.");
+        _state.RequestRetry(id, new ChosenMatch(candidate, target));
+        RecordDecision(review, $"Chose {Describe(candidate)}, to be filed into {library!.Name}.");
         return NoContent();
     }
 
@@ -190,8 +203,11 @@ public class IngestController : ControllerBase
 /// </summary>
 public sealed record ChooseRequest
 {
-    /// <summary>Gets the chosen title.</summary>
-    public required MetadataCandidate Candidate { get; init; }
+    /// <summary>Gets which list the choice is from: <c>suggested</c> (the review's candidates) or <c>search</c>.</summary>
+    public required string List { get; init; }
+
+    /// <summary>Gets the position of the chosen candidate in that list.</summary>
+    public required int Index { get; init; }
 
     /// <summary>Gets the id of the library to file into.</summary>
     public required string LibraryId { get; init; }

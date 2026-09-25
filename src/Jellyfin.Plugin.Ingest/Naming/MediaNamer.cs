@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using Jellyfin.Plugin.Ingest.Identification;
 
 namespace Jellyfin.Plugin.Ingest.Naming;
 
@@ -20,8 +21,9 @@ public static class MediaNamer
     {
         ArgumentNullException.ThrowIfNull(movie);
 
-        var id = !string.IsNullOrWhiteSpace(movie.TmdbId) ? $"[tmdbid-{movie.TmdbId}]"
-            : !string.IsNullOrWhiteSpace(movie.ImdbId) ? $"[imdbid-{movie.ImdbId}]"
+        // Only well-formed ids reach a folder name (defence in depth: they are also cleaned where they enter)
+        var id = ProviderIdRules.IsValid("Tmdb", movie.TmdbId) ? $"[tmdbid-{movie.TmdbId}]"
+            : ProviderIdRules.IsValid("Imdb", movie.ImdbId) ? $"[imdbid-{movie.ImdbId}]"
             : null;
         return Compose(movie.Title, movie.Year, id);
     }
@@ -61,12 +63,12 @@ public static class MediaNamer
         ArgumentNullException.ThrowIfNull(series);
 
         var ids = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(series.TvdbId))
+        if (ProviderIdRules.IsValid("Tvdb", series.TvdbId))
         {
             ids.Append(CultureInfo.InvariantCulture, $"[tvdbid-{series.TvdbId}]");
         }
 
-        if (!string.IsNullOrWhiteSpace(series.TmdbId))
+        if (ProviderIdRules.IsValid("Tmdb", series.TmdbId))
         {
             ids.Append(ids.Length > 0 ? " " : string.Empty).Append(CultureInfo.InvariantCulture, $"[tmdbid-{series.TmdbId}]");
         }

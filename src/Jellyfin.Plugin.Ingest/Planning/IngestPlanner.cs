@@ -56,6 +56,7 @@ public sealed class IngestPlanner
     private readonly Func<string, string?> _readText;
     private readonly TimeProvider _clock;
     private readonly IExistingMedia? _existing;
+    private readonly Func<string, bool> _isInsideLibrary;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IngestPlanner"/> class.
@@ -65,8 +66,11 @@ public sealed class IngestPlanner
     /// <param name="readText">Reads a subtitle file's text for language detection; may return <c>null</c>.</param>
     /// <param name="clock">Clock for dating quarantine folders.</param>
     /// <param name="existing">What's already on the server, so new episodes join their show and nothing is filed twice (optional).</param>
-    public IngestPlanner(MediaIdentifier identifier, Func<string, bool> exists, Func<string, string?> readText, TimeProvider clock, IExistingMedia? existing = null)
+    /// <param name="isInsideLibrary">Whether a folder is inside one of the server's library folders; an existing show's
+    /// folder must be, before anything is filed into it (optional; without it, existing shows are not joined).</param>
+    public IngestPlanner(MediaIdentifier identifier, Func<string, bool> exists, Func<string, string?> readText, TimeProvider clock, IExistingMedia? existing = null, Func<string, bool>? isInsideLibrary = null)
     {
+        _isInsideLibrary = isInsideLibrary ?? (_ => false);
         _existing = existing;
         _identifier = identifier ?? throw new ArgumentNullException(nameof(identifier));
         _exists = exists ?? throw new ArgumentNullException(nameof(exists));
@@ -136,6 +140,7 @@ public sealed class IngestPlanner
 
             var ext = Path.GetExtension(video);
             string destination, owner;
+            string? libraryRoot;
             if (result.Episode is { } ep)
             {
                 // A new episode of a show that's already on the server joins it, whichever library it's in (unless a
@@ -149,6 +154,7 @@ public sealed class IngestPlanner
                 }
 
                 owner = existingSeries ?? Path.Combine(target!.Root, MediaNamer.SeriesFolderName(ep.Series));
+                libraryRoot = existingSeries is null ? target!.Root : null;
 
                 // An existing show keeps its own season folder naming rather than getting a second "Season NN"
                 var seasonFolder = (existingSeries is null ? null : _existing?.FindSeasonFolder(existingSeries, ep.Season))
@@ -180,6 +186,7 @@ public sealed class IngestPlanner
                 }
 
                 owner = Path.Combine(target.Root, MediaNamer.MovieFolderName(movie));
+                libraryRoot = target.Root;
                 destination = Path.Combine(target.Root, MediaNamer.MovieRelativePath(movie, ext));
                 var duplicate = _existing?.FindMovie(MovieIds(movie), movie.Edition, destination);
                 if (duplicate is not null)
@@ -187,6 +194,15 @@ public sealed class IngestPlanner
                     review.Add(new ReviewItem(Abs(video), $"{movie.Title}{(movie.Edition is null ? string.Empty : " (" + movie.Edition + ")")} is already on the server: {duplicate}") { Candidates = result.Candidates });
                     continue;
                 }
+            }
+
+            // Containment: the film or show folder must be inside its library (an existing show's folder inside one of
+            // the server's libraries), and the file inside that folder, whatever the names and ids contain
+            var ownerInside = libraryRoot is null ? _isInsideLibrary(owner) : PathGuard.IsUnder(owner, libraryRoot);
+            if (!ownerInside || !PathGuard.IsUnder(destination, owner))
+            {
+                review.Add(new ReviewItem(Abs(video), $"Refused: the destination would be outside the library: {destination}") { Candidates = result.Candidates });
+                continue;
             }
 
             if (Taken(destination))
@@ -218,6 +234,12 @@ public sealed class IngestPlanner
                     destination = Path.Combine(folder, string.Create(CultureInfo.InvariantCulture, $"{name} ({n}){Path.GetExtension(extra)}"));
                 }
 
+                if (!PathGuard.IsUnder(destination, owners.First()))
+                {
+                    review.Add(new ReviewItem(Abs(extra), $"Refused: the destination would be outside the library: {destination}"));
+                    continue;
+                }
+
                 planned.Add(destination);
                 ops.Add(new PlannedOperation(OperationKind.Extra, Abs(extra), destination));
             }
@@ -239,6 +261,11 @@ public sealed class IngestPlanner
             {
                 var name = SubtitleNamer.SidecarName(stem, sub.Track, Path.GetExtension(sub.RelativePath), n => Taken(Path.Combine(dir, n)));
                 var destination = Path.Combine(dir, name);
+                if (!PathGuard.IsUnder(destination, dir))
+                {
+                    return new IngestPlan { ReleaseName = releaseName, Review = [new ReviewItem(Abs(sub.RelativePath), $"Refused: the subtitle destination would be outside the library: {destination}")] };
+                }
+
                 planned.Add(destination);
                 ops.Add(new PlannedOperation(OperationKind.Subtitle, Abs(sub.RelativePath), destination));
             }
@@ -255,11 +282,16 @@ public sealed class IngestPlanner
                 destination = Path.Combine(quarantine, string.Create(CultureInfo.InvariantCulture, $"{rel} ({n})"));
             }
 
+            if (!PathGuard.IsUnder(destination, quarantine))
+            {
+                return new IngestPlan { ReleaseName = releaseName, Review = [new ReviewItem(Abs(rel), $"Refused: the quarantine destination would be outside the quarantine folder: {destination}")] };
+            }
+
             planned.Add(destination);
             ops.Add(new PlannedOperation(OperationKind.Quarantine, Abs(rel), destination));
         }
 
-        return new IngestPlan { ReleaseName = releaseName, Operations = ops };
+        return new IngestPlan { ReleaseName = releaseName, Operations = ops, AllowedRoots = [.. owners, quarantine] };
     }
 
     private static Dictionary<string, string> MovieIds(MovieIdentity movie)

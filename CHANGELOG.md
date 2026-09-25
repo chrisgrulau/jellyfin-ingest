@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Security
+- Provider ids are validated wherever they enter (ING-02): TMDb/TheTVDB must be digits and IMDb `tt` + digits, and the
+  naming engine refuses any other id in a folder name, so an id crafted by a metadata plugin, an NFO file or a library
+  edit can't steer a file outside the library.
+- Choosing a title on the review screen only accepts a candidate the server itself produced for that review (by list
+  and position); search results are stored with the review. A candidate sent by the browser is never trusted.
+- Every destination is checked to stay inside its film or show folder (inside its library) or the quarantine folder,
+  both when planning and again before anything is moved; an existing show is only joined if it is inside one of the
+  server's libraries. A plan that fails the check moves nothing.
 - Symbolic links and junctions are never followed (ING-01): nothing outside a watch folder can become part of a
   release, be moved, quarantined or purged, and link loops can't hang the sweep. A link at the top of a watch folder is
   held for review with an explanation.
