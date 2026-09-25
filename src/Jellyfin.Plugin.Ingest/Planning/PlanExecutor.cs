@@ -55,6 +55,9 @@ public sealed record ExecutionReport
     /// <summary>Gets the failure message, if any.</summary>
     public string? Error { get; init; }
 
+    /// <summary>Gets a warning about a non-essential step that failed after every move succeeded (e.g. tidying up).</summary>
+    public string? Warning { get; init; }
+
     /// <summary>Gets a value indicating whether nothing was changed because it was a dry run.</summary>
     public bool DryRun { get; init; }
 
@@ -141,12 +144,21 @@ public sealed class PlanExecutor
             }
         }
 
+        // Tidying up is best-effort: every move has succeeded, so a failure here is a warning, not a failed ingest
+        string? warning = null;
         if (_fs.Exists(releaseRoot) && !done.Any(d => string.Equals(d.Source, releaseRoot, StringComparison.Ordinal)))
         {
-            _fs.DeleteEmptyDirectories(releaseRoot);
+            try
+            {
+                _fs.DeleteEmptyDirectories(releaseRoot);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                warning = ex.Message;
+            }
         }
 
-        return new ExecutionReport { Completed = done };
+        return new ExecutionReport { Completed = done, Warning = warning };
     }
 }
 
@@ -178,7 +190,13 @@ public sealed class PhysicalFileOperations : IFileOperations
             return;
         }
 
-        foreach (var dir in Directory.EnumerateDirectories(path, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
+        // Never walk into or delete through a symbolic link or junction
+        if (new DirectoryInfo(path).LinkTarget is not null)
+        {
+            return;
+        }
+
+        foreach (var dir in Directory.EnumerateDirectories(path, "*", Jellyfin.Plugin.Ingest.Service.ReleaseScanner.DeepWalk).OrderByDescending(d => d.Length))
         {
             if (!Directory.EnumerateFileSystemEntries(dir).Any())
             {

@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- Symbolic links and junctions are never followed (ING-01): nothing outside a watch folder can become part of a
+  release, be moved, quarantined or purged, and link loops can't hang the sweep. A link at the top of a watch folder is
+  held for review with an explanation.
+
+### Fixed
+- One unreadable watch folder or sub-folder no longer stops every other watch folder (ING-05); failures are reported
+  once per distinct error. A file that vanishes mid-scan (a download renamed from `.part`) only defers its release.
+- Quarantining a whole release on request can no longer fail the entire sweep; a failure is reported against it.
+- A failure tidying up empty folders after every move succeeded is logged as a warning, not reported as a failed ingest.
+- The quarantine folder is recognised even when configured with a trailing slash (part of ING-13).
+
 ### Added
 - Duplicate guard (PROC-01): an episode or film that's already on the server (any library, any file name or
   container, or not yet scanned) goes to review with the existing file's path instead of being filed as a second
