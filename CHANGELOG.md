@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.4-alpha] - 2026-09-25
+
 ### Security
 - Folder guardrails (ING-03): a watch folder may not be a filesystem root, overlap any library folder, Jellyfin's own
   folders or another watch folder; a custom quarantine may not overlap a library or Jellyfin's folders, or contain a
