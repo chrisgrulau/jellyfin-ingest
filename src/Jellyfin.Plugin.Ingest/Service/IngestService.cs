@@ -290,7 +290,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     LogReleaseFailed(_logger, review.Release, ex);
-                    ReportFailure(watch, review.Release, "Quarantine failed: " + ex.Message, []);
+                    ReportFailure(watch, review.Release, "Quarantine failed: " + ex.Message, [], review.RequestVersion);
                 }
             }
             else
@@ -302,9 +302,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
         foreach (var release in tracker.Observe(snapshot, _clock.GetUtcNow(), TimeSpan.FromSeconds(Math.Max(5, config.SettleSeconds))))
         {
             ct.ThrowIfCancellationRequested();
+
+            // The request this planning acts on; one made while planning runs is kept for the next sweep
+            var seen = _state.GetReview(IngestStateStore.ReviewId(watch.Path, release))?.RequestVersion ?? 0;
             try
             {
-                await IngestAsync(plugin.DataFolderPath, config, watch, release, snapshot[release], targets, quarantine, ct).ConfigureAwait(false);
+                await IngestAsync(plugin.DataFolderPath, config, watch, release, snapshot[release], targets, quarantine, seen, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -315,7 +318,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
 #pragma warning restore CA1031
             {
                 LogReleaseFailed(_logger, release, ex);
-                ReportFailure(watch, release, ex.Message, []);
+                ReportFailure(watch, release, ex.Message, [], seen);
             }
 
             tracker.MarkHandled(release);
@@ -425,10 +428,17 @@ public sealed partial class IngestService : IHostedService, IDisposable
         IReadOnlyList<ReleaseFile> files,
         LibraryTargets targets,
         string quarantine,
+        int seenVersion,
         CancellationToken ct)
     {
         var id = IngestStateStore.ReviewId(watch.Path, release);
         var previous = _state.GetReview(id);
+        if (previous is not null && previous.RequestVersion != seenVersion)
+        {
+            // A decision arrived between the sweep noticing the release and planning it: plan with that decision
+            seenVersion = previous.RequestVersion;
+        }
+
         // Titles anywhere on the server count as "already in the library": a show kept in another library is still
         // strong evidence, and its new episodes join it there.
         var identifier = new MediaIdentifier(
@@ -476,7 +486,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 Time = _clock.GetUtcNow(),
                 Items = items,
                 Candidates = DistinctCandidates(plan.Review),
-            });
+            },
+            seenVersion);
             return;
         }
 
@@ -511,7 +522,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 : report.RollbackProblems.Count == 0
                     ? string.Create(CultureInfo.InvariantCulture, $"Nothing was filed: {error} ({report.RolledBack.Count} completed move(s) were undone.)")
                     : string.Create(CultureInfo.InvariantCulture, $"Failed and couldn't be fully undone: {error}. Needs attention: {string.Join("; ", report.RollbackProblems)}");
-            ReportFailure(watch, release, summary, report.Completed);
+            ReportFailure(watch, release, summary, report.Completed, seenVersion);
             return;
         }
 
@@ -528,7 +539,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         if (config.DryRun && previous?.Chosen is { } chosen)
         {
             // Keep the decision so the release files the same way once dry run is turned off.
-            _state.MarkPlannedInDryRun(id, $"Dry run: planned as {chosen.Candidate.Name}{(chosen.Candidate.Year is { } y ? $" ({y})" : string.Empty)}; it will be filed once dry run is off.");
+            _state.MarkPlannedInDryRun(id, $"Dry run: planned as {chosen.Candidate.Name}{(chosen.Candidate.Year is { } y ? $" ({y})" : string.Empty)}; it will be filed once dry run is off.", seenVersion);
         }
         else
         {
@@ -603,7 +614,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private static List<string> Describe(string watchFolder, IEnumerable<PlannedOperation> operations)
         => [.. operations.Select(o => $"{o.Kind}: {Path.GetRelativePath(watchFolder, o.Source)} → {o.Destination}")];
 
-    private void ReportFailure(WatchFolder watch, string release, string error, IReadOnlyList<PlannedOperation> completed)
+    private void ReportFailure(WatchFolder watch, string release, string error, IReadOnlyList<PlannedOperation> completed, int? seenVersion = null)
     {
         _state.Record(new ActivityEntry
         {
@@ -621,7 +632,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
             Release = release,
             Time = _clock.GetUtcNow(),
             Items = [new PendingReviewItem(release, error)],
-        });
+        },
+        seenVersion);
     }
 
     private void QuarantineRelease(PluginConfiguration config, WatchFolder watch, PendingReview review, IReadOnlyList<ReleaseFile> files, string quarantine)
@@ -670,7 +682,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         if (error is not null)
         {
             LogExecutionFailed(_logger, review.Release, error);
-            ReportFailure(watch, review.Release, $"Quarantine stopped after {moved.Count} of {files.Count} files: {error}", []);
+            ReportFailure(watch, review.Release, $"Quarantine stopped after {moved.Count} of {files.Count} files: {error}", [], review.RequestVersion);
             return;
         }
 
@@ -687,7 +699,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         });
         if (config.DryRun)
         {
-            _state.ClearRequest(review.Id);
+            _state.ClearRequest(review.Id, review.RequestVersion);
         }
         else
         {

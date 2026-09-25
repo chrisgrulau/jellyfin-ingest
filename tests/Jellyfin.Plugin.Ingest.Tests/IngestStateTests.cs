@@ -194,7 +194,7 @@ public sealed class IngestStateTests : IDisposable
         store.PutReview(r);
         store.RequestRetry(r.Id, new ChosenMatch(r.Candidates[0].Candidate, new LibraryTarget("/lib/Movies", IsTv: false)));
 
-        store.MarkPlannedInDryRun(r.Id, "Dry run: planned.");
+        store.MarkPlannedInDryRun(r.Id, "Dry run: planned.", store.GetReview(r.Id)!.RequestVersion);
 
         var review = store.GetReview(r.Id)!;
         Assert.Equal("Dry run: planned.", Assert.Single(review.Items).Reason);
@@ -278,5 +278,42 @@ public sealed class IngestStateTests : IDisposable
         }
 
         Assert.Equal("{}", File.ReadAllText(StatePath));
+    }
+
+    [Fact]
+    public void A_decision_made_while_planning_runs_is_kept()
+    {
+        var store = new IngestStateStore(StatePath);
+        var r = Review("Quiet.Harbour", Cand("Quiet Harbour", 2010, "1", 0.9));
+        store.PutReview(r);
+        store.RequestRetry(r.Id, null);
+
+        // Planning starts from this request …
+        var seen = store.GetReview(r.Id)!.RequestVersion;
+
+        // … and while it runs, someone asks for quarantine
+        store.RequestQuarantine(r.Id);
+        store.PutReview(r, seen);
+
+        Assert.Equal(ReviewRequest.Quarantine, store.GetReview(r.Id)!.Request);
+
+        // Acting on the latest request clears it
+        store.PutReview(r, store.GetReview(r.Id)!.RequestVersion);
+        Assert.Equal(ReviewRequest.None, store.GetReview(r.Id)!.Request);
+    }
+
+    [Fact]
+    public void Clearing_an_old_request_leaves_a_newer_one()
+    {
+        var store = new IngestStateStore(StatePath);
+        var r = Review("Quiet.Harbour");
+        store.PutReview(r);
+        store.RequestQuarantine(r.Id);
+        var seen = store.GetReview(r.Id)!.RequestVersion;
+        store.RequestRetry(r.Id, null);
+
+        store.ClearRequest(r.Id, seen);
+
+        Assert.Equal(ReviewRequest.Retry, store.GetReview(r.Id)!.Request);
     }
 }

@@ -115,6 +115,12 @@ public sealed record PendingReview
 
     /// <summary>Gets the pending request.</summary>
     public ReviewRequest Request { get; init; }
+
+    /// <summary>
+    /// Gets a counter that goes up with every request, so planning (which takes a while) only clears the request it
+    /// started from and never one made while it was running.
+    /// </summary>
+    public int RequestVersion { get; init; }
 }
 
 /// <summary>
@@ -246,20 +252,30 @@ public sealed partial class IngestStateStore
     }
 
     /// <summary>
-    /// Adds or refreshes a release's review. A title chosen earlier is kept; any request is cleared (it has been acted on).
+    /// Adds or refreshes a release's review. A title chosen earlier is kept. The request that was acted on is cleared;
+    /// one made since (a newer <see cref="PendingReview.RequestVersion"/>) is kept, so it is acted on next.
     /// </summary>
-    /// <param name="review">The review (its <see cref="PendingReview.Chosen"/> and <see cref="PendingReview.Request"/> are ignored).</param>
-    public void PutReview(PendingReview review)
+    /// <param name="review">The review (its <see cref="PendingReview.Chosen"/>, <see cref="PendingReview.Request"/> and
+    /// <see cref="PendingReview.RequestVersion"/> are ignored).</param>
+    /// <param name="actedOnVersion">The request version the caller read before acting; <c>null</c> clears any request.</param>
+    public void PutReview(PendingReview review, int? actedOnVersion = null)
     {
         ArgumentNullException.ThrowIfNull(review);
         lock (_lock)
         {
             var s = Load();
             var i = s.Reviews.FindIndex(r => r.Id == review.Id);
-            var chosen = i >= 0 ? s.Reviews[i].Chosen : null;
-            var searched = i >= 0 ? s.Reviews[i].SearchResults : [];
+            var existing = i >= 0 ? s.Reviews[i] : null;
+            var newer = existing is not null && actedOnVersion is { } v && existing.RequestVersion != v;
             var candidates = review.Candidates.Take(MaxCandidates).ToList();
-            var updated = review with { Candidates = candidates, Chosen = chosen, SearchResults = searched, Request = ReviewRequest.None };
+            var updated = review with
+            {
+                Candidates = candidates,
+                Chosen = existing?.Chosen,
+                SearchResults = existing?.SearchResults ?? [],
+                Request = newer ? existing!.Request : ReviewRequest.None,
+                RequestVersion = existing?.RequestVersion ?? 0,
+            };
             if (i >= 0)
             {
                 s.Reviews[i] = updated;
@@ -293,7 +309,7 @@ public sealed partial class IngestStateStore
     /// <param name="chosen">The chosen title and library, or <c>null</c> to keep searching (clears an earlier choice).</param>
     /// <returns><c>false</c> if there is no such review.</returns>
     public bool RequestRetry(string id, ChosenMatch? chosen)
-        => Update(id, r => r with { Chosen = chosen, Request = ReviewRequest.Retry });
+        => Update(id, r => r with { Chosen = chosen, Request = ReviewRequest.Retry, RequestVersion = r.RequestVersion + 1 });
 
     /// <summary>
     /// Stores the results of a title search made for a review, replacing any earlier ones.
@@ -310,14 +326,15 @@ public sealed partial class IngestStateStore
     /// <param name="id">Review id.</param>
     /// <returns><c>false</c> if there is no such review.</returns>
     public bool RequestQuarantine(string id)
-        => Update(id, r => r with { Request = ReviewRequest.Quarantine });
+        => Update(id, r => r with { Request = ReviewRequest.Quarantine, RequestVersion = r.RequestVersion + 1 });
 
     /// <summary>
-    /// Clears a review's pending request, keeping everything else.
+    /// Clears a review's pending request, keeping everything else, unless a newer request has been made since.
     /// </summary>
     /// <param name="id">Review id.</param>
-    public void ClearRequest(string id)
-        => Update(id, r => r with { Request = ReviewRequest.None });
+    /// <param name="actedOnVersion">The request version that was acted on.</param>
+    public void ClearRequest(string id, int actedOnVersion)
+        => Update(id, r => r.RequestVersion == actedOnVersion ? r with { Request = ReviewRequest.None } : r);
 
     /// <summary>
     /// Marks a review as planned in dry run: its old reasons no longer apply, so they are replaced by a note and the
@@ -325,8 +342,9 @@ public sealed partial class IngestStateStore
     /// </summary>
     /// <param name="id">Review id.</param>
     /// <param name="note">What was planned.</param>
-    public void MarkPlannedInDryRun(string id, string note)
-        => Update(id, r => r with { Request = ReviewRequest.None, Items = [new PendingReviewItem(r.Release, note)] });
+    /// <param name="actedOnVersion">The request version that was acted on (a newer request is kept).</param>
+    public void MarkPlannedInDryRun(string id, string note, int actedOnVersion)
+        => Update(id, r => r with { Request = r.RequestVersion == actedOnVersion ? ReviewRequest.None : r.Request, Items = [new PendingReviewItem(r.Release, note)] });
 
     /// <summary>
     /// Removes a review (the release was filed, quarantined or has gone from the watch folder).
