@@ -1,5 +1,7 @@
 # Shoal Ingest
 
+<p align="center"><img src="assets/shoal-ingest.png" alt="Shoal Ingest icon" width="480"></p>
+
 Part of **Shoal**, a family of Jellyfin plugins that work together: [Shoal
 Ingest](https://github.com/chrisgrulau/jellyfin-ingest) files new media into your libraries, [Shoal
 Subtitles](https://github.com/chrisgrulau/jellyfin-subtitles) finds, checks and synchronises subtitles, and [Shoal
