@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Quarantine** section on the plugin page: the dated quarantine folders, newest first, with each release's files and
+  sizes and the day each folder is deleted (folders Ingest didn't create are shown as never deleted). Read-only, from the
+  new `GET /Ingest/Quarantine` (administrators only); links are never followed and at most 2,000 files per folder are listed.
+
 ## [0.1.6-alpha] - 2026-09-25
 
 ### Changed

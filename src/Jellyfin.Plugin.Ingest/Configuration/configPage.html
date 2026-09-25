@@ -64,6 +64,14 @@
       #IngestConfigPage .badge.Decision { background: rgba(150,110,220,.28); }
       #IngestConfigPage .badge.Failed { background: rgba(220,53,69,.30); }
       #IngestConfigPage .badge.Quarantined, #IngestConfigPage .badge.Purged { background: rgba(128,128,128,.30); }
+      #IngestConfigPage .ingest-q { padding: .75em 1em; margin: .75em 0; border-radius: 6px; background: rgba(128,128,128,.10); }
+      #IngestConfigPage .ingest-q h4 { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .25em 1em; }
+      #IngestConfigPage .ingest-q details { margin: .4em 0 0; }
+      #IngestConfigPage .ingest-q summary { cursor: pointer; word-break: break-word; }
+      #IngestConfigPage .ingest-q ul { list-style: none; margin: .25em 0 .5em; padding-left: 1.2em; font-size: .9em; }
+      #IngestConfigPage .ingest-q li { display: flex; justify-content: space-between; gap: 1em; padding: .1em 0; }
+      #IngestConfigPage .ingest-q li span:first-child { min-width: 0; word-break: break-word; }
+      #IngestConfigPage .ingest-q .size { font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .75; }
       #IngestConfigPage .ingest-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; flex-wrap: wrap; }
       @media (max-width: 720px) {
         #IngestConfigPage .wf-top, #IngestConfigPage .wf-dest { grid-template-columns: 1fr; }
@@ -94,6 +102,10 @@
         <h3 class="sectionTitle" style="margin-top:2em">Recent activity</h3>
         <div class="ingest-filters" id="ActivityFilters" role="group" aria-label="Filter activity"></div>
         <ul class="ingest-activity" id="Activity"></ul>
+
+        <h3 class="sectionTitle" style="margin-top:2em">Quarantine <span class="ingest-muted" id="QuarantineCount"></span></h3>
+        <p class="ingest-muted" id="QuarantineHint">Clutter from filed releases, and releases quarantined from review, kept by date until the retention period ends.</p>
+        <div id="Quarantine"></div>
 
         <form id="IngestConfigForm">
           <h3 class="sectionTitle" style="margin-top:2em" id="WatchFoldersHead">Watch folders</h3>
@@ -395,6 +407,49 @@
           });
         }
 
+        // ---- Quarantine ----
+        function size(b) {
+          var u = ['bytes', 'KB', 'MB', 'GB', 'TB'], i = 0;
+          while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+          return (i ? b.toFixed(b < 10 ? 1 : 0) : b) + ' ' + u[i];
+        }
+
+        function day(ymd) {
+          var p = String(ymd).split('-');
+          return new Date(+p[0], +p[1] - 1, +p[2]).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+
+        function plural(n, one) { return n + ' ' + one + (n === 1 ? '' : 's'); }
+
+        function renderQuarantine(folders) {
+          var box = page.querySelector('#Quarantine');
+          var open = Array.prototype.map.call(box.querySelectorAll('details[open]'), function (d) { return d.getAttribute('data-k'); });
+          var roots = folders.map(function (f) { return f.Root; }).filter(function (r, i, a) { return a.indexOf(r) === i; });
+          var files = 0, bytes = 0;
+          folders.forEach(function (f) { files += f.FileCount; bytes += f.Bytes; });
+          page.querySelector('#QuarantineCount').textContent = folders.length ? '(' + plural(files, 'file') + ', ' + size(bytes) + ')' : '';
+          if (!folders.length) { box.innerHTML = '<p class="ingest-muted">Nothing in quarantine.</p>'; return; }
+          box.innerHTML = folders.map(function (f) {
+            var fate = f.Managed ? 'deleted on ' + day(f.DeletesOn) : 'not created by Ingest, so never deleted';
+            return '<div class="ingest-q"><h4><span>' + esc(day(f.Date)) + '</span><span class="ingest-muted">' + plural(f.FileCount, 'file') + ', ' + size(f.Bytes) + ', ' + esc(fate) + '</span></h4>' +
+              (roots.length > 1 ? '<div class="ingest-muted">' + esc(f.Root) + '</div>' : '') +
+              f.Releases.map(function (r) {
+                var k = f.Root + '|' + f.Date + '|' + r.Name;
+                var more = r.FileCount - r.Files.length;
+                return '<details data-k="' + esc(k) + '"><summary>' + esc(r.Name) + ' <span class="ingest-muted">' + plural(r.FileCount, 'file') + ', ' + size(r.Bytes) + '</span></summary><ul>' +
+                  r.Files.map(function (x) { return '<li><span>' + esc(x.Path) + '</span><span class="size">' + size(x.Bytes) + '</span></li>'; }).join('') +
+                  (more > 0 ? '<li class="ingest-muted"><span>and ' + plural(more, 'more file') + '</span></li>' : '') + '</ul></details>';
+              }).join('') + '</div>';
+          }).join('');
+          Array.prototype.forEach.call(box.querySelectorAll('details'), function (d) { if (open.indexOf(d.getAttribute('data-k')) >= 0) { d.open = true; } });
+        }
+
+        function loadQuarantine() {
+          return ApiClient.getJSON(ApiClient.getUrl('Ingest/Quarantine')).then(renderQuarantine, function () {
+            page.querySelector('#Quarantine').innerHTML = '<p class="ingest-muted">The quarantine couldn\'t be read.</p>';
+          });
+        }
+
         function failed(xhr) {
           var p = xhr && xhr.text ? xhr.text() : Promise.resolve('');
           return p.then(function (t) {
@@ -460,7 +515,7 @@
           var b = e.target.closest('button');
           if (b) { filter = b.getAttribute('data-f'); renderActivity(); }
         });
-        page.querySelector('#RefreshStatus').addEventListener('click', function () { if (document.activeElement) { document.activeElement.blur(); } loadStatus(); });
+        page.querySelector('#RefreshStatus').addEventListener('click', function () { if (document.activeElement) { document.activeElement.blur(); } loadStatus(); loadQuarantine(); });
 
         page.addEventListener('pagehide', function () { if (statusTimer) { clearInterval(statusTimer); statusTimer = null; } });
 
@@ -481,6 +536,7 @@
             syncBanner();
             Dashboard.hideLoadingMsg();
             loadStatus();
+            loadQuarantine();
             if (!statusTimer) { statusTimer = setInterval(function () { if (!document.hidden && !busyCard) { loadStatus(); } }, 15000); }
           });
         });

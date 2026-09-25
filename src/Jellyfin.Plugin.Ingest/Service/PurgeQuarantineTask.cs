@@ -61,11 +61,7 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
 
         // Never purge in a quarantine that breaks the folder rules (e.g. one pointed at a library)
         var problems = IngestService.FolderProblems(config, IngestService.Libraries(_libraryManager.GetVirtualFolders()), _paths);
-        var roots = config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path))
-            .Where(w => !problems.Any(p => PathGuard.SamePath(p.Folder, w.Path) || PathGuard.SamePath(p.Folder, config.QuarantinePath)))
-            .Select(w => PathGuard.Normalise(IngestService.QuarantineFor(config, w)))
-            .Distinct(PathGuard.Comparer)
-            .ToList();
+        var roots = IngestService.SafeQuarantineRoots(config, problems);
         var retention = Math.Max(1, config.QuarantineRetentionDays);
         var today = DateOnly.FromDateTime(DateTime.Now);
         for (var i = 0; i < roots.Count; i++)

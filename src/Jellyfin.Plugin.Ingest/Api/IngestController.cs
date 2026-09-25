@@ -66,6 +66,30 @@ public class IngestController : ControllerBase
     }
 
     /// <summary>
+    /// Lists what is in quarantine: the dated folders, newest first, with their releases and files, and when each is
+    /// deleted. Quarantine folders that break the folder rules are not listed.
+    /// </summary>
+    /// <returns>The dated folders.</returns>
+    [HttpGet("Quarantine")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<IReadOnlyList<QuarantineFolder>> GetQuarantine()
+    {
+        var config = IngestPlugin.Instance?.Configuration;
+        if (config is null)
+        {
+            return new List<QuarantineFolder>();
+        }
+
+        var problems = IngestService.FolderProblems(config, IngestService.Libraries(_libraryManager.GetVirtualFolders()), _paths);
+        var retention = Math.Max(1, config.QuarantineRetentionDays);
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        return IngestService.SafeQuarantineRoots(config, problems)
+            .SelectMany(root => QuarantineListing.List(root, today, retention))
+            .OrderByDescending(f => f.Date, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
     /// Checks proposed watch and quarantine folders against the safety rules (used by the settings page before saving;
     /// the service applies the same rules and never sweeps an unsafe folder).
     /// </summary>
