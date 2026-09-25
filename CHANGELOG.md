@@ -27,6 +27,12 @@ All notable changes to this project are documented here. The format follows
   held for review with an explanation.
 
 ### Fixed
+- Moves are crash-safe and all-or-nothing (ING-06): each file moves to a hidden temporary name in its destination
+  folder (a rename, or a copy across file systems), is size-verified, then renamed into place, so a crash or power cut
+  mid-copy can never leave a truncated file under a real name in the library. Every move is logged before and after;
+  a failure undoes the moves already made (and removes folders it created); moves interrupted by a crash are finished
+  or discarded at the next start. Free space is checked before a cross-file-system copy, and a shutdown stops between
+  files.
 - A release is only processed once nothing in it has been written for the settle time (ING-04): file write times are
   part of the settle check, so downloads into pre-allocated, full-size files are no longer mistaken for finished ones.
   Write times are compared only with their own earlier values, so clock differences on network shares don't matter.

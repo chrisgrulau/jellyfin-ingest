@@ -181,6 +181,10 @@ public class PlanningTests
         }
 
         public void AppendLine(string path, string line) => Log.Add(line);
+
+        public void Delete(string path) => Files.Remove(path);
+
+        public bool HasRoomFor(string source, string destinationFolder, long bytes) => true;
     }
 
     [Fact]
@@ -204,7 +208,8 @@ public class PlanningTests
         var real = executor.Execute(plan, "/drop/r", "/log.jsonl", dryRun: false);
         Assert.True(real.Succeeded);
         Assert.Equal(100, fs.Length("/lib/A/a.mkv"));
-        Assert.Equal(2, fs.Log.Count);
+        Assert.Equal(4, fs.Log.Count); // an intent and a done record per move
+        Assert.DoesNotContain(fs.Files.Keys, k => k.Contains(".partial", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -420,6 +425,10 @@ public class PlanningTests
         }
 
         public void DeleteEmptyDirectories(string path) => throw new IOException("Directory not empty");
+
+        public void Delete(string path) => _files.Remove(path);
+
+        public bool HasRoomFor(string source, string destinationFolder, long bytes) => true;
     }
 
     [Fact]

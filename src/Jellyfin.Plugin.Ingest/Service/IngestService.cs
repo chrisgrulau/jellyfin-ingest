@@ -193,6 +193,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         if (!_markersMigrated)
         {
             _markersMigrated = true;
+            RecoverInterruptedMoves(plugin.DataFolderPath);
             MigrateQuarantineMarkers(plugin.DataFolderPath, config, problems);
         }
         foreach (var watch in config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)))
@@ -333,6 +334,41 @@ public sealed partial class IngestService : IHostedService, IDisposable
         return Path.Combine(quarantine, first);
     }
 
+    // Moves cut short by a crash or restart are finished (the file had fully arrived) or discarded (the original is intact)
+    private void RecoverInterruptedMoves(string dataFolder)
+    {
+        var log = Path.Combine(dataFolder, "actions.jsonl");
+        if (!File.Exists(log))
+        {
+            return;
+        }
+
+        try
+        {
+            var results = new PlanExecutor(new PhysicalFileOperations(), _clock).Recover([.. File.ReadLines(log)], log);
+            foreach (var result in results)
+            {
+                LogRecovery(_logger, result);
+            }
+
+            if (results.Count > 0)
+            {
+                _state.Record(new ActivityEntry
+                {
+                    Time = _clock.GetUtcNow(),
+                    Status = results.Any(r => r.StartsWith("Needs attention", StringComparison.Ordinal)) ? ActivityStatus.Failed : ActivityStatus.Filed,
+                    Release = "Interrupted moves",
+                    Summary = string.Create(CultureInfo.InvariantCulture, $"Recovered {results.Count} move(s) interrupted by a restart."),
+                    Details = results,
+                });
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            LogMarkerMigrationFailed(_logger, ex);
+        }
+    }
+
     // Dated quarantine folders created before markers existed are marked if the action log shows Ingest filled them
     private void MigrateQuarantineMarkers(string dataFolder, PluginConfiguration config, IReadOnlyList<FolderProblem> problems)
     {
@@ -454,7 +490,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
 
         var report = new PlanExecutor(new PhysicalFileOperations(), _clock)
-            .Execute(plan, Path.Combine(watch.Path, release), Path.Combine(dataFolder, "actions.jsonl"), config.DryRun);
+            .Execute(plan, Path.Combine(watch.Path, release), Path.Combine(dataFolder, "actions.jsonl"), config.DryRun, ct);
         var prefix = config.DryRun ? "[dry run] would" : "Did";
         foreach (var op in report.Completed)
         {
@@ -470,7 +506,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
         {
             var error = report.Error ?? "unknown error";
             LogExecutionFailed(_logger, release, error);
-            ReportFailure(watch, release, $"Stopped after {report.Completed.Count} of {plan.Operations.Count} moves: {error}", report.Completed);
+            var summary = report.Cancelled
+                ? error
+                : report.RollbackProblems.Count == 0
+                    ? string.Create(CultureInfo.InvariantCulture, $"Nothing was filed: {error} ({report.RolledBack.Count} completed move(s) were undone.)")
+                    : string.Create(CultureInfo.InvariantCulture, $"Failed and couldn't be fully undone: {error}. Needs attention: {string.Join("; ", report.RollbackProblems)}");
+            ReportFailure(watch, release, summary, report.Completed);
             return;
         }
 
@@ -684,6 +725,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest: couldn't mark existing quarantine folders")]
     private static partial void LogMarkerMigrationFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest recovery: {Result}")]
+    private static partial void LogRecovery(ILogger logger, string result);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Ingest sweep failed")]
     private static partial void LogSweepFailed(ILogger logger, Exception exception);
