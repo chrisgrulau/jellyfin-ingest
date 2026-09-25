@@ -173,3 +173,5 @@ All notable changes to this project are documented here. The format follows
 - Unit tests (xunit v3) for the parser and naming engine.
 - Repository scaffolding: licence (GPL-3.0), README, design notes, contribution and security policies,
   `.gitignore` / `.editorconfig`, CODEOWNERS, Dependabot, plugin project skeleton, CI workflow.
+- `global.json` accepts any .NET 10 SDK (10.0.100 and later), so the SDKs shipped by Linux distributions (10.0.1xx)
+  build it; CI uses the newest .NET 10 SDK, and Dependabot no longer raises the minimum. Package versions stay locked.
