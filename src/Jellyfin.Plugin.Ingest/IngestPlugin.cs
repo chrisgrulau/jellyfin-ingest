@@ -34,6 +34,20 @@ public class IngestPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
     /// <inheritdoc />
     public override string Description => "Watches drop folders and files new media into your libraries, correctly named.";
 
+    /// <inheritdoc />
+    public override void UpdateConfiguration(BasePluginConfiguration configuration)
+    {
+        // Keep values the service relies on within safe bounds, whatever the settings page (or an API client) sent
+        if (configuration is PluginConfiguration c)
+        {
+            c.QuarantineRetentionDays = Math.Max(1, c.QuarantineRetentionDays);
+            c.SettleSeconds = Math.Max(5, c.SettleSeconds);
+            c.QuarantinePath = (c.QuarantinePath ?? string.Empty).Trim();
+        }
+
+        base.UpdateConfiguration(configuration);
+    }
+
     /// <summary>
     /// Gets the current plugin instance.
     /// </summary>

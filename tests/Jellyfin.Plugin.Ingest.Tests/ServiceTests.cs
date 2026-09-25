@@ -74,15 +74,25 @@ public class ServiceTests
         var root = Path.Combine(Path.GetTempPath(), "ingest-purge-" + Guid.NewGuid().ToString("N"));
         try
         {
+            QuarantineMarkers.Mark(root, Path.Combine(root, "2020-01-01"));
             Directory.CreateDirectory(Path.Combine(root, "2020-01-01", "release"));
             File.WriteAllText(Path.Combine(root, "2020-01-01", "release", "readme.txt"), "x");
             Directory.CreateDirectory(Path.Combine(root, "not-a-date"));
 
+            // A date-named folder Ingest didn't create (e.g. photo imports) is never deleted, however old
+            Directory.CreateDirectory(Path.Combine(root, "2019-05-05"));
+            File.WriteAllText(Path.Combine(root, "2019-05-05", "holiday.jpg"), "x");
+
+            // A marked but recent folder is kept
+            QuarantineMarkers.Mark(root, Path.Combine(root, "2026-09-20"));
+
             var deleted = QuarantinePurger.Purge(root, new DateOnly(2026, 9, 24), 30);
 
-            Assert.Single(deleted);
-            Assert.False(Directory.Exists(Path.Combine(root, "2020-01-01")));
+            Assert.Equal([Path.Combine(root, "2020-01-01")], deleted);
             Assert.True(Directory.Exists(Path.Combine(root, "not-a-date")));
+            Assert.True(File.Exists(Path.Combine(root, "2019-05-05", "holiday.jpg")));
+            Assert.True(Directory.Exists(Path.Combine(root, "2026-09-20")));
+            Assert.True(File.Exists(Path.Combine(root, QuarantineMarkers.RootMarker)));
         }
         finally
         {
@@ -123,4 +133,26 @@ public class ServiceTests
     [InlineData("Movie Title (2019)")]
     [InlineData("Found Footage (2019)")]
     public void Releases_are_not_ignored(string name) => Assert.False(ReleaseTracker.IsIgnored(name));
+
+    [Fact]
+    public void Existing_quarantine_folders_are_recognised_from_the_action_log()
+    {
+        string[] log =
+        [
+            "{\"kind\":\"Video\",\"destination\":\"/lib/Shows/x.mkv\"}",
+            "{\"kind\":\"Quarantine\",\"destination\":\"/drop/.ingest-quarantine/2026-09-24/Show/readme.txt\"}",
+            "{\"kind\":\"Quarantine\",\"destination\":\"/drop/.ingest-quarantine/2026-09-24/Other/x.nfo\"}",
+            "{\"kind\":\"Quarantine\",\"destination\":\"/drop/.ingest-quarantine/not-dated/x.nfo\"}",
+            "{\"kind\":\"Quarantine\",\"destination\":\"/elsewhere/2026-01-01/x.nfo\"}",
+            "not json",
+        ];
+
+        var found = QuarantineMarkers.FromActionLog(log, ["/drop/.ingest-quarantine/"]);
+
+        Assert.Equal([("/drop/.ingest-quarantine", "/drop/.ingest-quarantine/2026-09-24")], found);
+    }
+
+    [Fact]
+    public void A_marker_is_only_written_inside_the_quarantine()
+        => Assert.Throws<ArgumentException>(() => QuarantineMarkers.Mark("/tmp/q", "/tmp/other/2026-09-24"));
 }
