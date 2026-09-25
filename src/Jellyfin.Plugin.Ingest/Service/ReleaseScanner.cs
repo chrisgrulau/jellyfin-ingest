@@ -59,12 +59,12 @@ public static class ReleaseScanner
         var releases = new Dictionary<string, IReadOnlyList<ReleaseFile>>(StringComparer.Ordinal);
         var links = new List<string>();
         var unsettled = new List<string>();
-        var quarantineRoot = Normalise(quarantine);
+        var quarantineRoot = PathGuard.Normalise(quarantine);
 
         foreach (var entry in new DirectoryInfo(watchFolder).EnumerateFileSystemInfos("*", TopLevel))
         {
             var name = entry.Name;
-            if (ReleaseTracker.IsIgnored(name) || IsSameOrUnder(Normalise(entry.FullName), quarantineRoot) || IsSameOrUnder(quarantineRoot, Normalise(entry.FullName)))
+            if (ReleaseTracker.IsIgnored(name) || PathGuard.IsSameOrUnder(entry.FullName, quarantineRoot) || PathGuard.IsSameOrUnder(quarantineRoot, entry.FullName))
             {
                 continue;
             }
@@ -92,27 +92,6 @@ public static class ReleaseScanner
         }
 
         return new ScanResult { Releases = releases, Links = links, Unsettled = unsettled };
-    }
-
-    /// <summary>
-    /// Normalises a path for comparison: absolute, without a trailing separator.
-    /// </summary>
-    /// <param name="path">The path.</param>
-    /// <returns>The normalised path.</returns>
-    public static string Normalise(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-
-    /// <summary>
-    /// Whether <paramref name="path"/> is <paramref name="root"/> or inside it (both already normalised).
-    /// </summary>
-    /// <param name="path">The path.</param>
-    /// <param name="root">The folder.</param>
-    /// <returns><c>true</c> if it is the same folder or below it.</returns>
-    public static bool IsSameOrUnder(string path, string root)
-    {
-        ArgumentNullException.ThrowIfNull(path);
-        ArgumentNullException.ThrowIfNull(root);
-        var cmp = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        return path.Equals(root, cmp) || path.StartsWith(root + Path.DirectorySeparatorChar, cmp);
     }
 
     private static List<ReleaseFile> Files(string watchFolder, DirectoryInfo folder)

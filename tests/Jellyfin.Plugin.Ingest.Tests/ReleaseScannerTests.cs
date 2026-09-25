@@ -139,9 +139,9 @@ public sealed class ReleaseScannerTests : IDisposable
     [Fact]
     public void Paths_compare_by_folder_not_by_prefix()
     {
-        Assert.True(ReleaseScanner.IsSameOrUnder("/in/q/x", "/in/q"));
-        Assert.True(ReleaseScanner.IsSameOrUnder("/in/q", "/in/q"));
-        Assert.False(ReleaseScanner.IsSameOrUnder("/in/queue", "/in/q"));
-        Assert.Equal("/in/q", ReleaseScanner.Normalise("/in/q/"));
+        Assert.True(PathGuard.IsSameOrUnder("/in/q/x", "/in/q"));
+        Assert.True(PathGuard.IsSameOrUnder("/in/q", "/in/q"));
+        Assert.False(PathGuard.IsSameOrUnder("/in/queue", "/in/q"));
+        Assert.Equal("/in/q", PathGuard.Normalise("/in/q/"));
     }
 }

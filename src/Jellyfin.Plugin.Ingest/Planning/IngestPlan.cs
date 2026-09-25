@@ -53,6 +53,12 @@ public sealed record IngestPlan
     /// <summary>Gets the operations to perform, in order.</summary>
     public IReadOnlyList<PlannedOperation> Operations { get; init; } = [];
 
+    /// <summary>
+    /// Gets the folders the operations may write into (the film or show folders and the dated quarantine folder). The
+    /// executor refuses any operation whose destination falls outside them.
+    /// </summary>
+    public IReadOnlyList<string> AllowedRoots { get; init; } = [];
+
     /// <summary>Gets the items that need a decision; when non-empty nothing is moved.</summary>
     public IReadOnlyList<ReviewItem> Review { get; init; } = [];
 

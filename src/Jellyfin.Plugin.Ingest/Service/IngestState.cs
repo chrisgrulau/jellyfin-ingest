@@ -103,6 +103,12 @@ public sealed record PendingReview
     /// <summary>Gets the distinct titles considered across the release's files, best first.</summary>
     public IReadOnlyList<ScoredCandidate> Candidates { get; init; } = [];
 
+    /// <summary>
+    /// Gets the results of the last title search made for this review. Choices are made by position in this list or in
+    /// <see cref="Candidates"/>, both produced by the server, never from a candidate sent by the browser.
+    /// </summary>
+    public IReadOnlyList<ScoredCandidate> SearchResults { get; init; } = [];
+
     /// <summary>Gets the title and library chosen in review, if any; used instead of searching when the release is planned again.</summary>
     public ChosenMatch? Chosen { get; init; }
 
@@ -243,8 +249,9 @@ public sealed class IngestStateStore
             var s = Load();
             var i = s.Reviews.FindIndex(r => r.Id == review.Id);
             var chosen = i >= 0 ? s.Reviews[i].Chosen : null;
+            var searched = i >= 0 ? s.Reviews[i].SearchResults : [];
             var candidates = review.Candidates.Take(MaxCandidates).ToList();
-            var updated = review with { Candidates = candidates, Chosen = chosen, Request = ReviewRequest.None };
+            var updated = review with { Candidates = candidates, Chosen = chosen, SearchResults = searched, Request = ReviewRequest.None };
             if (i >= 0)
             {
                 s.Reviews[i] = updated;
@@ -279,6 +286,15 @@ public sealed class IngestStateStore
     /// <returns><c>false</c> if there is no such review.</returns>
     public bool RequestRetry(string id, ChosenMatch? chosen)
         => Update(id, r => r with { Chosen = chosen, Request = ReviewRequest.Retry });
+
+    /// <summary>
+    /// Stores the results of a title search made for a review, replacing any earlier ones.
+    /// </summary>
+    /// <param name="id">Review id.</param>
+    /// <param name="results">The results, best first.</param>
+    /// <returns><c>false</c> if there is no such review.</returns>
+    public bool SetSearchResults(string id, IReadOnlyList<ScoredCandidate> results)
+        => Update(id, r => r with { SearchResults = [.. (results ?? []).Take(MaxCandidates * 2)] });
 
     /// <summary>
     /// Asks for a whole release to be quarantined.

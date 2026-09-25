@@ -308,7 +308,15 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var identifier = new MediaIdentifier(
             new JellyfinMetadataLookup(_providerManager),
             new JellyfinLibraryIndex(_libraryManager, []));
-        var planner = new IngestPlanner(identifier, p => File.Exists(p) || Directory.Exists(p), ReadSmallText, _clock, new JellyfinExistingMedia(_libraryManager));
+        // Existing shows may only be joined inside one of the server's library folders
+        var libraryFolders = Libraries(_libraryManager.GetVirtualFolders()).SelectMany(l => l.Locations).ToList();
+        var planner = new IngestPlanner(
+            identifier,
+            p => File.Exists(p) || Directory.Exists(p),
+            ReadSmallText,
+            _clock,
+            new JellyfinExistingMedia(_libraryManager),
+            p => PathGuard.IsUnderAny(p, libraryFolders));
         var plan = await planner.PlanAsync(watch.Path, release, files, targets, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
 
         Directory.CreateDirectory(dataFolder);
@@ -490,6 +498,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 for (var n = 2; fs.Exists(destination); n++)
                 {
                     destination = Path.Combine(dated, string.Create(CultureInfo.InvariantCulture, $"{file.RelativePath} ({n})"));
+                }
+
+                if (!PathGuard.IsUnder(destination, dated) || !PathGuard.IsUnder(Path.Combine(watch.Path, file.RelativePath), watch.Path))
+                {
+                    error = "Refused: a file would leave the watch folder or the quarantine folder.";
+                    break;
                 }
 
                 try

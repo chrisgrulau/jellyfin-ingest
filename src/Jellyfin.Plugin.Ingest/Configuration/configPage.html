@@ -336,7 +336,8 @@
             }
             html += pickTable(r, r.Candidates || [], 'suggested');
             var sr = searchResults[r.Id];
-            if (sr && sr.results) { html += sr.results.length ? pickTable(r, sr.results, 'search') : '<p class="ingest-muted">No results for “' + esc(sr.q) + '”.</p>'; }
+            if ((r.SearchResults || []).length) { html += pickTable(r, r.SearchResults, 'search'); }
+            else if (sr) { html += '<p class="ingest-muted">No results for “' + esc(sr.q) + '”.</p>'; }
             var guessTv = (r.Candidates || []).length ? !!r.Candidates[0].Candidate.IsSeries : !!(libById(defaultLibrary(r.WatchFolder, true)) && !defaultLibrary(r.WatchFolder, false));
             html += '<details class="ingest-search"' + (sr || !(r.Candidates || []).length ? ' open' : '') + '><summary>Search for a different title</summary>' +
               '<form><input name="q" type="text" placeholder="Title" value="' + esc(sr ? sr.q : '') + '" required />' +
@@ -415,13 +416,13 @@
           if (btn.classList.contains('ingest-choose')) {
             var r = reviewById(id);
             var list = btn.getAttribute('data-list');
-            var cands = list === 'search' ? (searchResults[id] || {}).results : r && r.Candidates;
-            var cand = cands && cands[parseInt(btn.getAttribute('data-i'), 10)];
+            var index = parseInt(btn.getAttribute('data-i'), 10);
             var lib = btn.closest('.ingest-pick').querySelector('.ingest-lib').value;
-            if (!cand) { return; }
+            if (!r || isNaN(index)) { return; }
             if (!lib) { Dashboard.alert('There is no library of the right kind to file this into.'); return; }
             delete searchResults[id];
-            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose', { Candidate: cand.Candidate, LibraryId: lib });
+            // The server resolves the choice from its own list; the browser only says which one
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose', { List: list === 'search' ? 'search' : 'suggested', Index: index, LibraryId: lib });
           } else if (btn.classList.contains('ingest-retry')) {
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Retry');
           } else if (btn.classList.contains('ingest-quarantine')) {
@@ -438,14 +439,14 @@
           var f = e.target;
           var q = f.q.value.trim();
           if (!q) { return; }
-          var params = { name: q, series: f.k.value === 'tv' };
+          var params = { name: q, series: f.k.value === 'tv', review: id };
           if (f.y.value) { params.year = f.y.value; }
           busyCard = id;
           Dashboard.showLoadingMsg();
-          ApiClient.getJSON(ApiClient.getUrl('Ingest/Search', params)).then(function (results) {
-            searchResults[id] = { q: q, y: f.y.value, k: f.k.value, results: results || [] };
+          ApiClient.getJSON(ApiClient.getUrl('Ingest/Search', params)).then(function () {
+            searchResults[id] = { q: q, y: f.y.value, k: f.k.value };
             if (document.activeElement) { document.activeElement.blur(); }
-            renderReviews();
+            return loadStatus();
           }, function () { Dashboard.alert('Search failed; check the Jellyfin log.'); }).then(function () { busyCard = null; Dashboard.hideLoadingMsg(); });
         });
 
