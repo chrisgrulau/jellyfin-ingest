@@ -316,4 +316,17 @@ public sealed class IngestStateTests : IDisposable
 
         Assert.Equal(ReviewRequest.Retry, store.GetReview(r.Id)!.Request);
     }
+
+    [Fact]
+    public void Reviews_of_a_removed_watch_folder_are_dropped()
+    {
+        var store = new IngestStateStore(StatePath);
+        store.PutReview(Review("Quiet.Harbour"));
+
+        store.PruneWatchFolders(["/drop/"]);
+        Assert.Single(store.Snapshot().Reviews);
+
+        store.PruneWatchFolders(["/other"]);
+        Assert.Empty(store.Snapshot().Reviews);
+    }
 }

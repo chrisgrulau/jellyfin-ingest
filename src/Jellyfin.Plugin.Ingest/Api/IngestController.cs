@@ -148,7 +148,7 @@ public class IngestController : ControllerBase
         }
 
         // A library the watch folder already files into keeps its configured folder; any other uses its first folder.
-        var watch = IngestPlugin.Instance?.Configuration.WatchFolders.FirstOrDefault(w => w.Path == review.WatchFolder);
+        var watch = IngestPlugin.Instance?.Configuration.WatchFolders.FirstOrDefault(w => PathGuard.SamePath(w.Path, review.WatchFolder));
         var path = watch is null ? null
             : IngestService.DestinationsOf(watch).FirstOrDefault(d => string.Equals(d.LibraryId, request.LibraryId, StringComparison.OrdinalIgnoreCase))?.Path;
         var library = IngestService.Libraries(_libraryManager.GetVirtualFolders())

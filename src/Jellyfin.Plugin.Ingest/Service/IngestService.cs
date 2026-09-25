@@ -196,13 +196,15 @@ public sealed partial class IngestService : IHostedService, IDisposable
             RecoverInterruptedMoves(plugin.DataFolderPath);
             MigrateQuarantineMarkers(plugin.DataFolderPath, config, problems);
         }
+        // Reviews of a watch folder that has been removed from the settings can never be acted on
+        _state.PruneWatchFolders([.. config.WatchFolders.Select(w => w.Path)]);
         foreach (var watch in config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)))
         {
             // Each watch folder on its own: one that can't be read (permissions, offline share) mustn't stop the others
             try
             {
                 // An unsafe watch or quarantine folder is never swept; the reason is shown once in the activity panel
-                var problem = problems.FirstOrDefault(p => p.Folder == watch.Path || p.Folder == config.QuarantinePath);
+                var problem = problems.FirstOrDefault(p => PathGuard.SamePath(p.Folder, watch.Path) || PathGuard.SamePath(p.Folder, config.QuarantinePath));
                 if (problem is not null)
                 {
                     throw new InvalidOperationException("Not swept, because the folder settings are unsafe: " + problem.Problem + " (" + problem.Folder + ")");
@@ -383,8 +385,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
         var roots = config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path))
             .Select(w => QuarantineFor(config, w))
-            .Where(q => !problems.Any(p => p.Folder == q))
-            .Distinct(StringComparer.Ordinal)
+            .Where(q => !problems.Any(p => PathGuard.SamePath(p.Folder, q)))
+            .Select(PathGuard.Normalise)
+            .Distinct(PathGuard.Comparer)
             .ToList();
         try
         {

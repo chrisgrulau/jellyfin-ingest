@@ -29,6 +29,7 @@ public class LibraryRoutingTests
     {
         Assert.Equal(new LibraryTargets(null, new LibraryTarget("/lib/Movies", false)), LibraryRouting.TargetsOf(Movies, null));
         Assert.Equal(new LibraryTargets(new LibraryTarget("/lib/TV2", true), null), LibraryRouting.TargetsOf(Shows, "/lib/TV2"));
+        Assert.Equal(new LibraryTargets(new LibraryTarget("/lib/TV2", true), null), LibraryRouting.TargetsOf(Shows, "/lib/TV2/"));
         Assert.Equal(new LibraryTargets(new LibraryTarget("/lib/TV", true), null), LibraryRouting.TargetsOf(Shows, "/not/a/library/folder"));
         Assert.Equal(new LibraryTargets(new LibraryTarget("/lib/Mixed", true), new LibraryTarget("/lib/Mixed", false)), LibraryRouting.TargetsOf(Mixed, null));
         Assert.Equal(new LibraryTargets(null, null), LibraryRouting.TargetsOf(Music, null));

@@ -144,4 +144,17 @@ public sealed class ReleaseScannerTests : IDisposable
         Assert.False(PathGuard.IsSameOrUnder("/in/queue", "/in/q"));
         Assert.Equal("/in/q", PathGuard.Normalise("/in/q/"));
     }
+
+    [Fact]
+    public void A_quarantine_spelled_with_a_trailing_separator_is_still_left_out()
+    {
+        var quarantine = Path.Combine(Watch, "held");
+        Directory.CreateDirectory(Path.Combine(quarantine, "2026-09-24"));
+        File.WriteAllText(Path.Combine(quarantine, "2026-09-24", "Some.Film.2020.mkv"), "x");
+        File.WriteAllText(Path.Combine(Watch, "New.Film.2021.mkv"), "x");
+
+        var scan = ReleaseScanner.Scan(Watch + Path.DirectorySeparatorChar, quarantine + Path.DirectorySeparatorChar);
+
+        Assert.Equal(["New.Film.2021.mkv"], scan.Releases.Keys);
+    }
 }

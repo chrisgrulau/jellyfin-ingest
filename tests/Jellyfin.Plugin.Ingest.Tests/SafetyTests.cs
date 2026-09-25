@@ -80,4 +80,34 @@ public class SafetyTests
     [InlineData(null, 0)]
     public void Unknown_lists_and_positions_are_refused(string? list, int index)
         => Assert.Null(ReviewChoice.Pick(Review(), list, index));
+
+    [Theory]
+    [InlineData("/in", "/in/", true)]
+    [InlineData("/in/./a/..", "/in", true)]
+    [InlineData("/in", "/inbox", false)]
+    [InlineData("/in", "", false)]
+    public void Paths_are_compared_after_normalising(string a, string b, bool same)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Assert.Equal(same, PathGuard.SamePath(a, b));
+    }
+
+    [Theory]
+    [InlineData(" /in/ ", "/in")]
+    [InlineData("/", "/")]
+    [InlineData("relative/", "relative/")]
+    [InlineData(null, "")]
+    public void Configured_folders_are_tidied(string? input, string expected)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Assert.Equal(expected, PathGuard.Tidy(input));
+    }
 }

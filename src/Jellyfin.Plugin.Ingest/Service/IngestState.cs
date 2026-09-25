@@ -380,6 +380,23 @@ public sealed partial class IngestStateStore
         }
     }
 
+    /// <summary>
+    /// Drops reviews of watch folders that are no longer configured.
+    /// </summary>
+    /// <param name="watchFolders">The configured watch folders.</param>
+    public void PruneWatchFolders(IReadOnlyCollection<string> watchFolders)
+    {
+        ArgumentNullException.ThrowIfNull(watchFolders);
+        lock (_lock)
+        {
+            var s = Load();
+            if (s.Reviews.RemoveAll(r => !watchFolders.Any(w => PathGuard.SamePath(w, r.WatchFolder))) > 0)
+            {
+                Save(s);
+            }
+        }
+    }
+
     private bool Update(string id, Func<PendingReview, PendingReview> change)
     {
         lock (_lock)
