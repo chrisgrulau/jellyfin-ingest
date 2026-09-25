@@ -124,6 +124,7 @@ public sealed class IngestPlanner
         // 1. main videos
         var destinations = new Dictionary<string, string>(StringComparer.Ordinal);
         var owners = new HashSet<string>(StringComparer.Ordinal);
+        var requiredFolders = new HashSet<string>(StringComparer.Ordinal);
         var plannedEpisodes = new HashSet<(string Series, int Season, int Episode)>();
         foreach (var video in mains)
         {
@@ -134,7 +135,7 @@ public sealed class IngestPlanner
                 : await _identifier.IdentifyAsChosenAsync(parsed[video], chosen.Candidate, chosen.Target.IsTv, cancellationToken).ConfigureAwait(false);
             if (result.Status != IdentificationStatus.Identified)
             {
-                review.Add(new ReviewItem(Abs(video), result.Reason) { Candidates = result.Candidates });
+                review.Add(new ReviewItem(Abs(video), result.Reason) { Candidates = result.Candidates, Retry = result.NothingFound ? RetryKind.NothingFound : RetryKind.None });
                 continue;
             }
 
@@ -195,6 +196,17 @@ public sealed class IngestPlanner
                     continue;
                 }
             }
+
+            // The library folder (or the existing show's folder) must be there: if a share isn't mounted, creating the
+            // folders would put the media on the local disk under the mount point, hidden once the share is back
+            var required = libraryRoot ?? owner;
+            if (!_exists(required))
+            {
+                review.Add(new ReviewItem(Abs(video), $"The library folder isn't available (is the share mounted?): {required}. Trying again automatically.") { Candidates = result.Candidates, Retry = RetryKind.FolderUnavailable });
+                continue;
+            }
+
+            requiredFolders.Add(required);
 
             // Containment: the film or show folder must be inside its library (an existing show's folder inside one of
             // the server's libraries), and the file inside that folder, whatever the names and ids contain
@@ -292,7 +304,7 @@ public sealed class IngestPlanner
             ops.Add(new PlannedOperation(OperationKind.Quarantine, Abs(rel), destination));
         }
 
-        return new IngestPlan { ReleaseName = releaseName, Operations = ops, AllowedRoots = [.. owners, quarantine] };
+        return new IngestPlan { ReleaseName = releaseName, Operations = ops, AllowedRoots = [.. owners, quarantine], RequiredFolders = [.. requiredFolders] };
     }
 
     private static Dictionary<string, string> MovieIds(MovieIdentity movie)

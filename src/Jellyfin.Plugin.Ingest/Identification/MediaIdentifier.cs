@@ -322,6 +322,7 @@ public sealed class MediaIdentifier
                 Confidence = ranked.Count > 0 ? Math.Min(1, ranked[0].Score) : 0,
                 Reason = reason,
                 Candidates = ranked,
+                NothingFound = ranked.Count == 0,
             };
         }
 
@@ -348,6 +349,7 @@ public sealed class MediaIdentifier
                 Confidence = ranked.Count > 0 ? Math.Min(1, ranked[0].Score) : 0,
                 Reason = reason,
                 Candidates = ranked,
+                NothingFound = ranked.Count == 0,
             };
         }
 

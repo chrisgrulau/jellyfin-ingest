@@ -182,4 +182,23 @@ public class ServiceTests
         Assert.Empty(t.Observe(snap, T0, Settle));
         Assert.Equal(["r"], t.Observe(snap, T0.AddSeconds(61), Settle));
     }
+
+    [Fact]
+    public void An_offline_library_is_retried_until_it_is_back_at_most_hourly()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(5), IngestService.RetryDelay(RetryKind.FolderUnavailable, 1));
+        Assert.Equal(TimeSpan.FromMinutes(10), IngestService.RetryDelay(RetryKind.FolderUnavailable, 2));
+        Assert.Equal(TimeSpan.FromMinutes(60), IngestService.RetryDelay(RetryKind.FolderUnavailable, 5));
+        Assert.Equal(TimeSpan.FromMinutes(60), IngestService.RetryDelay(RetryKind.FolderUnavailable, 500));
+    }
+
+    [Fact]
+    public void Nothing_found_is_retried_three_times_then_left_for_a_person()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(10), IngestService.RetryDelay(RetryKind.NothingFound, 1));
+        Assert.Equal(TimeSpan.FromHours(1), IngestService.RetryDelay(RetryKind.NothingFound, 2));
+        Assert.Equal(TimeSpan.FromHours(6), IngestService.RetryDelay(RetryKind.NothingFound, 3));
+        Assert.Null(IngestService.RetryDelay(RetryKind.NothingFound, 4));
+        Assert.Null(IngestService.RetryDelay(RetryKind.None, 1));
+    }
 }

@@ -38,6 +38,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private readonly Dictionary<string, ReleaseTracker> _trackers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _settings = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _folderErrors = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (string WatchFolder, string Release, DateTimeOffset At, int Attempt)> _retries = new(StringComparer.Ordinal);
     private readonly TimeProvider _clock = TimeProvider.System;
     private CancellationTokenSource? _stopping;
     private Task? _loop;
@@ -147,6 +148,46 @@ public sealed partial class IngestService : IHostedService, IDisposable
         return watch.Destinations.Count > 0
             ? [.. watch.Destinations.Select(d => new DestinationSetting(d.LibraryId, d.Path))]
             : [new DestinationSetting(watch.TargetLibraryId, watch.TargetPath)];
+    }
+
+    /// <summary>
+    /// How long to wait before trying a release again by itself. An offline library is retried until it is back (5
+    /// minutes, doubling to hourly); providers that found nothing are retried three times (after 10 minutes, 1 hour and
+    /// 6 hours), since an outage and an unknown title look the same, then left for a person.
+    /// </summary>
+    /// <param name="kind">Why the release couldn't be planned.</param>
+    /// <param name="attempt">Which retry this would be (1 for the first).</param>
+    /// <returns>The delay, or <c>null</c> to stop retrying.</returns>
+    public static TimeSpan? RetryDelay(RetryKind kind, int attempt)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(attempt, 1);
+        return kind switch
+        {
+            RetryKind.FolderUnavailable => TimeSpan.FromMinutes(Math.Min(60, 5 * Math.Pow(2, Math.Min(attempt - 1, 10)))),
+            RetryKind.NothingFound => attempt switch
+            {
+                1 => TimeSpan.FromMinutes(10),
+                2 => TimeSpan.FromHours(1),
+                3 => TimeSpan.FromHours(6),
+                _ => null,
+            },
+            _ => null,
+        };
+    }
+
+    // Schedules (or ends) automatic retries of a release; returns when the next one is due
+    private DateTimeOffset? ScheduleRetry(string id, WatchFolder watch, string release, RetryKind kind)
+    {
+        var attempt = _retries.TryGetValue(id, out var r) ? r.Attempt + 1 : 1;
+        if (RetryDelay(kind, attempt) is not { } delay)
+        {
+            _retries.Remove(id);
+            return null;
+        }
+
+        var at = _clock.GetUtcNow() + delay;
+        _retries[id] = (watch.Path, release, at, attempt);
+        return at;
     }
 
     private async Task RunAsync(CancellationToken ct)
@@ -278,6 +319,19 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
 
         _settings[watch.Path] = settings;
+
+        // Releases due an automatic retry are offered again; retries of releases that have gone are dropped
+        foreach (var (id, retry) in _retries.Where(r => r.Value.WatchFolder == watch.Path).ToList())
+        {
+            if (!snapshot.ContainsKey(retry.Release))
+            {
+                _retries.Remove(id);
+            }
+            else if (retry.At <= _clock.GetUtcNow())
+            {
+                tracker.Forget(retry.Release);
+            }
+        }
 
         _state.PruneReviews(watch.Path, [.. snapshot.Keys, .. scan.Links, .. scan.Unsettled]);
         ReviewLinks(watch, scan.Links);
@@ -461,6 +515,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         Directory.CreateDirectory(dataFolder);
         if (!plan.IsReady)
         {
+            var retryAt = ScheduleRetry(id, watch, release, plan.Retry);
             var items = plan.Review.Select(r => new PendingReviewItem(Path.GetRelativePath(watch.Path, r.Source), r.Reason)).ToList();
             foreach (var item in items)
             {
@@ -489,10 +544,13 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 Time = _clock.GetUtcNow(),
                 Items = items,
                 Candidates = DistinctCandidates(plan.Review),
+                RetryAt = retryAt,
             },
             seenVersion);
             return;
         }
+
+        _retries.Remove(id);
 
         // Mark the dated quarantine folder as Ingest's own before anything is moved into it (the purge only deletes marked folders)
         if (!config.DryRun)
@@ -525,7 +583,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 : report.RollbackProblems.Count == 0
                     ? string.Create(CultureInfo.InvariantCulture, $"Nothing was filed: {error} ({report.RolledBack.Count} completed move(s) were undone.)")
                     : string.Create(CultureInfo.InvariantCulture, $"Failed and couldn't be fully undone: {error}. Needs attention: {string.Join("; ", report.RollbackProblems)}");
-            ReportFailure(watch, release, summary, report.Completed, seenVersion);
+            var retryAt = report.FolderUnavailable ? ScheduleRetry(id, watch, release, RetryKind.FolderUnavailable) : null;
+            ReportFailure(watch, release, summary, report.Completed, seenVersion, retryAt);
             return;
         }
 
@@ -617,7 +676,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private static List<string> Describe(string watchFolder, IEnumerable<PlannedOperation> operations)
         => [.. operations.Select(o => $"{o.Kind}: {Path.GetRelativePath(watchFolder, o.Source)} → {o.Destination}")];
 
-    private void ReportFailure(WatchFolder watch, string release, string error, IReadOnlyList<PlannedOperation> completed, int? seenVersion = null)
+    private void ReportFailure(WatchFolder watch, string release, string error, IReadOnlyList<PlannedOperation> completed, int? seenVersion = null, DateTimeOffset? retryAt = null)
     {
         _state.Record(new ActivityEntry
         {
@@ -635,6 +694,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
             Release = release,
             Time = _clock.GetUtcNow(),
             Items = [new PendingReviewItem(release, error)],
+            RetryAt = retryAt,
         },
         seenVersion);
     }

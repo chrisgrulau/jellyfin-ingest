@@ -85,8 +85,11 @@ public sealed record ExecutionReport
     /// <summary>Gets a value indicating whether nothing was changed because it was a dry run.</summary>
     public bool DryRun { get; init; }
 
+    /// <summary>Gets a value indicating whether nothing was moved because a required library folder is missing (offline share).</summary>
+    public bool FolderUnavailable { get; init; }
+
     /// <summary>Gets a value indicating whether every operation completed.</summary>
-    public bool Succeeded => Failed is null && !Cancelled;
+    public bool Succeeded => Failed is null && !Cancelled && Error is null;
 }
 
 /// <summary>
@@ -143,6 +146,15 @@ public sealed class PlanExecutor
         if (dryRun)
         {
             return new ExecutionReport { Completed = plan.Operations, DryRun = true };
+        }
+
+        // A library folder that has gone (an unmounted share) is never recreated on the local disk
+        foreach (var folder in plan.RequiredFolders)
+        {
+            if (!_fs.Exists(folder))
+            {
+                return new ExecutionReport { Error = $"The library folder isn't available (is the share mounted?): {folder}", FolderUnavailable = true };
+            }
         }
 
         // Defence in depth: check every operation before touching anything, so a bad plan moves nothing at all

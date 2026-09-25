@@ -47,4 +47,10 @@ public sealed record IdentificationResult
 
     /// <summary>Gets the ranked candidates that were considered.</summary>
     public IReadOnlyList<ScoredCandidate> Candidates { get; init; } = [];
+
+    /// <summary>
+    /// Gets a value indicating whether every search came back empty (and nothing similar is in the library). An unknown
+    /// title and a provider outage look the same, so this is worth trying again later.
+    /// </summary>
+    public bool NothingFound { get; init; }
 }

@@ -110,6 +110,9 @@ public sealed record PendingReview
     /// </summary>
     public IReadOnlyList<ScoredCandidate> SearchResults { get; init; } = [];
 
+    /// <summary>Gets when the release will be tried again automatically (an offline library, or providers that found nothing), if it will.</summary>
+    public DateTimeOffset? RetryAt { get; init; }
+
     /// <summary>Gets the title and library chosen in review, if any; used instead of searching when the release is planned again.</summary>
     public ChosenMatch? Chosen { get; init; }
 
