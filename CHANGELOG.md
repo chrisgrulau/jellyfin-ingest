@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The format follows
 - A failure tidying up empty folders after every move succeeded is logged as a warning, not reported as a failed ingest.
 - The quarantine folder is recognised even when configured with a trailing slash (part of ING-13).
 
+## [0.1.3-alpha] - 2026-09-25
+
 ### Added
 - Duplicate guard (PROC-01): an episode or film that's already on the server (any library, any file name or
   container, or not yet scanned) goes to review with the existing file's path instead of being filed as a second
@@ -35,7 +37,7 @@ All notable changes to this project are documented here. The format follows
 ## [0.1.0-alpha.3] - 2026-09-24
 
 > **Correction:** this release's notes also listed a duplicate guard, but that change missed the release (PROC-01). It
-> ships in the next release; see *Unreleased*.
+> ships in 0.1.3-alpha.
 
 ### Added
 - New episodes follow their show: an episode of a series that's already on the server is filed into that series'
