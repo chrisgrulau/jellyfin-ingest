@@ -194,7 +194,7 @@ public sealed class IngestStateTests : IDisposable
         store.PutReview(r);
         store.RequestRetry(r.Id, new ChosenMatch(r.Candidates[0].Candidate, new LibraryTarget("/lib/Movies", IsTv: false)));
 
-        store.MarkPlannedInDryRun(r.Id, "Dry run: planned.");
+        store.MarkPlannedInDryRun(r.Id, "Dry run: planned.", store.GetReview(r.Id)!.RequestVersion);
 
         var review = store.GetReview(r.Id)!;
         Assert.Equal("Dry run: planned.", Assert.Single(review.Items).Reason);
@@ -210,5 +210,123 @@ public sealed class IngestStateTests : IDisposable
 
         var review = Assert.Single(new IngestStateStore(StatePath).Snapshot().Reviews);
         Assert.Null(review.Chosen);
+    }
+
+    [Fact]
+    public void A_damaged_state_file_is_set_aside_not_overwritten()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(StatePath, "{ not json");
+        var store = new IngestStateStore(StatePath);
+
+        store.Record(new ActivityEntry { Time = T0, Status = ActivityStatus.Filed, Release = "Lantern" });
+
+        var aside = Assert.Single(Directory.GetFiles(_dir, "state.json.corrupt-*"));
+        Assert.Equal("{ not json", File.ReadAllText(aside));
+        Assert.Single(new IngestStateStore(StatePath).Snapshot().Activity);
+    }
+
+    [Fact]
+    public void Null_lists_and_entries_in_the_file_are_tolerated()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(StatePath, """{"Reviews": null, "Activity": [null, {"Time":"2026-09-24T10:00:00+00:00","Status":"Filed","Release":"Lantern","Details":null}]}""");
+        var store = new IngestStateStore(StatePath);
+
+        var state = store.Snapshot();
+
+        Assert.Empty(state.Reviews);
+        Assert.Empty(Assert.Single(state.Activity).Details);
+        store.PutReview(Review("Kite"));
+        Assert.Single(store.Snapshot().Reviews);
+    }
+
+    [Fact]
+    public void A_file_that_cannot_be_written_keeps_the_dashboard_in_memory()
+    {
+        // The state path is a folder: every save fails
+        Directory.CreateDirectory(StatePath);
+        var store = new IngestStateStore(StatePath);
+
+        store.Record(new ActivityEntry { Time = T0, Status = ActivityStatus.Filed, Release = "Lantern" });
+        store.PutReview(Review("Kite"));
+
+        Assert.Single(store.Snapshot().Activity);
+        Assert.Single(store.Snapshot().Reviews);
+    }
+
+    [Fact]
+    public void A_file_that_cannot_be_read_is_never_replaced()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(StatePath, "{}");
+        File.SetUnixFileMode(StatePath, UnixFileMode.None);
+        try
+        {
+            var store = new IngestStateStore(StatePath);
+            store.Record(new ActivityEntry { Time = T0, Status = ActivityStatus.Filed, Release = "Lantern" });
+            Assert.Single(store.Snapshot().Activity);
+        }
+        finally
+        {
+            File.SetUnixFileMode(StatePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        Assert.Equal("{}", File.ReadAllText(StatePath));
+    }
+
+    [Fact]
+    public void A_decision_made_while_planning_runs_is_kept()
+    {
+        var store = new IngestStateStore(StatePath);
+        var r = Review("Quiet.Harbour", Cand("Quiet Harbour", 2010, "1", 0.9));
+        store.PutReview(r);
+        store.RequestRetry(r.Id, null);
+
+        // Planning starts from this request …
+        var seen = store.GetReview(r.Id)!.RequestVersion;
+
+        // … and while it runs, someone asks for quarantine
+        store.RequestQuarantine(r.Id);
+        store.PutReview(r, seen);
+
+        Assert.Equal(ReviewRequest.Quarantine, store.GetReview(r.Id)!.Request);
+
+        // Acting on the latest request clears it
+        store.PutReview(r, store.GetReview(r.Id)!.RequestVersion);
+        Assert.Equal(ReviewRequest.None, store.GetReview(r.Id)!.Request);
+    }
+
+    [Fact]
+    public void Clearing_an_old_request_leaves_a_newer_one()
+    {
+        var store = new IngestStateStore(StatePath);
+        var r = Review("Quiet.Harbour");
+        store.PutReview(r);
+        store.RequestQuarantine(r.Id);
+        var seen = store.GetReview(r.Id)!.RequestVersion;
+        store.RequestRetry(r.Id, null);
+
+        store.ClearRequest(r.Id, seen);
+
+        Assert.Equal(ReviewRequest.Retry, store.GetReview(r.Id)!.Request);
+    }
+
+    [Fact]
+    public void Reviews_of_a_removed_watch_folder_are_dropped()
+    {
+        var store = new IngestStateStore(StatePath);
+        store.PutReview(Review("Quiet.Harbour"));
+
+        store.PruneWatchFolders(["/drop/"]);
+        Assert.Single(store.Snapshot().Reviews);
+
+        store.PruneWatchFolders(["/other"]);
+        Assert.Empty(store.Snapshot().Reviews);
     }
 }

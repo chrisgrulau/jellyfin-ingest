@@ -44,4 +44,29 @@ public class TitleMatcherTests
         Assert.True(TitleMatcher.Similarity("Lantern", "Alien") < 0.7);
         Assert.Equal(0, TitleMatcher.Similarity(string.Empty, "Anything"));
     }
+
+    [Theory]
+    [InlineData("Амели", "Амели")]
+    [InlineData("Ἀμελί", "Αμελι")]
+    [InlineData("千と千尋の神隠し", "千と千尋の神隠し")]
+    [InlineData("שׁלום", "שׁלום")]
+    [InlineData("สวัสดี", "สวัสดี")]
+    public void Non_latin_titles_match_themselves(string a, string b)
+    {
+        Assert.Equal(1.0, TitleMatcher.Similarity(a, b), 3);
+    }
+
+    [Fact]
+    public void Different_non_latin_titles_are_different()
+    {
+        Assert.True(TitleMatcher.Similarity("千と千尋の神隠し", "もののけ姫") < 0.5);
+        Assert.True(TitleMatcher.Similarity("Амели", "Брат") < 0.5);
+    }
+
+    [Fact]
+    public void Marks_that_spell_a_word_are_kept_outside_latin_greek_cyrillic()
+    {
+        // Thai vowel marks change the word; they aren't accents
+        Assert.NotEqual(TitleMatcher.Normalise("กิน"), TitleMatcher.Normalise("กน"));
+    }
 }

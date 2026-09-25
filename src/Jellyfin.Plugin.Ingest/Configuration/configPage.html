@@ -126,8 +126,9 @@
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
               <input id="ScanLibraryAfterIngest" name="ScanLibraryAfterIngest" type="checkbox" is="emby-checkbox" />
-              <span>Scan the library after ingesting</span>
+              <span>Refresh filed folders in Jellyfin after ingesting</span>
             </label>
+            <div class="fieldDescription checkboxFieldDescription">Only the film or show folders that were filed into are refreshed, so new items appear within a minute or so without scanning whole libraries.</div>
           </div>
           <div>
             <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
@@ -329,6 +330,9 @@
               '<ul class="ingest-reasons">' + (r.Items || []).map(function (i) {
                 return '<li>' + (i.Source !== r.Release ? '<span class="ingest-muted">' + esc(i.Source) + ':</span> ' : '') + esc(i.Reason) + '</li>';
               }).join('') + '</ul>';
+            if (r.RetryAt) {
+              html += '<p class="ingest-muted">Trying again automatically at ' + when(r.RetryAt) + '. You can still decide now.</p>';
+            }
             if (r.Chosen) {
               html += '<div class="ingest-chosen">Chosen: <strong>' + title(r.Chosen.Candidate) + '</strong> into <strong>' + esc(libraryFor(r.Chosen.Target.Root)) + '</strong> &nbsp;' + links(r.Chosen.Candidate.ProviderIds, r.Chosen.Candidate.IsSeries) +
                 (config.DryRun ? '<div class="ingest-muted">Dry run is on, so it has only been planned (see Recent activity). It will be filed once dry run is off.</div>' : '') + '</div>';

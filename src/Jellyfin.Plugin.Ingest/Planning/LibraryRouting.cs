@@ -73,7 +73,7 @@ public static class LibraryRouting
     public static LibraryTargets TargetsOf(MediaLibrary library, string? path)
     {
         ArgumentNullException.ThrowIfNull(library);
-        var root = !string.IsNullOrWhiteSpace(path) && library.Locations.Contains(path, StringComparer.Ordinal) ? path : (library.Locations.Count > 0 ? library.Locations[0] : null);
+        var root = library.Locations.FirstOrDefault(l => PathGuard.SamePath(l, path)) ?? (library.Locations.Count > 0 ? library.Locations[0] : null);
         if (string.IsNullOrWhiteSpace(root))
         {
             return new LibraryTargets(null, null);

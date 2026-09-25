@@ -148,7 +148,7 @@ public class IngestController : ControllerBase
         }
 
         // A library the watch folder already files into keeps its configured folder; any other uses its first folder.
-        var watch = IngestPlugin.Instance?.Configuration.WatchFolders.FirstOrDefault(w => w.Path == review.WatchFolder);
+        var watch = IngestPlugin.Instance?.Configuration.WatchFolders.FirstOrDefault(w => PathGuard.SamePath(w.Path, review.WatchFolder));
         var path = watch is null ? null
             : IngestService.DestinationsOf(watch).FirstOrDefault(d => string.Equals(d.LibraryId, request.LibraryId, StringComparison.OrdinalIgnoreCase))?.Path;
         var library = IngestService.Libraries(_libraryManager.GetVirtualFolders())
@@ -208,18 +208,16 @@ public class IngestController : ControllerBase
     private static string Describe(MetadataCandidate c)
         => c.Year is { } y ? $"{c.Name} ({y})" : c.Name;
 
+    // Who decided isn't stored: only administrators can decide, and the state file shouldn't collect user names
     private void RecordDecision(PendingReview review, string summary)
-    {
-        var who = User.Identity?.Name;
-        _state.Record(new ActivityEntry
+        => _state.Record(new ActivityEntry
         {
             Time = DateTimeOffset.UtcNow,
             Status = ActivityStatus.Decision,
             Release = review.Release,
             WatchFolder = review.WatchFolder,
-            Summary = string.IsNullOrEmpty(who) ? summary : $"{who}: {summary}",
+            Summary = summary,
         });
-    }
 }
 
 /// <summary>

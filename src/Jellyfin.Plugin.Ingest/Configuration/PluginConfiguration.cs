@@ -37,7 +37,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public int SettleSeconds { get; set; } = 300;
 
     /// <summary>
-    /// Gets or sets a value indicating whether to scan the target library after an ingest.
+    /// Gets or sets a value indicating whether Jellyfin refreshes the film or show folders filed into after an ingest (only
+    /// those folders, not whole libraries).
     /// </summary>
     public bool ScanLibraryAfterIngest { get; set; } = true;
 }

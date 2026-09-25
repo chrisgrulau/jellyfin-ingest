@@ -44,8 +44,15 @@ public class PlanningTests
             => Task.FromResult<string?>(season == 1 && episode == 4 ? "Glass Harbour" : null);
     }
 
-    private static IngestPlanner Planner(Func<string, bool>? exists = null, IExistingMedia? existing = null, IMetadataLookup? lookup = null)
-        => new(new MediaIdentifier(lookup ?? new Lookup()), exists ?? (_ => false), _ => null, new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)), existing, p => PathGuard.IsUnder(p, "/lib"));
+    // Folders (no extension) exist unless the libraries are offline; files exist only when the test says so
+    private static IngestPlanner Planner(Func<string, bool>? exists = null, IExistingMedia? existing = null, IMetadataLookup? lookup = null, bool librariesOnline = true)
+        => new(
+            new MediaIdentifier(lookup ?? new Lookup()),
+            p => (librariesOnline && !Path.HasExtension(p)) || (exists?.Invoke(p) ?? false),
+            _ => null,
+            new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)),
+            existing,
+            p => PathGuard.IsUnder(p, "/lib"));
 
     private sealed class Existing(string? seriesFolder = null) : IExistingMedia
     {
@@ -157,7 +164,9 @@ public class PlanningTests
 
         public List<string> Log { get; } = [];
 
-        public bool Exists(string path) => Files.ContainsKey(path);
+        public bool Offline { get; set; }
+
+        public bool Exists(string path) => Files.ContainsKey(path) || (!Offline && !Path.HasExtension(path));
 
         public long Length(string path) => Files[path];
 
@@ -406,7 +415,7 @@ public class PlanningTests
     {
         private readonly HashSet<string> _files = new(StringComparer.Ordinal) { Watch + "/r/Rocket.Club.2019.1080p.mkv" };
 
-        public bool Exists(string path) => _files.Contains(path) || path == Watch + "/r";
+        public bool Exists(string path) => _files.Contains(path) || path == Watch + "/r" || path == "/lib/Movies";
 
         public long Length(string path) => 1;
 
@@ -486,5 +495,51 @@ public class PlanningTests
         Assert.False(report.Succeeded);
         Assert.Empty(report.Completed);
         Assert.Contains("outside the folders", report.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_offline_library_is_retried_not_recreated()
+    {
+        var plan = await Planner(librariesOnline: false).PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+
+        var item = Assert.Single(plan.Review);
+        Assert.Equal(RetryKind.FolderUnavailable, item.Retry);
+        Assert.Equal(RetryKind.FolderUnavailable, plan.Retry);
+        Assert.Contains("/lib/Movies", item.Reason, StringComparison.Ordinal);
+        Assert.Empty(plan.Operations);
+    }
+
+    [Fact]
+    public async Task The_executor_moves_nothing_if_the_library_went_offline_after_planning()
+    {
+        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+        Assert.Contains("/lib/Movies", plan.RequiredFolders);
+        var fs = new FakeFs { Offline = true };
+        fs.Files[Watch + "/r/Rocket.Club.2019.1080p.mkv"] = 1;
+
+        var report = new PlanExecutor(fs, new FixedClock(DateTimeOffset.UnixEpoch)).Execute(plan, Watch + "/r", "/log", dryRun: false);
+
+        Assert.False(report.Succeeded);
+        Assert.True(report.FolderUnavailable);
+        Assert.Empty(report.Completed);
+        Assert.True(fs.Files.ContainsKey(Watch + "/r/Rocket.Club.2019.1080p.mkv"));
+    }
+
+    [Fact]
+    public async Task Nothing_found_anywhere_is_worth_trying_again()
+    {
+        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Completely.Unknown.Thing.2019.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+
+        Assert.Equal(RetryKind.NothingFound, plan.Retry);
+    }
+
+    [Fact]
+    public async Task A_close_call_needs_a_person()
+    {
+        // Two same-named films and no year: only a person can decide
+        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.1080p.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+
+        Assert.Equal(RetryKind.None, plan.Retry);
+        Assert.NotEmpty(plan.Review);
     }
 }

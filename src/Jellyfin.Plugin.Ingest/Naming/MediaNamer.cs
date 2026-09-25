@@ -39,7 +39,7 @@ public static class MediaNamer
     {
         ArgumentNullException.ThrowIfNull(movie);
 
-        var edition = FileNameSanitizer.Sanitize(movie.Edition ?? string.Empty);
+        var edition = FileNameSanitizer.Truncate(FileNameSanitizer.Sanitize(movie.Edition ?? string.Empty), 30);
         var stem = edition.Length > 0 ? $"{MovieFolderName(movie)} - {edition}" : MovieFolderName(movie);
         return stem + NormaliseExtension(extension);
     }
@@ -115,10 +115,13 @@ public static class MediaNamer
     {
         ArgumentNullException.ThrowIfNull(episode);
 
-        var series = FileNameSanitizer.Sanitize(episode.Series.Title);
+        var series = Title(episode.Series.Title);
         var code = EpisodeCode(episode.Season, episode.Episode, episode.EndingEpisode);
-        var title = FileNameSanitizer.Sanitize(episode.Title ?? string.Empty);
-        var stem = title.Length > 0 ? $"{series} {code} - {title}" : $"{series} {code}";
+
+        // Long episode titles (common in CJK) are shortened so the whole name fits the file system's limit
+        var prefix = $"{series} {code} - ";
+        var title = FileNameSanitizer.Truncate(FileNameSanitizer.Sanitize(episode.Title ?? string.Empty), FileNameSanitizer.MaxStemBytes - Encoding.UTF8.GetByteCount(prefix));
+        var stem = title.Length > 0 ? prefix + title : $"{series} {code}";
         return stem + NormaliseExtension(extension);
     }
 
@@ -154,17 +157,28 @@ public static class MediaNamer
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Not filed as an extra."),
     };
 
-    private static string Compose(string title, int? year, string? ids)
+    /// <summary>
+    /// A title ready for a file or folder name: sanitised, shortened to <see cref="FileNameSanitizer.MaxTitleBytes"/>,
+    /// and <c>Untitled</c> when nothing printable is left (a film called "?").
+    /// </summary>
+    /// <param name="title">The title.</param>
+    /// <returns>The safe title; never empty.</returns>
+    public static string Title(string title)
     {
         ArgumentNullException.ThrowIfNull(title);
+        var name = FileNameSanitizer.Truncate(FileNameSanitizer.Sanitize(title), FileNameSanitizer.MaxTitleBytes);
+        return name.Length > 0 ? name : "Untitled";
+    }
 
-        var name = FileNameSanitizer.Sanitize(title);
+    private static string Compose(string title, int? year, string? ids)
+    {
+        var name = Title(title);
         if (year is { } y)
         {
             name += string.Create(CultureInfo.InvariantCulture, $" ({y})");
         }
 
-        return ids is null ? name : $"{name} {ids}";
+        return FileNameSanitizer.AvoidReserved(ids is null ? name : $"{name} {ids}");
     }
 
     private static string NormaliseExtension(string extension)

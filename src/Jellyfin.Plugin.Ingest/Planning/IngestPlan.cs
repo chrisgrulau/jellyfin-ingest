@@ -31,6 +31,24 @@ public enum OperationKind
 public sealed record PlannedOperation(OperationKind Kind, string Source, string Destination);
 
 /// <summary>
+/// Why a release that couldn't be planned may succeed later without anyone doing anything.
+/// </summary>
+public enum RetryKind
+{
+    /// <summary>Only a person can resolve it.</summary>
+    None = 0,
+
+    /// <summary>A library folder isn't there (an unmounted share): tried again until it is.</summary>
+    FolderUnavailable,
+
+    /// <summary>
+    /// No metadata provider returned anything. Jellyfin reports a provider outage the same way as an unknown title,
+    /// so it is tried again a few times before being left for review.
+    /// </summary>
+    NothingFound,
+}
+
+/// <summary>
 /// Something a person has to decide before the release can be filed.
 /// </summary>
 /// <param name="Source">The file concerned (absolute path).</param>
@@ -39,6 +57,9 @@ public sealed record ReviewItem(string Source, string Reason)
 {
     /// <summary>Gets the titles identification considered, best first (empty when identification isn't the problem).</summary>
     public IReadOnlyList<ScoredCandidate> Candidates { get; init; } = [];
+
+    /// <summary>Gets whether (and why) the problem may clear up by itself, so the release is tried again automatically.</summary>
+    public RetryKind Retry { get; init; }
 }
 
 /// <summary>
@@ -59,8 +80,23 @@ public sealed record IngestPlan
     /// </summary>
     public IReadOnlyList<string> AllowedRoots { get; init; } = [];
 
+    /// <summary>
+    /// Gets folders that must already exist when the plan is executed (the library folder, or an existing show's folder).
+    /// They are never created: a missing one means an offline share, and creating it would write to the local disk
+    /// under the mount point.
+    /// </summary>
+    public IReadOnlyList<string> RequiredFolders { get; init; } = [];
+
     /// <summary>Gets the items that need a decision; when non-empty nothing is moved.</summary>
     public IReadOnlyList<ReviewItem> Review { get; init; } = [];
+
+    /// <summary>
+    /// Gets why the plan may succeed if tried again later: <see cref="RetryKind.FolderUnavailable"/> wins over
+    /// <see cref="RetryKind.NothingFound"/>; <see cref="RetryKind.None"/> when any item needs a person.
+    /// </summary>
+    public RetryKind Retry => Review.Count == 0 || Review.Any(r => r.Retry == RetryKind.None) ? RetryKind.None
+        : Review.Any(r => r.Retry == RetryKind.FolderUnavailable) ? RetryKind.FolderUnavailable
+        : RetryKind.NothingFound;
 
     /// <summary>Gets a value indicating whether the plan can be executed as is.</summary>
     public bool IsReady => Review.Count == 0 && Operations.Any(o => o.Kind is OperationKind.Video);

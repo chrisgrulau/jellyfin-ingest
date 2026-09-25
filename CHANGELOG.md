@@ -5,6 +5,37 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- An offline library (an unmounted share) is never recreated on the local disk (ING-10): the library folder, or the
+  existing show's folder, must exist when planning and again before moving. The release waits and is tried again
+  automatically (after 5 minutes, doubling to hourly) until the share is back.
+- A provider outage no longer strands releases in review (ING-07). "Nothing found" is tried again after 10 minutes,
+  1 hour and 6 hours before being left for a person. After 12 empty searches in a row, identification pauses (10
+  minutes, doubling to 2 hours) and the activity panel says why. The review card shows when the next try is due.
+- Titles in non-Latin scripts (Cyrillic, Greek, CJK, Hebrew, Arabic, Thai …) now match, and two different ones from the
+  same year are no longer merged into one candidate (ING-09).
+- A Retry, Choose or Quarantine made while a release is being planned is no longer lost (ING-11).
+- File names (ING-12): leading dots are removed (no hidden folders Jellyfin skips); a title with nothing printable
+  becomes "Untitled"; titles and episode titles are shortened, between whole characters, to fit 255-byte names with
+  room for subtitle flags; Windows device names (`CON`, `NUL` …) get an underscore.
+- Paths are compared one way everywhere (ING-13): `/in/` and `/in` are the same watch folder, and folders are stored
+  without a trailing separator. Reviews of a watch folder removed from the settings are dropped.
+- The state file (ING-15): read and write errors no longer break the sweep or the settings page (the page runs from
+  memory and the problem is logged once), an unreadable file is never overwritten, a damaged one is kept as
+  `state.json.corrupt-<time>`, and null values in it are tolerated.
+
+### Changed
+- Provider searches are remembered (ING-07): results for 24 hours, kept across restarts in `search-cache.json`, so a
+  season pack searches for its show once and restarts, retries or settings changes don't search again.
+- The server's film or series names are loaded once per sweep instead of once per video (ING-08).
+- After filing, only the film or show folders filed into are refreshed, instead of queueing Jellyfin's server-wide
+  library scan (ING-14). The setting is now labelled "Refresh filed folders in Jellyfin after ingesting".
+
+### Privacy
+- Per-file moves and review reasons (full paths) are logged at Debug; Information gets one line per release (ING-17).
+- The user who made a review decision is no longer stored.
+- `actions.jsonl` keeps 90 days, at most 5 MB. The README lists what Ingest stores and for how long.
+
 ## [0.1.4-alpha] - 2026-09-25
 
 ### Security

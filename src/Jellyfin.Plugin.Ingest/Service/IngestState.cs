@@ -9,6 +9,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Planning;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Ingest.Service;
 
@@ -109,11 +110,20 @@ public sealed record PendingReview
     /// </summary>
     public IReadOnlyList<ScoredCandidate> SearchResults { get; init; } = [];
 
+    /// <summary>Gets when the release will be tried again automatically (an offline library, or providers that found nothing), if it will.</summary>
+    public DateTimeOffset? RetryAt { get; init; }
+
     /// <summary>Gets the title and library chosen in review, if any; used instead of searching when the release is planned again.</summary>
     public ChosenMatch? Chosen { get; init; }
 
     /// <summary>Gets the pending request.</summary>
     public ReviewRequest Request { get; init; }
+
+    /// <summary>
+    /// Gets a counter that goes up with every request, so planning (which takes a while) only clears the request it
+    /// started from and never one made while it was running.
+    /// </summary>
+    public int RequestVersion { get; init; }
 }
 
 /// <summary>
@@ -137,9 +147,11 @@ public sealed record IngestState
 
 /// <summary>
 /// Thread-safe access to the <see cref="IngestState"/>, shared by the sweep service, the purge task and the API.
-/// Every change is written straight to disk (write to a temporary file, then replace).
+/// Every change is written straight to disk (write to a temporary file, then replace). The file is small (activity and
+/// candidates are capped). If it can't be read or written, the dashboard carries on from memory: a damaged file is set
+/// aside rather than overwritten, and an unreadable one is never replaced.
 /// </summary>
-public sealed class IngestStateStore
+public sealed partial class IngestStateStore
 {
     /// <summary>How many activity entries are kept.</summary>
     public const int MaxActivity = 300;
@@ -153,17 +165,22 @@ public sealed class IngestStateStore
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private readonly string _path;
+    private readonly ILogger? _logger;
     private readonly Lock _lock = new();
     private StateFile? _state;
+    private bool _memoryOnly;
+    private string? _lastSaveError;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IngestStateStore"/> class.
     /// </summary>
     /// <param name="path">Absolute path of the JSON state file.</param>
-    public IngestStateStore(string path)
+    /// <param name="logger">Logger for problems with the file (optional).</param>
+    public IngestStateStore(string path, ILogger? logger = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         _path = path;
+        _logger = logger;
     }
 
     /// <summary>
@@ -238,20 +255,30 @@ public sealed class IngestStateStore
     }
 
     /// <summary>
-    /// Adds or refreshes a release's review. A title chosen earlier is kept; any request is cleared (it has been acted on).
+    /// Adds or refreshes a release's review. A title chosen earlier is kept. The request that was acted on is cleared;
+    /// one made since (a newer <see cref="PendingReview.RequestVersion"/>) is kept, so it is acted on next.
     /// </summary>
-    /// <param name="review">The review (its <see cref="PendingReview.Chosen"/> and <see cref="PendingReview.Request"/> are ignored).</param>
-    public void PutReview(PendingReview review)
+    /// <param name="review">The review (its <see cref="PendingReview.Chosen"/>, <see cref="PendingReview.Request"/> and
+    /// <see cref="PendingReview.RequestVersion"/> are ignored).</param>
+    /// <param name="actedOnVersion">The request version the caller read before acting; <c>null</c> clears any request.</param>
+    public void PutReview(PendingReview review, int? actedOnVersion = null)
     {
         ArgumentNullException.ThrowIfNull(review);
         lock (_lock)
         {
             var s = Load();
             var i = s.Reviews.FindIndex(r => r.Id == review.Id);
-            var chosen = i >= 0 ? s.Reviews[i].Chosen : null;
-            var searched = i >= 0 ? s.Reviews[i].SearchResults : [];
+            var existing = i >= 0 ? s.Reviews[i] : null;
+            var newer = existing is not null && actedOnVersion is { } v && existing.RequestVersion != v;
             var candidates = review.Candidates.Take(MaxCandidates).ToList();
-            var updated = review with { Candidates = candidates, Chosen = chosen, SearchResults = searched, Request = ReviewRequest.None };
+            var updated = review with
+            {
+                Candidates = candidates,
+                Chosen = existing?.Chosen,
+                SearchResults = existing?.SearchResults ?? [],
+                Request = newer ? existing!.Request : ReviewRequest.None,
+                RequestVersion = existing?.RequestVersion ?? 0,
+            };
             if (i >= 0)
             {
                 s.Reviews[i] = updated;
@@ -285,7 +312,7 @@ public sealed class IngestStateStore
     /// <param name="chosen">The chosen title and library, or <c>null</c> to keep searching (clears an earlier choice).</param>
     /// <returns><c>false</c> if there is no such review.</returns>
     public bool RequestRetry(string id, ChosenMatch? chosen)
-        => Update(id, r => r with { Chosen = chosen, Request = ReviewRequest.Retry });
+        => Update(id, r => r with { Chosen = chosen, Request = ReviewRequest.Retry, RequestVersion = r.RequestVersion + 1 });
 
     /// <summary>
     /// Stores the results of a title search made for a review, replacing any earlier ones.
@@ -302,14 +329,15 @@ public sealed class IngestStateStore
     /// <param name="id">Review id.</param>
     /// <returns><c>false</c> if there is no such review.</returns>
     public bool RequestQuarantine(string id)
-        => Update(id, r => r with { Request = ReviewRequest.Quarantine });
+        => Update(id, r => r with { Request = ReviewRequest.Quarantine, RequestVersion = r.RequestVersion + 1 });
 
     /// <summary>
-    /// Clears a review's pending request, keeping everything else.
+    /// Clears a review's pending request, keeping everything else, unless a newer request has been made since.
     /// </summary>
     /// <param name="id">Review id.</param>
-    public void ClearRequest(string id)
-        => Update(id, r => r with { Request = ReviewRequest.None });
+    /// <param name="actedOnVersion">The request version that was acted on.</param>
+    public void ClearRequest(string id, int actedOnVersion)
+        => Update(id, r => r.RequestVersion == actedOnVersion ? r with { Request = ReviewRequest.None } : r);
 
     /// <summary>
     /// Marks a review as planned in dry run: its old reasons no longer apply, so they are replaced by a note and the
@@ -317,8 +345,9 @@ public sealed class IngestStateStore
     /// </summary>
     /// <param name="id">Review id.</param>
     /// <param name="note">What was planned.</param>
-    public void MarkPlannedInDryRun(string id, string note)
-        => Update(id, r => r with { Request = ReviewRequest.None, Items = [new PendingReviewItem(r.Release, note)] });
+    /// <param name="actedOnVersion">The request version that was acted on (a newer request is kept).</param>
+    public void MarkPlannedInDryRun(string id, string note, int actedOnVersion)
+        => Update(id, r => r with { Request = r.RequestVersion == actedOnVersion ? ReviewRequest.None : r.Request, Items = [new PendingReviewItem(r.Release, note)] });
 
     /// <summary>
     /// Removes a review (the release was filed, quarantined or has gone from the watch folder).
@@ -354,6 +383,23 @@ public sealed class IngestStateStore
         }
     }
 
+    /// <summary>
+    /// Drops reviews of watch folders that are no longer configured.
+    /// </summary>
+    /// <param name="watchFolders">The configured watch folders.</param>
+    public void PruneWatchFolders(IReadOnlyCollection<string> watchFolders)
+    {
+        ArgumentNullException.ThrowIfNull(watchFolders);
+        lock (_lock)
+        {
+            var s = Load();
+            if (s.Reviews.RemoveAll(r => !watchFolders.Any(w => PathGuard.SamePath(w, r.WatchFolder))) > 0)
+            {
+                Save(s);
+            }
+        }
+    }
+
     private bool Update(string id, Func<PendingReview, PendingReview> change)
     {
         lock (_lock)
@@ -378,25 +424,61 @@ public sealed class IngestStateStore
             return _state;
         }
 
+        StateFile? loaded = null;
         try
         {
-            _state = File.Exists(_path) ? JsonSerializer.Deserialize<StateFile>(File.ReadAllText(_path), JsonOptions) : null;
+            if (File.Exists(_path))
+            {
+                try
+                {
+                    loaded = JsonSerializer.Deserialize<StateFile>(File.ReadAllText(_path), JsonOptions);
+                }
+                catch (JsonException ex)
+                {
+                    // A damaged state file only loses dashboard history; the releases themselves are untouched. It is
+                    // kept to one side (not silently overwritten) so it can be inspected.
+                    var aside = _path + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+                    File.Move(_path, aside, overwrite: true);
+                    if (_logger is not null)
+                    {
+                        LogCorrupt(_logger, aside, ex);
+                    }
+                }
+            }
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // A damaged state file only loses dashboard history; the releases themselves are untouched.
-            _state = null;
+            // Can't read it (permissions, offline disk): carry on in memory and never overwrite what's there
+            _memoryOnly = true;
+            if (_logger is not null)
+            {
+                LogUnreadable(_logger, _path, ex);
+            }
         }
 
-        _state ??= new StateFile();
+        _state = loaded ?? new StateFile();
+        _state.Reviews ??= [];
+        _state.Activity ??= [];
+        _state.Activity.RemoveAll(a => a is null || a.Release is null);
+        _state.Reviews.RemoveAll(r => r is null || r.Id is null || r.WatchFolder is null || r.Release is null);
 
-        // A choice saved in an older format can come back incomplete; drop it rather than plan with it.
         for (var i = 0; i < _state.Reviews.Count; i++)
         {
-            if (_state.Reviews[i].Chosen is { } c && (c.Candidate is null || c.Target is null))
+            // Lists written as null come back as null; a choice saved in an older format can come back incomplete
+            // (dropped rather than planned with)
+            var r = _state.Reviews[i];
+            _state.Reviews[i] = r with
             {
-                _state.Reviews[i] = _state.Reviews[i] with { Chosen = null };
-            }
+                Items = r.Items ?? [],
+                Candidates = r.Candidates ?? [],
+                SearchResults = r.SearchResults ?? [],
+                Chosen = r.Chosen is { Candidate: not null, Target: not null } c ? c : null,
+            };
+        }
+
+        for (var i = 0; i < _state.Activity.Count; i++)
+        {
+            _state.Activity[i] = _state.Activity[i] with { Details = _state.Activity[i].Details ?? [], Summary = _state.Activity[i].Summary ?? string.Empty };
         }
 
         return _state;
@@ -404,11 +486,41 @@ public sealed class IngestStateStore
 
     private void Save(StateFile state)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var temp = _path + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(state, JsonOptions));
-        File.Move(temp, _path, overwrite: true);
+        if (_memoryOnly)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+            var temp = _path + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(state, JsonOptions));
+            File.Move(temp, _path, overwrite: true);
+            _lastSaveError = null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The dashboard keeps working from memory; the problem is logged once until it changes
+            if (!string.Equals(_lastSaveError, ex.Message, StringComparison.Ordinal))
+            {
+                _lastSaveError = ex.Message;
+                if (_logger is not null)
+                {
+                    LogUnwritable(_logger, _path, ex);
+                }
+            }
+        }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest: the state file was damaged and has been set aside as {Path}; the dashboard starts empty")]
+    private static partial void LogCorrupt(ILogger logger, string path, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Ingest: can't read the state file {Path}; the dashboard runs from memory until restart")]
+    private static partial void LogUnreadable(ILogger logger, string path, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Ingest: can't save the state file {Path}; changes are kept in memory")]
+    private static partial void LogUnwritable(ILogger logger, string path, Exception exception);
 
     private sealed class StateFile
     {

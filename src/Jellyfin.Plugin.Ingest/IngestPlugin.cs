@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Jellyfin.Plugin.Ingest.Configuration;
+using Jellyfin.Plugin.Ingest.Planning;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
@@ -42,7 +43,13 @@ public class IngestPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
         {
             c.QuarantineRetentionDays = Math.Max(1, c.QuarantineRetentionDays);
             c.SettleSeconds = Math.Max(5, c.SettleSeconds);
-            c.QuarantinePath = (c.QuarantinePath ?? string.Empty).Trim();
+            c.QuarantinePath = PathGuard.Tidy(c.QuarantinePath);
+
+            // One spelling per folder ("/in/" is "/in"), so everything keyed by a watch folder agrees
+            foreach (var w in c.WatchFolders)
+            {
+                w.Path = PathGuard.Tidy(w.Path);
+            }
         }
 
         base.UpdateConfiguration(configuration);

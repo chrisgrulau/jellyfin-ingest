@@ -15,6 +15,33 @@ public static class PathGuard
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     /// <summary>
+    /// Gets the comparer for normalised paths: case-insensitive where the platform's file system usually is.
+    /// </summary>
+    public static StringComparer Comparer { get; } =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    /// <summary>
+    /// Whether two paths name the same folder or file (<c>/in</c> and <c>/in/</c> do).
+    /// </summary>
+    /// <param name="a">First path.</param>
+    /// <param name="b">Second path.</param>
+    /// <returns><c>true</c> if they are the same after normalisation; <c>false</c> if either is empty.</returns>
+    public static bool SamePath(string? a, string? b)
+        => !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) && Normalise(a).Equals(Normalise(b), Comparison);
+
+    /// <summary>
+    /// Tidies a configured folder: trimmed, and for a full path, normalised (so <c>/in/</c> is stored as <c>/in</c>).
+    /// Anything else is returned trimmed, for the folder rules to report.
+    /// </summary>
+    /// <param name="path">The folder as entered.</param>
+    /// <returns>The tidied folder.</returns>
+    public static string Tidy(string? path)
+    {
+        var p = (path ?? string.Empty).Trim();
+        return p.Length > 0 && Path.IsPathFullyQualified(p) ? Normalise(p) : p;
+    }
+
+    /// <summary>
     /// Normalises a path for comparison.
     /// </summary>
     /// <param name="path">The path.</param>

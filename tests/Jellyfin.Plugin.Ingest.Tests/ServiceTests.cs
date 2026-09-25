@@ -182,4 +182,89 @@ public class ServiceTests
         Assert.Empty(t.Observe(snap, T0, Settle));
         Assert.Equal(["r"], t.Observe(snap, T0.AddSeconds(61), Settle));
     }
+
+    [Fact]
+    public void An_offline_library_is_retried_until_it_is_back_at_most_hourly()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(5), IngestService.RetryDelay(RetryKind.FolderUnavailable, 1));
+        Assert.Equal(TimeSpan.FromMinutes(10), IngestService.RetryDelay(RetryKind.FolderUnavailable, 2));
+        Assert.Equal(TimeSpan.FromMinutes(60), IngestService.RetryDelay(RetryKind.FolderUnavailable, 5));
+        Assert.Equal(TimeSpan.FromMinutes(60), IngestService.RetryDelay(RetryKind.FolderUnavailable, 500));
+    }
+
+    [Fact]
+    public void Nothing_found_is_retried_three_times_then_left_for_a_person()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(10), IngestService.RetryDelay(RetryKind.NothingFound, 1));
+        Assert.Equal(TimeSpan.FromHours(1), IngestService.RetryDelay(RetryKind.NothingFound, 2));
+        Assert.Equal(TimeSpan.FromHours(6), IngestService.RetryDelay(RetryKind.NothingFound, 3));
+        Assert.Null(IngestService.RetryDelay(RetryKind.NothingFound, 4));
+        Assert.Null(IngestService.RetryDelay(RetryKind.None, 1));
+    }
+
+    [Fact]
+    public void Only_the_folders_filed_into_are_refreshed()
+    {
+        var plan = new IngestPlan
+        {
+            ReleaseName = "r",
+            Operations =
+            [
+                new PlannedOperation(OperationKind.Video, "/drop/r/a.mkv", "/lib/Shows/Lantern (2001)/Season 01/a.mkv"),
+                new PlannedOperation(OperationKind.Subtitle, "/drop/r/a.srt", "/lib/Shows/Lantern (2001)/Season 01/a.en.srt"),
+                new PlannedOperation(OperationKind.Quarantine, "/drop/r/x.nfo", "/drop/.ingest-quarantine/2026-09-25/r/x.nfo"),
+            ],
+            AllowedRoots = ["/lib/Shows/Lantern (2001)", "/drop/.ingest-quarantine/2026-09-25"],
+        };
+
+        Assert.Equal(["/lib/Shows/Lantern (2001)"], IngestService.FiledFolders(plan));
+    }
+
+    private static string Line(DateTimeOffset time, string release = "r")
+        => $$"""{"time":"{{time:O}}","release":"{{release}}","kind":"Video","source":"/drop/a.mkv","destination":"/lib/a.mkv","bytes":1,"phase":"done"}""";
+
+    [Fact]
+    public void The_action_log_keeps_ninety_days()
+    {
+        var now = new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero);
+        string[] lines = [Line(now.AddDays(-200)), "not json", Line(now.AddDays(-91)), Line(now.AddDays(-89)), Line(now)];
+
+        var keep = ActionLog.Trim(lines, now, ActionLog.MaxAge, ActionLog.MaxBytes);
+
+        Assert.Equal([lines[3], lines[4]], keep);
+    }
+
+    [Fact]
+    public void The_action_log_keeps_the_newest_that_fit()
+    {
+        var now = new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero);
+        var lines = Enumerable.Range(0, 10).Select(i => Line(now.AddMinutes(i), "r" + i)).ToList();
+        var budget = lines.Skip(7).Sum(l => System.Text.Encoding.UTF8.GetByteCount(l) + 1);
+
+        var keep = ActionLog.Trim(lines, now.AddMinutes(10), ActionLog.MaxAge, budget);
+
+        Assert.Equal(lines.Skip(7), keep);
+    }
+
+    [Fact]
+    public void Trimming_the_action_log_file_rewrites_it_only_when_needed()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "ingest-log-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "actions.jsonl");
+            var now = new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero);
+            File.WriteAllLines(path, [Line(now.AddDays(-120)), Line(now)]);
+
+            Assert.Equal(1, ActionLog.TrimFile(path, now));
+            Assert.Equal([Line(now)], File.ReadAllLines(path));
+            Assert.Equal(0, ActionLog.TrimFile(path, now));
+            Assert.Equal(0, ActionLog.TrimFile(Path.Combine(dir, "missing.jsonl"), now));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }

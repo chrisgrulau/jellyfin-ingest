@@ -27,18 +27,30 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// <summary>How often watch folders are swept.</summary>
     public static readonly TimeSpan SweepInterval = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Provider searches in a row that may come back empty before identification pauses (a release can make up to five,
+    /// so this is about three unknown releases running). An outage looks like "nothing found" to plugins.
+    /// </summary>
+    public const int EmptySearchesBeforePause = 12;
+
     private const long MaxSubtitleBytesToRead = 4L * 1024 * 1024;
 
     private readonly ILibraryManager _libraryManager;
+    private readonly ILibraryMonitor _libraryMonitor;
     private readonly IProviderManager _providerManager;
     private readonly ILogger<IngestService> _logger;
     private readonly IngestStateStore _state;
     private readonly IApplicationPaths _paths;
     private bool _markersMigrated;
+    private DateTimeOffset _logTrimmed;
     private readonly Dictionary<string, ReleaseTracker> _trackers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _settings = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _folderErrors = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (string WatchFolder, string Release, DateTimeOffset At, int Attempt)> _retries = new(StringComparer.Ordinal);
     private readonly TimeProvider _clock = TimeProvider.System;
+    private CachingMetadataLookup? _lookup;
+    private DateTimeOffset _identificationPausedUntil;
+    private int _pauses;
     private CancellationTokenSource? _stopping;
     private Task? _loop;
 
@@ -46,12 +58,14 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// Initializes a new instance of the <see cref="IngestService"/> class.
     /// </summary>
     /// <param name="libraryManager">Jellyfin library manager.</param>
+    /// <param name="libraryMonitor">Jellyfin library monitor (told which folders changed, so only those are refreshed).</param>
     /// <param name="providerManager">Jellyfin provider manager.</param>
     /// <param name="state">Reviews and activity shown on the dashboard.</param>
     /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
     /// <param name="logger">Logger.</param>
-    public IngestService(ILibraryManager libraryManager, IProviderManager providerManager, IngestStateStore state, IApplicationPaths paths, ILogger<IngestService> logger)
+    public IngestService(ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IProviderManager providerManager, IngestStateStore state, IApplicationPaths paths, ILogger<IngestService> logger)
     {
+        _libraryMonitor = libraryMonitor ?? throw new ArgumentNullException(nameof(libraryMonitor));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
@@ -149,6 +163,46 @@ public sealed partial class IngestService : IHostedService, IDisposable
             : [new DestinationSetting(watch.TargetLibraryId, watch.TargetPath)];
     }
 
+    /// <summary>
+    /// How long to wait before trying a release again by itself. An offline library is retried until it is back (5
+    /// minutes, doubling to hourly); providers that found nothing are retried three times (after 10 minutes, 1 hour and
+    /// 6 hours), since an outage and an unknown title look the same, then left for a person.
+    /// </summary>
+    /// <param name="kind">Why the release couldn't be planned.</param>
+    /// <param name="attempt">Which retry this would be (1 for the first).</param>
+    /// <returns>The delay, or <c>null</c> to stop retrying.</returns>
+    public static TimeSpan? RetryDelay(RetryKind kind, int attempt)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(attempt, 1);
+        return kind switch
+        {
+            RetryKind.FolderUnavailable => TimeSpan.FromMinutes(Math.Min(60, 5 * Math.Pow(2, Math.Min(attempt - 1, 10)))),
+            RetryKind.NothingFound => attempt switch
+            {
+                1 => TimeSpan.FromMinutes(10),
+                2 => TimeSpan.FromHours(1),
+                3 => TimeSpan.FromHours(6),
+                _ => null,
+            },
+            _ => null,
+        };
+    }
+
+    // Schedules (or ends) automatic retries of a release; returns when the next one is due
+    private DateTimeOffset? ScheduleRetry(string id, WatchFolder watch, string release, RetryKind kind)
+    {
+        var attempt = _retries.TryGetValue(id, out var r) ? r.Attempt + 1 : 1;
+        if (RetryDelay(kind, attempt) is not { } delay)
+        {
+            _retries.Remove(id);
+            return null;
+        }
+
+        var at = _clock.GetUtcNow() + delay;
+        _retries[id] = (watch.Path, release, at, attempt);
+        return at;
+    }
+
     private async Task RunAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -189,6 +243,13 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
         var config = plugin.Configuration;
         var libraries = Libraries(_libraryManager.GetVirtualFolders());
+
+        // One search cache for the service's life (kept on disk), and one library index per sweep
+        _lookup ??= new CachingMetadataLookup(new JellyfinMetadataLookup(_providerManager), _clock, Path.Combine(plugin.DataFolderPath, "search-cache.json"));
+        _lookup.BeginSweep();
+        var sweep = new Sweep(
+            new MediaIdentifier(_lookup, new JellyfinLibraryIndex(_libraryManager, [])),
+            [.. libraries.SelectMany(l => l.Locations)]);
         var problems = FolderProblems(config, libraries, _paths);
         if (!_markersMigrated)
         {
@@ -196,19 +257,28 @@ public sealed partial class IngestService : IHostedService, IDisposable
             RecoverInterruptedMoves(plugin.DataFolderPath);
             MigrateQuarantineMarkers(plugin.DataFolderPath, config, problems);
         }
+
+        // Keep only recent history in the action log (after any recovery has read it), checked daily
+        if (_clock.GetUtcNow() - _logTrimmed >= TimeSpan.FromDays(1))
+        {
+            _logTrimmed = _clock.GetUtcNow();
+            TrimActionLog(plugin.DataFolderPath);
+        }
+        // Reviews of a watch folder that has been removed from the settings can never be acted on
+        _state.PruneWatchFolders([.. config.WatchFolders.Select(w => w.Path)]);
         foreach (var watch in config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)))
         {
             // Each watch folder on its own: one that can't be read (permissions, offline share) mustn't stop the others
             try
             {
                 // An unsafe watch or quarantine folder is never swept; the reason is shown once in the activity panel
-                var problem = problems.FirstOrDefault(p => p.Folder == watch.Path || p.Folder == config.QuarantinePath);
+                var problem = problems.FirstOrDefault(p => PathGuard.SamePath(p.Folder, watch.Path) || PathGuard.SamePath(p.Folder, config.QuarantinePath));
                 if (problem is not null)
                 {
                     throw new InvalidOperationException("Not swept, because the folder settings are unsafe: " + problem.Problem + " (" + problem.Folder + ")");
                 }
 
-                await SweepFolderAsync(plugin, config, libraries, watch, ct).ConfigureAwait(false);
+                await SweepFolderAsync(plugin, config, libraries, sweep, watch, ct).ConfigureAwait(false);
                 _folderErrors.Remove(watch.Path);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -234,9 +304,11 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 }
             }
         }
+
+        _lookup.Save();
     }
 
-    private async Task SweepFolderAsync(IngestPlugin plugin, PluginConfiguration config, IReadOnlyCollection<MediaLibrary> libraries, WatchFolder watch, CancellationToken ct)
+    private async Task SweepFolderAsync(IngestPlugin plugin, PluginConfiguration config, IReadOnlyCollection<MediaLibrary> libraries, Sweep sweep, WatchFolder watch, CancellationToken ct)
     {
         if (!Directory.Exists(watch.Path))
         {
@@ -277,6 +349,19 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
         _settings[watch.Path] = settings;
 
+        // Releases due an automatic retry are offered again; retries of releases that have gone are dropped
+        foreach (var (id, retry) in _retries.Where(r => r.Value.WatchFolder == watch.Path).ToList())
+        {
+            if (!snapshot.ContainsKey(retry.Release))
+            {
+                _retries.Remove(id);
+            }
+            else if (retry.At <= _clock.GetUtcNow())
+            {
+                tracker.Forget(retry.Release);
+            }
+        }
+
         _state.PruneReviews(watch.Path, [.. snapshot.Keys, .. scan.Links, .. scan.Unsettled]);
         ReviewLinks(watch, scan.Links);
         foreach (var review in _state.Snapshot().Reviews.Where(r => r.WatchFolder == watch.Path && r.Request != ReviewRequest.None))
@@ -290,7 +375,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     LogReleaseFailed(_logger, review.Release, ex);
-                    ReportFailure(watch, review.Release, "Quarantine failed: " + ex.Message, []);
+                    ReportFailure(watch, review.Release, "Quarantine failed: " + ex.Message, [], review.RequestVersion);
                 }
             }
             else
@@ -302,9 +387,18 @@ public sealed partial class IngestService : IHostedService, IDisposable
         foreach (var release in tracker.Observe(snapshot, _clock.GetUtcNow(), TimeSpan.FromSeconds(Math.Max(5, config.SettleSeconds))))
         {
             ct.ThrowIfCancellationRequested();
+
+            // Providers look down: leave the release unhandled so it is planned once the pause ends
+            if (_clock.GetUtcNow() < _identificationPausedUntil)
+            {
+                continue;
+            }
+
+            // The request this planning acts on; one made while planning runs is kept for the next sweep
+            var seen = _state.GetReview(IngestStateStore.ReviewId(watch.Path, release))?.RequestVersion ?? 0;
             try
             {
-                await IngestAsync(plugin.DataFolderPath, config, watch, release, snapshot[release], targets, quarantine, ct).ConfigureAwait(false);
+                await IngestAsync(plugin.DataFolderPath, config, sweep, watch, release, snapshot[release], targets, quarantine, seen, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -315,11 +409,51 @@ public sealed partial class IngestService : IHostedService, IDisposable
 #pragma warning restore CA1031
             {
                 LogReleaseFailed(_logger, release, ex);
-                ReportFailure(watch, release, ex.Message, []);
+                ReportFailure(watch, release, ex.Message, [], seen);
             }
 
             tracker.MarkHandled(release);
+            PauseIfProvidersLookDown();
         }
+    }
+
+    // Many searches in a row found nothing: most likely an outage, so stop spending quota and try again later
+    private void PauseIfProvidersLookDown()
+    {
+        if (_lookup is null)
+        {
+            return;
+        }
+
+        if (_lookup.ConsecutiveEmpty == 0)
+        {
+            _pauses = 0;
+            return;
+        }
+
+        if (_lookup.ConsecutiveEmpty < EmptySearchesBeforePause)
+        {
+            return;
+        }
+
+        var pause = TimeSpan.FromMinutes(Math.Min(120, 10 * Math.Pow(2, Math.Min(_pauses, 10))));
+        _identificationPausedUntil = _clock.GetUtcNow() + pause;
+        LogProvidersPaused(_logger, _lookup.ConsecutiveEmpty, pause.TotalMinutes);
+        if (_pauses == 0)
+        {
+            _state.Record(new ActivityEntry
+            {
+                Time = _clock.GetUtcNow(),
+                Status = ActivityStatus.Failed,
+                Release = "Metadata providers",
+                Summary = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The last {_lookup.ConsecutiveEmpty} title searches found nothing, so the metadata providers may be down. Identifying new releases is paused for {pause.TotalMinutes:0} minutes, then tried again (pausing for longer, up to 2 hours, while they still find nothing)."),
+            });
+        }
+
+        _pauses++;
+        _lookup.ResetEmptyCount();
     }
 
     // The dated folder (directly inside the quarantine) that a quarantine destination falls in
@@ -369,6 +503,22 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
     }
 
+    private void TrimActionLog(string dataFolder)
+    {
+        try
+        {
+            var removed = ActionLog.TrimFile(Path.Combine(dataFolder, "actions.jsonl"), _clock.GetUtcNow());
+            if (removed > 0)
+            {
+                LogActionLogTrimmed(_logger, removed);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            LogActionLogTrimFailed(_logger, ex);
+        }
+    }
+
     // Dated quarantine folders created before markers existed are marked if the action log shows Ingest filled them
     private void MigrateQuarantineMarkers(string dataFolder, PluginConfiguration config, IReadOnlyList<FolderProblem> problems)
     {
@@ -380,8 +530,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
         var roots = config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path))
             .Select(w => QuarantineFor(config, w))
-            .Where(q => !problems.Any(p => p.Folder == q))
-            .Distinct(StringComparer.Ordinal)
+            .Where(q => !problems.Any(p => PathGuard.SamePath(p.Folder, q)))
+            .Select(PathGuard.Normalise)
+            .Distinct(PathGuard.Comparer)
             .ToList();
         try
         {
@@ -420,38 +571,44 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private async Task IngestAsync(
         string dataFolder,
         PluginConfiguration config,
+        Sweep sweep,
         WatchFolder watch,
         string release,
         IReadOnlyList<ReleaseFile> files,
         LibraryTargets targets,
         string quarantine,
+        int seenVersion,
         CancellationToken ct)
     {
         var id = IngestStateStore.ReviewId(watch.Path, release);
         var previous = _state.GetReview(id);
-        // Titles anywhere on the server count as "already in the library": a show kept in another library is still
-        // strong evidence, and its new episodes join it there.
-        var identifier = new MediaIdentifier(
-            new JellyfinMetadataLookup(_providerManager),
-            new JellyfinLibraryIndex(_libraryManager, []));
-        // Existing shows may only be joined inside one of the server's library folders
-        var libraryFolders = Libraries(_libraryManager.GetVirtualFolders()).SelectMany(l => l.Locations).ToList();
+        if (previous is not null && previous.RequestVersion != seenVersion)
+        {
+            // A decision arrived between the sweep noticing the release and planning it: plan with that decision
+            seenVersion = previous.RequestVersion;
+        }
+
+        // Titles anywhere on the server count as "already in the library" (a show kept in another library is still
+        // strong evidence, and its new episodes join it there), but existing shows may only be joined inside one of
+        // the server's library folders
         var planner = new IngestPlanner(
-            identifier,
+            sweep.Identifier,
             p => File.Exists(p) || Directory.Exists(p),
             ReadSmallText,
             _clock,
             new JellyfinExistingMedia(_libraryManager),
-            p => PathGuard.IsUnderAny(p, libraryFolders));
+            p => PathGuard.IsUnderAny(p, sweep.LibraryFolders));
         var plan = await planner.PlanAsync(watch.Path, release, files, targets, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
 
         Directory.CreateDirectory(dataFolder);
         if (!plan.IsReady)
         {
+            var retryAt = ScheduleRetry(id, watch, release, plan.Retry);
             var items = plan.Review.Select(r => new PendingReviewItem(Path.GetRelativePath(watch.Path, r.Source), r.Reason)).ToList();
+            LogNeedsReview(_logger, release, items.Count);
             foreach (var item in items)
             {
-                LogNeedsReview(_logger, release, item.Source, item.Reason);
+                LogNeedsReviewItem(_logger, release, item.Source, item.Reason);
             }
 
             // Only report a review once per distinct set of reasons (restarts and retries plan the release again).
@@ -476,9 +633,13 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 Time = _clock.GetUtcNow(),
                 Items = items,
                 Candidates = DistinctCandidates(plan.Review),
-            });
+                RetryAt = retryAt,
+            },
+            seenVersion);
             return;
         }
+
+        _retries.Remove(id);
 
         // Mark the dated quarantine folder as Ingest's own before anything is moved into it (the purge only deletes marked folders)
         if (!config.DryRun)
@@ -492,9 +653,19 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var report = new PlanExecutor(new PhysicalFileOperations(), _clock)
             .Execute(plan, Path.Combine(watch.Path, release), Path.Combine(dataFolder, "actions.jsonl"), config.DryRun, ct);
         var prefix = config.DryRun ? "[dry run] would" : "Did";
-        foreach (var op in report.Completed)
+        // Per-file detail (paths can hold user and share names) only at Debug; one line per release at Information
+        if (_logger.IsEnabled(LogLevel.Debug))
         {
-            LogOperation(_logger, prefix, op.Kind, op.Source, op.Destination);
+            foreach (var (op, source) in report.Completed.Select(o => (o, Path.GetRelativePath(watch.Path, o.Source))))
+            {
+                LogOperation(_logger, prefix, op.Kind, source, op.Destination);
+            }
+        }
+
+        var summaryLine = Summarise(report.Completed, config.DryRun);
+        if (report.Succeeded)
+        {
+            LogFiled(_logger, release, summaryLine);
         }
 
         if (report.Warning is not null)
@@ -511,7 +682,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 : report.RollbackProblems.Count == 0
                     ? string.Create(CultureInfo.InvariantCulture, $"Nothing was filed: {error} ({report.RolledBack.Count} completed move(s) were undone.)")
                     : string.Create(CultureInfo.InvariantCulture, $"Failed and couldn't be fully undone: {error}. Needs attention: {string.Join("; ", report.RollbackProblems)}");
-            ReportFailure(watch, release, summary, report.Completed);
+            var retryAt = report.FolderUnavailable ? ScheduleRetry(id, watch, release, RetryKind.FolderUnavailable) : null;
+            ReportFailure(watch, release, summary, report.Completed, seenVersion, retryAt);
             return;
         }
 
@@ -521,14 +693,14 @@ public sealed partial class IngestService : IHostedService, IDisposable
             Status = config.DryRun ? ActivityStatus.DryRun : ActivityStatus.Filed,
             Release = release,
             WatchFolder = watch.Path,
-            Summary = Summarise(report.Completed, config.DryRun),
+            Summary = summaryLine,
             Details = Describe(watch.Path, report.Completed),
         });
 
         if (config.DryRun && previous?.Chosen is { } chosen)
         {
             // Keep the decision so the release files the same way once dry run is turned off.
-            _state.MarkPlannedInDryRun(id, $"Dry run: planned as {chosen.Candidate.Name}{(chosen.Candidate.Year is { } y ? $" ({y})" : string.Empty)}; it will be filed once dry run is off.");
+            _state.MarkPlannedInDryRun(id, $"Dry run: planned as {chosen.Candidate.Name}{(chosen.Candidate.Year is { } y ? $" ({y})" : string.Empty)}; it will be filed once dry run is off.", seenVersion);
         }
         else
         {
@@ -537,8 +709,26 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
         if (!config.DryRun && config.ScanLibraryAfterIngest)
         {
-            _libraryManager.QueueLibraryScan();
+            // Only the film or show folders that changed are refreshed (as Jellyfin's real-time monitoring would), not
+            // every library on the server; a new folder is picked up through its library folder
+            foreach (var folder in FiledFolders(plan))
+            {
+                _libraryMonitor.ReportFileSystemChanged(folder);
+            }
         }
+    }
+
+    /// <summary>
+    /// The film and show folders a plan files into (not the quarantine), for refreshing just those.
+    /// </summary>
+    /// <param name="plan">The executed plan.</param>
+    /// <returns>The folders.</returns>
+    public static IReadOnlyList<string> FiledFolders(IngestPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return [.. plan.AllowedRoots
+            .Where(root => plan.Operations.Any(o => o.Kind != OperationKind.Quarantine && PathGuard.IsUnder(o.Destination, root)))
+            .Distinct(PathGuard.Comparer)];
     }
 
     /// <summary>
@@ -603,7 +793,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private static List<string> Describe(string watchFolder, IEnumerable<PlannedOperation> operations)
         => [.. operations.Select(o => $"{o.Kind}: {Path.GetRelativePath(watchFolder, o.Source)} → {o.Destination}")];
 
-    private void ReportFailure(WatchFolder watch, string release, string error, IReadOnlyList<PlannedOperation> completed)
+    private void ReportFailure(WatchFolder watch, string release, string error, IReadOnlyList<PlannedOperation> completed, int? seenVersion = null, DateTimeOffset? retryAt = null)
     {
         _state.Record(new ActivityEntry
         {
@@ -621,7 +811,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
             Release = release,
             Time = _clock.GetUtcNow(),
             Items = [new PendingReviewItem(release, error)],
-        });
+            RetryAt = retryAt,
+        },
+        seenVersion);
     }
 
     private void QuarantineRelease(PluginConfiguration config, WatchFolder watch, PendingReview review, IReadOnlyList<ReleaseFile> files, string quarantine)
@@ -670,7 +862,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         if (error is not null)
         {
             LogExecutionFailed(_logger, review.Release, error);
-            ReportFailure(watch, review.Release, $"Quarantine stopped after {moved.Count} of {files.Count} files: {error}", []);
+            ReportFailure(watch, review.Release, $"Quarantine stopped after {moved.Count} of {files.Count} files: {error}", [], review.RequestVersion);
             return;
         }
 
@@ -687,7 +879,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         });
         if (config.DryRun)
         {
-            _state.ClearRequest(review.Id);
+            _state.ClearRequest(review.Id, review.RequestVersion);
         }
         else
         {
@@ -710,6 +902,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
             return null;
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest: the last {Count} title searches found nothing; pausing identification for {Minutes} minutes")]
+    private static partial void LogProvidersPaused(ILogger logger, int count, double minutes);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Ingest watch folder {Path}: settings changed, planning waiting releases again")]
     private static partial void LogReplanning(ILogger logger, string path);
@@ -741,15 +936,31 @@ public sealed partial class IngestService : IHostedService, IDisposable
     [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest watch folder {Path} has no valid target library")]
     private static partial void LogNoLibrary(ILogger logger, string path);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: {Release} needs review - {Source}: {Reason}")]
-    private static partial void LogNeedsReview(ILogger logger, string release, string source, string reason);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: {Release} needs review ({Count} item(s); see the Ingest page)")]
+    private static partial void LogNeedsReview(ILogger logger, string release, int count);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: {Prefix} {Kind} {Source} -> {Destination}")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Ingest: {Release} needs review - {Source}: {Reason}")]
+    private static partial void LogNeedsReviewItem(ILogger logger, string release, string source, string reason);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Ingest: {Prefix} {Kind} {Source} -> {Destination}")]
     private static partial void LogOperation(ILogger logger, string prefix, OperationKind kind, string source, string destination);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: {Release}: {Summary}")]
+    private static partial void LogFiled(ILogger logger, string release, string summary);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: removed {Count} old line(s) from the action log")]
+    private static partial void LogActionLogTrimmed(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest: couldn't trim the action log")]
+    private static partial void LogActionLogTrimFailed(ILogger logger, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Ingest of {Release} failed")]
     private static partial void LogReleaseFailed(ILogger logger, string release, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Ingest of {Release} stopped: {Error}")]
     private static partial void LogExecutionFailed(ILogger logger, string release, string error);
+
+    // What one sweep shares across its releases: the identifier (with its library index, loaded once) and the server's
+    // library folders
+    private sealed record Sweep(MediaIdentifier Identifier, IReadOnlyList<string> LibraryFolders);
 }

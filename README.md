@@ -39,7 +39,7 @@ and Jellyfin Ingest will:
    tagging language, SDH and forced flags the way Jellyfin expects.
 5. **Quarantine everything else** (READMEs, `.nfo`, samples, screenshots, `.txt` …) instead of deleting it. Quarantined
    items are removed automatically after a retention period (30 days by default) by a Jellyfin scheduled task.
-6. **Trigger a library scan** so the new item appears straight away.
+6. **Refresh the filed folders** so the new item appears straight away (just those folders, not whole libraries).
 
 Anything it cannot identify confidently is left where it is, never guessed, and listed under **Needs review** on the
 plugin page, where you pick the right title (and library) with one click or search for it.
@@ -57,7 +57,7 @@ plugin page, where you pick the right title (and library) with one click or sear
 | Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. |
 | Activity | *Recent activity* on the plugin page: filed, dry run, needs review, decisions, failures, quarantine and purges, with what went where. |
 | Safety | Dry-run mode (on by default), never overwrites, never files a second copy of an episode or film already on the server, crash-safe moves (hidden temporary name, size check, then rename; interrupted moves are finished or discarded at the next start), all-or-nothing per release (a failure undoes the moves already made), a JSON-lines action log. |
-| Library refresh | Queues a library scan after a real ingest. |
+| Library refresh | Asks Jellyfin to refresh just the film or show folders filed into after a real ingest. |
 
 ## Download clients
 
@@ -94,7 +94,21 @@ nothing is watched until you do. Dry run is on until you turn it off.
 | Quarantine retention | 30 days | Enforced by the *Purge Ingest quarantine* scheduled task. |
 | Dry run | On | Records what would happen (see *Recent activity*) without moving anything. Turn off once you are happy with the results. |
 | Settle time | 300 s | How long nothing in a release (files, sizes, write times) may change before it is processed. |
-| Scan library after ingest | On | |
+| Refresh filed folders after ingest | On | Only the film or show folders filed into are refreshed, never whole libraries. |
+
+## What Ingest stores and logs
+
+Everything stays on your server, in Jellyfin's plugin data folder (`<jellyfin data>/plugins/Jellyfin.Plugin.Ingest/`):
+
+| File | What's in it | Kept |
+|---|---|---|
+| `state.json` | Releases waiting for review and the recent activity shown on the Ingest page (release names, paths, chosen titles). Who made a decision is not recorded. | The latest 300 activity entries |
+| `actions.jsonl` | One line per file moved: time, release, source and destination. Used to finish or undo moves interrupted by a restart. | 90 days, at most 5 MB |
+| `search-cache.json` | Recent title searches and their provider ids, so the same title isn't searched again. | 24 hours |
+
+Jellyfin's log gets one line per release at Information level. Per-file moves and review reasons, which include full
+paths, are logged only at Debug. Paths and release names can reveal account names, share names and where media came
+from, so check a log before posting it publicly.
 
 ## Building
 
@@ -116,7 +130,7 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Subtitle pairing and language/flag detection (incl. commentary tracks, content-based language fallback)
 - [x] Planner (all-or-nothing per release) and executor with dry-run, never-overwrite, size verification and a JSON-lines action log
 - [x] Quarantine + scheduled purge task
-- [x] Library scan after ingest
+- [x] Refresh of the filed folders after ingest
 - [x] Destinations per watch folder; review screen (library choice, title search); activity panel
 - [x] Unit tests; CI; release packaging (pre-releases)
 - [ ] Plugin repository manifest
