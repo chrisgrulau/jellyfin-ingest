@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.5-alpha] - 2026-09-25
+
 ### Fixed
 - An offline library (an unmounted share) is never recreated on the local disk (ING-10): the library folder, or the
   existing show's folder, must exist when planning and again before moving. The release waits and is tried again
