@@ -9,7 +9,8 @@ namespace Jellyfin.Plugin.Ingest.Identification;
 
 /// <summary>
 /// Fuzzy title comparison tolerant of the ways release names differ from provider titles: punctuation, "&amp;"/"and",
-/// a leading "The", accents, roman numerals, typos (edit distance, including transpositions) and extra words.
+/// a leading "The", accents, roman numerals, typos (edit distance, including transpositions) and extra words. Letters and
+/// digits of every script count, so Cyrillic, Greek, CJK, Hebrew, Arabic or Thai titles compare as themselves.
 /// </summary>
 public static partial class TitleMatcher
 {
@@ -19,8 +20,9 @@ public static partial class TitleMatcher
     };
 
     /// <summary>
-    /// Normalises a title for comparison: compatibility forms folded (<c>³</c> → <c>3</c>), upper case, accents removed, "&amp;" → "AND", punctuation removed,
-    /// leading "THE" dropped, roman numerals II–X → digits, single spaces.
+    /// Normalises a title for comparison: compatibility forms folded (<c>³</c> → <c>3</c>), upper case, accents removed
+    /// from Latin, Greek and Cyrillic letters (in other scripts combining marks are part of the spelling and kept),
+    /// "&amp;" → "AND", punctuation removed, leading "THE" dropped, roman numerals II–X → digits, single spaces.
     /// </summary>
     /// <param name="title">A title.</param>
     /// <returns>The normalised form.</returns>
@@ -33,7 +35,8 @@ public static partial class TitleMatcher
         var sb = new StringBuilder(decomposed.Length);
         foreach (var c in decomposed)
         {
-            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            // Accents on Latin, Greek and Cyrillic letters (below U+0530) are dropped: "Amélie" = "Amelie"
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark || sb.Length == 0 || sb[^1] >= '\u0530')
             {
                 sb.Append(c);
             }
@@ -114,6 +117,6 @@ public static partial class TitleMatcher
         return prev[t.Length];
     }
 
-    [GeneratedRegex(@"[^A-Z0-9 ]+")]
+    [GeneratedRegex(@"[^\p{L}\p{M}\p{Nd} ]+")]
     private static partial Regex NonAlphanumeric();
 }

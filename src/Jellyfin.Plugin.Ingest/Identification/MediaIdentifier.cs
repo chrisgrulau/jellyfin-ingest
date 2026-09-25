@@ -240,7 +240,9 @@ public sealed class MediaIdentifier
             }
         }
 
-        return a.Year == b.Year && string.Equals(TitleMatcher.Normalise(a.Name), TitleMatcher.Normalise(b.Name), StringComparison.Ordinal);
+        // Names that normalise to nothing say nothing about each other: never merge on them
+        var x = TitleMatcher.Normalise(a.Name);
+        return x.Length > 0 && a.Year == b.Year && string.Equals(x, TitleMatcher.Normalise(b.Name), StringComparison.Ordinal);
     }
 
     private static (ScoredCandidate? Best, IReadOnlyList<ScoredCandidate> Ranked, string Reason) Choose(string title, int? year, IReadOnlyList<MetadataCandidate> hits)

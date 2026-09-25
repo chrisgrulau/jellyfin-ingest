@@ -174,6 +174,20 @@ public class MediaIdentifierTests
     }
 
     [Fact]
+    public void Different_non_latin_titles_from_the_same_year_are_not_merged()
+    {
+        var merged = MediaIdentifier.Merge(
+        [
+            new MetadataCandidate { Name = "千と千尋の神隠し", Year = 2001, ProviderIds = new Dictionary<string, string> { ["Tmdb"] = "1" } },
+            new MetadataCandidate { Name = "もののけ姫", Year = 2001, ProviderIds = new Dictionary<string, string> { ["Tmdb"] = "2" } },
+            new MetadataCandidate { Name = "?", Year = 2001, ProviderIds = new Dictionary<string, string> { ["Tmdb"] = "3" } },
+            new MetadataCandidate { Name = "!", Year = 2001, ProviderIds = new Dictionary<string, string> { ["Tmdb"] = "4" } },
+        ]);
+
+        Assert.Equal(4, merged.Count);
+    }
+
+    [Fact]
     public void Duplicate_hits_from_two_providers_are_merged_with_all_ids()
     {
         var merged = MediaIdentifier.Merge(
