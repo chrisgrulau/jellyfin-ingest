@@ -5,7 +5,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.6-alpha] - 2026-09-25
+
 ### Changed
+- The plugin family is now called **Shoal**: this plugin shows as "Shoal Ingest", and its quarantine task as "Purge
+  Shoal Ingest quarantine" under "Shoal". Settings, data and the plugin id are unchanged.
 - Builds (BLD-01, BLD-03): Jellyfin packages pinned to 12.1.0 with lock files and locked-mode restores; releases carry
   a build-provenance attestation (`gh attestation verify jellyfin-plugin-ingest.zip --repo chrisgrulau/jellyfin-ingest`).
   DESIGN.md and README corrected to match the code (DOC-01).

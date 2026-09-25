@@ -27,7 +27,7 @@ public class IngestPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
     }
 
     /// <inheritdoc />
-    public override string Name => "Ingest";
+    public override string Name => "Shoal Ingest";
 
     /// <inheritdoc />
     public override Guid Id => Guid.Parse("88d6ced9-052e-45f6-b21d-fc4eefa7998d");
