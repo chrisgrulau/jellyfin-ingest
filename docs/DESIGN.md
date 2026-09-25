@@ -20,7 +20,7 @@ Working notes for Jellyfin Ingest. Descriptive of intent; will be updated as the
 | **Settler** | A release is processed only after every file in it has had a stable size for the settle time. |
 | **Classifier** | `Emby.Naming` (`EpisodeResolver`, `VideoResolver`) for title / year / season / episode / edition parsing, then `IProviderManager` remote search against the libraries' configured providers. Scores candidates (title similarity, year, episode existence); below the threshold → review. |
 | **Planner** | Pure function: `(classification, library root, options) → planned operations`. No I/O, fully unit-testable. |
-| **Executor** | Same-filesystem `File.Move`, cross-filesystem copy-verify-delete. Never overwrites. Writes an activity log (`IActivityManager`) and a JSON action log for undo. |
+| **Executor** | Every file moves first to a hidden `.ingest-<id>.partial` name in its destination folder (a rename, or a copy across file systems), is size-verified, then renamed into place, so a half-copied file never appears under a real name (Jellyfin ignores hidden files). Each move is logged before (`intent`) and after (`done`) in `actions.jsonl`; a failure undoes the moves already made (and removes folders it created), and moves interrupted by a crash are finished or discarded at the next start. Never overwrites; every destination is re-checked against the plan's allowed folders first; free space is checked before a cross-file-system copy. |
 | **Quarantine purge** | `IScheduledTask`, daily; deletes quarantined releases older than the retention period. |
 | **Scan** | `ILibraryManager` refresh of the affected library only. |
 
