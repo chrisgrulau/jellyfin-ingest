@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- Builds (BLD-01, BLD-03): Jellyfin packages pinned to 12.1.0 with lock files and locked-mode restores; releases carry
+  a build-provenance attestation (`gh attestation verify jellyfin-plugin-ingest.zip --repo chrisgrulau/jellyfin-ingest`).
+  DESIGN.md and README corrected to match the code (DOC-01).
+- `global.json` accepts any .NET 10 SDK (10.0.100 and later), so the SDKs shipped by Linux distributions (10.0.1xx)
+  build it; CI uses the newest .NET 10 SDK, and Dependabot no longer raises the minimum. Package versions stay locked.
+
 ## [0.1.5-alpha] - 2026-09-25
 
 ### Fixed
