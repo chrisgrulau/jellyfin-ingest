@@ -27,6 +27,11 @@ All notable changes to this project are documented here. The format follows
   held for review with an explanation.
 
 ### Fixed
+- A release is only processed once nothing in it has been written for the settle time (ING-04): file write times are
+  part of the settle check, so downloads into pre-allocated, full-size files are no longer mistaken for finished ones.
+  Write times are compared only with their own earlier values, so clock differences on network shares don't matter.
+  New installs default to a 5-minute settle time (existing settings are kept), and the settings page and README explain
+  how to set up download clients (an incomplete folder outside the watch folder, or an in-progress suffix).
 - One unreadable watch folder or sub-folder no longer stops every other watch folder (ING-05); failures are reported
   once per distinct error. A file that vanishes mid-scan (a download renamed from `.part`) only defers its release.
 - Quarantining a whole release on request can no longer fail the entire sweep; a failure is reported against it.

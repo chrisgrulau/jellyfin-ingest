@@ -78,7 +78,7 @@ public static class ReleaseScanner
             try
             {
                 releases[name] = entry is FileInfo file
-                    ? [new ReleaseFile(name, file.Length)]
+                    ? [new ReleaseFile(name, file.Length, file.LastWriteTimeUtc)]
                     : Files(watchFolder, (DirectoryInfo)entry);
             }
             catch (FileNotFoundException)
@@ -100,7 +100,7 @@ public static class ReleaseScanner
         foreach (var f in folder.EnumerateFiles("*", DeepWalk))
         {
             // Length is read from the enumeration; a file that vanished since raises FileNotFoundException here or later
-            files.Add(new ReleaseFile(Path.GetRelativePath(watchFolder, f.FullName), f.Length));
+            files.Add(new ReleaseFile(Path.GetRelativePath(watchFolder, f.FullName), f.Length, f.LastWriteTimeUtc));
         }
 
         return files;

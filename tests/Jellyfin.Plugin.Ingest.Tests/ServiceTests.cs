@@ -155,4 +155,31 @@ public class ServiceTests
     [Fact]
     public void A_marker_is_only_written_inside_the_quarantine()
         => Assert.Throws<ArgumentException>(() => QuarantineMarkers.Mark("/tmp/q", "/tmp/other/2026-09-24"));
+
+    [Fact]
+    public void A_release_written_at_full_size_is_not_ready_while_writes_continue()
+    {
+        var t = new ReleaseTracker();
+        Dictionary<string, IReadOnlyList<ReleaseFile>> At(int minute) => new() { ["r"] = [new ReleaseFile("r/a.mkv", 5_000_000_000, new DateTime(2026, 9, 25, 10, minute, 0, DateTimeKind.Utc))] };
+
+        // Size never changes (pre-allocated), but the file keeps being written
+        for (var m = 0; m < 10; m++)
+        {
+            Assert.Empty(t.Observe(At(m), T0.AddMinutes(m), Settle));
+        }
+
+        // Writing stops: ready once nothing has changed for the settle time
+        Assert.Empty(t.Observe(At(10), T0.AddMinutes(10), Settle));
+        Assert.Equal(["r"], t.Observe(At(10), T0.AddMinutes(10).AddSeconds(61), Settle));
+    }
+
+    [Fact]
+    public void File_times_are_compared_with_themselves_not_the_server_clock()
+    {
+        // A share whose clock runs an hour ahead: the file looks "written in the future", which doesn't matter
+        var t = new ReleaseTracker();
+        var snap = new Dictionary<string, IReadOnlyList<ReleaseFile>> { ["r"] = [new ReleaseFile("r/a.mkv", 100, T0.UtcDateTime.AddHours(1))] };
+        Assert.Empty(t.Observe(snap, T0, Settle));
+        Assert.Equal(["r"], t.Observe(snap, T0.AddSeconds(61), Settle));
+    }
 }

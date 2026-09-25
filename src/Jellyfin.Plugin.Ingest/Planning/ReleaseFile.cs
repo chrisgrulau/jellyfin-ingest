@@ -29,7 +29,9 @@ public enum FileRole
 /// </summary>
 /// <param name="RelativePath">Path relative to the watch folder, e.g. <c>Show.S01E04/Show.S01E04.mkv</c>.</param>
 /// <param name="Size">Size in bytes.</param>
-public sealed record ReleaseFile(string RelativePath, long Size);
+/// <param name="LastWriteUtc">When the file was last written, if known. Part of the settle check, because download clients
+/// that pre-allocate files show their final size long before they finish writing them.</param>
+public sealed record ReleaseFile(string RelativePath, long Size, DateTime? LastWriteUtc = null);
 
 /// <summary>
 /// Sorts release files into roles by extension, name and size.

@@ -22,7 +22,8 @@ incoming/
 
 and Jellyfin Ingest will:
 
-1. **Wait until the copy has finished** (the file size has stopped changing).
+1. **Wait until the copy has finished**: nothing in the release (files, sizes, write times) has changed for the settle
+   time (5 minutes by default). See [Download clients](#download-clients).
 2. **Identify it** from the release name (title, year, season/episode, edition) and the metadata providers you
    already have configured in Jellyfin (TMDb, TheTVDB, …) — here: *Lantern*, season 1, episode 4.
 3. **Rename and move it** into the watch folder's destination library for its kind (shows or films) using
@@ -58,6 +59,14 @@ plugin page, where you pick the right title (and library) with one click or sear
 | Safety | Dry-run mode (on by default), never overwrites, never files a second copy of an episode or film already on the server, size-verified moves, a JSON-lines action log, all-or-nothing per release. |
 | Library refresh | Queues a library scan after a real ingest. |
 
+## Download clients
+
+Ingest can only tell that a release has finished arriving when nothing in it changes for the settle time. Point your
+download client at an **incomplete (temporary) folder outside the watch folder** and let it move finished downloads in,
+or have it add an in-progress suffix (`.part`, `.!qb`, `.crdownload` …) until each file is complete. Some clients create
+files at their full size before downloading them (pre-allocation), so file size alone proves nothing; Ingest also watches
+write times, but a download that stalls for longer than the settle time can still look finished.
+
 ## Requirements
 
 - Jellyfin **12.1** or newer (the plugin targets .NET 10).
@@ -84,7 +93,7 @@ nothing is watched until you do. Dry run is on until you turn it off.
 | Quarantine folder | `<watch folder>/.ingest-quarantine` | Keep it on the same filesystem as the watch folder so moves are instant. |
 | Quarantine retention | 30 days | Enforced by the *Purge Ingest quarantine* scheduled task. |
 | Dry run | On | Records what would happen (see *Recent activity*) without moving anything. Turn off once you are happy with the results. |
-| Settle time | 60 s | How long a file's size must stay unchanged before it is processed. |
+| Settle time | 300 s | How long nothing in a release (files, sizes, write times) may change before it is processed. |
 | Scan library after ingest | On | |
 
 ## Building
