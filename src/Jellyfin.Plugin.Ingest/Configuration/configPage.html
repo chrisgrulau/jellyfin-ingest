@@ -105,7 +105,8 @@
           <div class="inputContainer">
             <label class="inputLabel inputLabelUnfocused" for="QuarantinePath">Quarantine folder</label>
             <input id="QuarantinePath" name="QuarantinePath" type="text" is="emby-input" />
-            <div class="fieldDescription">Leave empty to use a hidden <code>.ingest-quarantine</code> folder inside each watch folder (same disk, so moves are instant).</div>
+            <div class="fieldDescription">Leave empty to use a hidden <code>.ingest-quarantine</code> folder inside each watch folder (same disk, so moves are instant). It must not be, contain or sit inside a library folder; only the dated folders Ingest creates there are ever deleted.</div>
+            <div class="wf-error" id="QuarantinePathError"></div>
           </div>
           <div class="inputContainer">
             <label class="inputLabel inputLabelUnfocused" for="QuarantineRetentionDays">Keep quarantined items for (days)</label>
@@ -523,23 +524,56 @@
             return false;
           }
 
+          // The server applies the folder safety rules (libraries, Jellyfin's own folders, overlaps); show its answer
+          var quarantinePath = page.querySelector('#QuarantinePath').value.trim();
           Dashboard.showLoadingMsg();
-          ApiClient.getPluginConfiguration(pluginId).then(function (current) {
+          ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('Ingest/ValidateFolders'),
+            data: JSON.stringify({ WatchFolders: folders.map(function (w) { return w.Path; }), QuarantinePath: quarantinePath }),
+            contentType: 'application/json',
+            dataType: 'json'
+          }).then(function (problems) {
+            problems = problems || [];
+            var qError = page.querySelector('#QuarantinePathError');
+            qError.textContent = problems.filter(function (p) { return p.Folder === quarantinePath; }).map(function (p) { return p.Problem; }).join(' ');
+            Array.prototype.forEach.call(page.querySelectorAll('.ingest-row'), function (row) {
+              var path = row.querySelector('.wf-path').value.trim();
+              var mine = problems.filter(function (p) { return p.Folder === path; }).map(function (p) { return p.Problem; });
+              if (mine.length) { row.querySelector('.wf-error').textContent = mine.join(' '); row.classList.add('invalid'); }
+            });
+            if (problems.length) {
+              Dashboard.hideLoadingMsg();
+              Dashboard.alert('Some folders aren\'t safe to use. Fix the highlighted settings, then save.');
+              var bad = page.querySelector('.ingest-row.invalid') || qError;
+              if (bad) { bad.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+              return;
+            }
+
+            return saveSettings(folders, quarantinePath);
+          }, function () {
+            Dashboard.hideLoadingMsg();
+            Dashboard.alert('The folder settings couldn\'t be checked; nothing was saved.');
+          });
+          return false;
+        });
+
+        function saveSettings(folders, quarantinePath) {
+          return ApiClient.getPluginConfiguration(pluginId).then(function (current) {
             current.WatchFolders = folders;
-            current.QuarantinePath = page.querySelector('#QuarantinePath').value.trim();
-            current.QuarantineRetentionDays = parseInt(page.querySelector('#QuarantineRetentionDays').value, 10) || 30;
-            current.SettleSeconds = parseInt(page.querySelector('#SettleSeconds').value, 10) || 60;
+            current.QuarantinePath = quarantinePath;
+            current.QuarantineRetentionDays = Math.max(1, parseInt(page.querySelector('#QuarantineRetentionDays').value, 10) || 30);
+            current.SettleSeconds = Math.max(5, parseInt(page.querySelector('#SettleSeconds').value, 10) || 60);
             current.DryRun = page.querySelector('#DryRun').checked;
             current.ScanLibraryAfterIngest = page.querySelector('#ScanLibraryAfterIngest').checked;
             config = current;
-            ApiClient.updatePluginConfiguration(pluginId, current).then(function (r) {
+            return ApiClient.updatePluginConfiguration(pluginId, current).then(function (r) {
               Dashboard.processPluginConfigurationUpdateResult(r);
               syncBanner();
               renderReviews();
             });
           });
-          return false;
-        });
+        }
       })();
     </script>
   </div>

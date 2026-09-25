@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Planning;
 using Jellyfin.Plugin.Ingest.Service;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using Microsoft.AspNetCore.Authorization;
@@ -30,6 +31,7 @@ public class IngestController : ControllerBase
     private readonly IngestStateStore _state;
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
+    private readonly IApplicationPaths _paths;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IngestController"/> class.
@@ -37,8 +39,10 @@ public class IngestController : ControllerBase
     /// <param name="state">Reviews and activity.</param>
     /// <param name="libraryManager">Jellyfin library manager.</param>
     /// <param name="providerManager">Jellyfin provider manager.</param>
-    public IngestController(IngestStateStore state, ILibraryManager libraryManager, IProviderManager providerManager)
+    /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
+    public IngestController(IngestStateStore state, ILibraryManager libraryManager, IProviderManager providerManager, IApplicationPaths paths)
     {
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
         _providerManager = providerManager ?? throw new ArgumentNullException(nameof(providerManager));
@@ -59,6 +63,26 @@ public class IngestController : ControllerBase
             Reviews = [.. s.Reviews.OrderByDescending(r => r.Time)],
             Activity = [.. s.Activity.Take(Math.Clamp(limit, 1, IngestStateStore.MaxActivity))],
         };
+    }
+
+    /// <summary>
+    /// Checks proposed watch and quarantine folders against the safety rules (used by the settings page before saving;
+    /// the service applies the same rules and never sweeps an unsafe folder).
+    /// </summary>
+    /// <param name="request">The proposed folders.</param>
+    /// <returns>The problems found; empty when everything is safe.</returns>
+    [HttpPost("ValidateFolders")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<IReadOnlyList<FolderProblem>> ValidateFolders([FromBody] FolderCheckRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var libraries = IngestService.Libraries(_libraryManager.GetVirtualFolders());
+        return FolderRules.Check(
+            [.. request.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w))],
+            request.QuarantinePath,
+            [.. libraries.SelectMany(l => l.Locations)],
+            IngestService.ProtectedFolders(_paths)).ToList();
     }
 
     /// <summary>
@@ -211,4 +235,16 @@ public sealed record ChooseRequest
 
     /// <summary>Gets the id of the library to file into.</summary>
     public required string LibraryId { get; init; }
+}
+
+/// <summary>
+/// Body of <see cref="IngestController.ValidateFolders"/>.
+/// </summary>
+public sealed record FolderCheckRequest
+{
+    /// <summary>Gets the proposed watch folders.</summary>
+    public IReadOnlyList<string> WatchFolders { get; init; } = [];
+
+    /// <summary>Gets the proposed custom quarantine folder (empty for the default).</summary>
+    public string? QuarantinePath { get; init; }
 }

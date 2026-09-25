@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.Ingest.Configuration;
 using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Planning;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Entities;
@@ -32,6 +33,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private readonly IProviderManager _providerManager;
     private readonly ILogger<IngestService> _logger;
     private readonly IngestStateStore _state;
+    private readonly IApplicationPaths _paths;
+    private bool _markersMigrated;
     private readonly Dictionary<string, ReleaseTracker> _trackers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _settings = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _folderErrors = new(StringComparer.Ordinal);
@@ -45,9 +48,11 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// <param name="libraryManager">Jellyfin library manager.</param>
     /// <param name="providerManager">Jellyfin provider manager.</param>
     /// <param name="state">Reviews and activity shown on the dashboard.</param>
+    /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
     /// <param name="logger">Logger.</param>
-    public IngestService(ILibraryManager libraryManager, IProviderManager providerManager, IngestStateStore state, ILogger<IngestService> logger)
+    public IngestService(ILibraryManager libraryManager, IProviderManager providerManager, IngestStateStore state, IApplicationPaths paths, ILogger<IngestService> logger)
     {
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
         _providerManager = providerManager ?? throw new ArgumentNullException(nameof(providerManager));
@@ -90,6 +95,35 @@ public sealed partial class IngestService : IHostedService, IDisposable
         return string.IsNullOrWhiteSpace(configuration.QuarantinePath)
             ? Path.Combine(watchFolder.Path, ".ingest-quarantine")
             : configuration.QuarantinePath;
+    }
+
+    /// <summary>
+    /// Jellyfin's own folders, which no watch or quarantine folder may overlap.
+    /// </summary>
+    /// <param name="paths">Jellyfin's application paths.</param>
+    /// <returns>The folders.</returns>
+    public static IReadOnlyList<string> ProtectedFolders(IApplicationPaths paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return [.. new[] { paths.ProgramDataPath, paths.ProgramSystemPath, paths.DataPath, paths.ConfigurationDirectoryPath, paths.CachePath, paths.LogDirectoryPath, paths.PluginsPath, paths.TempDirectory }
+            .Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Checks the configured watch and quarantine folders against the rules in <see cref="FolderRules"/>.
+    /// </summary>
+    /// <param name="config">Plugin configuration.</param>
+    /// <param name="libraries">The server's libraries.</param>
+    /// <param name="paths">Jellyfin's application paths.</param>
+    /// <returns>The problems found.</returns>
+    public static IReadOnlyList<FolderProblem> FolderProblems(PluginConfiguration config, IEnumerable<MediaLibrary> libraries, IApplicationPaths paths)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return FolderRules.Check(
+            [.. config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path)).Select(w => w.Path)],
+            config.QuarantinePath,
+            [.. libraries.SelectMany(l => l.Locations)],
+            ProtectedFolders(paths));
     }
 
     /// <summary>
@@ -155,11 +189,24 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
         var config = plugin.Configuration;
         var libraries = Libraries(_libraryManager.GetVirtualFolders());
+        var problems = FolderProblems(config, libraries, _paths);
+        if (!_markersMigrated)
+        {
+            _markersMigrated = true;
+            MigrateQuarantineMarkers(plugin.DataFolderPath, config, problems);
+        }
         foreach (var watch in config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)))
         {
             // Each watch folder on its own: one that can't be read (permissions, offline share) mustn't stop the others
             try
             {
+                // An unsafe watch or quarantine folder is never swept; the reason is shown once in the activity panel
+                var problem = problems.FirstOrDefault(p => p.Folder == watch.Path || p.Folder == config.QuarantinePath);
+                if (problem is not null)
+                {
+                    throw new InvalidOperationException("Not swept, because the folder settings are unsafe: " + problem.Problem + " (" + problem.Folder + ")");
+                }
+
                 await SweepFolderAsync(plugin, config, libraries, watch, ct).ConfigureAwait(false);
                 _folderErrors.Remove(watch.Path);
             }
@@ -274,6 +321,49 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
     }
 
+    // The dated folder (directly inside the quarantine) that a quarantine destination falls in
+    private static string? DatedFolder(string quarantine, string destination)
+    {
+        if (!PathGuard.IsUnder(destination, quarantine))
+        {
+            return null;
+        }
+
+        var first = Path.GetRelativePath(PathGuard.Normalise(quarantine), PathGuard.Normalise(destination)).Split(Path.DirectorySeparatorChar)[0];
+        return Path.Combine(quarantine, first);
+    }
+
+    // Dated quarantine folders created before markers existed are marked if the action log shows Ingest filled them
+    private void MigrateQuarantineMarkers(string dataFolder, PluginConfiguration config, IReadOnlyList<FolderProblem> problems)
+    {
+        var log = Path.Combine(dataFolder, "actions.jsonl");
+        if (!File.Exists(log))
+        {
+            return;
+        }
+
+        var roots = config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path))
+            .Select(w => QuarantineFor(config, w))
+            .Where(q => !problems.Any(p => p.Folder == q))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        try
+        {
+            foreach (var (root, dated) in QuarantineMarkers.FromActionLog(File.ReadLines(log), roots))
+            {
+                if (Directory.Exists(dated) && !QuarantineMarkers.IsMarked(dated))
+                {
+                    QuarantineMarkers.Mark(root, dated);
+                    LogMarkedQuarantine(_logger, dated);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            LogMarkerMigrationFailed(_logger, ex);
+        }
+    }
+
     // A top-level symbolic link is never followed; it waits for review so the user knows why nothing happened
     private void ReviewLinks(WatchFolder watch, IReadOnlyList<string> links)
     {
@@ -352,6 +442,15 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 Candidates = DistinctCandidates(plan.Review),
             });
             return;
+        }
+
+        // Mark the dated quarantine folder as Ingest's own before anything is moved into it (the purge only deletes marked folders)
+        if (!config.DryRun)
+        {
+            foreach (var dated in plan.Operations.Where(o => o.Kind == OperationKind.Quarantine).Select(o => DatedFolder(quarantine, o.Destination)).OfType<string>().Distinct(StringComparer.Ordinal))
+            {
+                QuarantineMarkers.Mark(quarantine, dated);
+            }
         }
 
         var report = new PlanExecutor(new PhysicalFileOperations(), _clock)
@@ -492,6 +591,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         string? error = null;
         if (!config.DryRun)
         {
+            QuarantineMarkers.Mark(quarantine, dated);
             foreach (var file in files)
             {
                 var destination = Path.Combine(dated, file.RelativePath);
@@ -578,6 +678,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest of {Release}: filed, but tidying up the release folder failed: {Warning}")]
     private static partial void LogTidyWarning(ILogger logger, string release, string warning);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: marked existing quarantine folder {Folder} as Ingest's own (from the action log)")]
+    private static partial void LogMarkedQuarantine(ILogger logger, string folder);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest: couldn't mark existing quarantine folders")]
+    private static partial void LogMarkerMigrationFailed(ILogger logger, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Ingest sweep failed")]
     private static partial void LogSweepFailed(ILogger logger, Exception exception);

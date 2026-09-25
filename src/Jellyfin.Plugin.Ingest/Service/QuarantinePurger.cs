@@ -8,7 +8,7 @@ namespace Jellyfin.Plugin.Ingest.Service;
 
 /// <summary>
 /// Deletes quarantine folders past the retention period. Only top-level folders named <c>yyyy-MM-dd</c> (the date the
-/// clutter was quarantined) are ever considered; anything else in the quarantine folder is left alone.
+/// clutter was quarantined) that Ingest created and marked are ever deleted; anything else is left alone.
 /// </summary>
 public static class QuarantinePurger
 {
@@ -47,7 +47,13 @@ public static class QuarantinePurger
         var deleted = new List<string>();
         foreach (var name in expired)
         {
+            // Only folders Ingest created and marked; a date-named folder that was already there is never touched
             var path = Path.Combine(quarantineRoot, name);
+            if (!QuarantineMarkers.IsMarked(path) || new DirectoryInfo(path).LinkTarget is not null)
+            {
+                continue;
+            }
+
             Directory.Delete(path, recursive: true);
             deleted.Add(path);
         }

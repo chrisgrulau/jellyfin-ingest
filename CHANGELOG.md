@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Security
+- Folder guardrails (ING-03): a watch folder may not be a filesystem root, overlap any library folder, Jellyfin's own
+  folders or another watch folder; a custom quarantine may not overlap a library or Jellyfin's folders, or contain a
+  watch folder. The settings page asks the server to check before saving, and the service never sweeps (and the purge
+  never cleans) an unsafe folder, reporting why once in the activity panel.
+- The quarantine purge only deletes dated folders Ingest created: each is marked (`.ingest-created`) before anything is
+  moved in, so an existing date-named folder (photo imports, backups) is never touched. Dated folders created before
+  this release are marked once from Ingest's action log.
+- Retention (at least 1 day) and settle time (at least 5 s) are clamped on save and when used.
 - Provider ids are validated wherever they enter (ING-02): TMDb/TheTVDB must be digits and IMDb `tt` + digits, and the
   naming engine refuses any other id in a folder name, so an id crafted by a metadata plugin, an NFO file or a library
   edit can't steer a file outside the library.

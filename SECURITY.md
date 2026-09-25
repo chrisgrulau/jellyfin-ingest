@@ -15,4 +15,5 @@ Nothing secret belongs in this repository: no API keys, tokens, server addresses
 
 The plugin moves and deletes files, so it only ever operates inside the watch folders, the configured library roots and
 the quarantine folder, and it never deletes anything except expired quarantine entries. Symbolic links and junctions
-in a watch folder are never followed.
+in a watch folder are never followed. Watch and quarantine folders are checked against the libraries and Jellyfin's own
+folders before they are used, and the purge only deletes the dated quarantine folders Ingest created and marked.
