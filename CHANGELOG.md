@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.7-alpha] - 2026-09-25
+
 ### Added
 
 - **Quarantine** section on the plugin page: the dated quarantine folders, newest first, with each release's files and
