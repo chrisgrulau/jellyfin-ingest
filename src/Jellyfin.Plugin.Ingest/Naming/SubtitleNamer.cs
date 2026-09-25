@@ -70,7 +70,7 @@ public static class SubtitleNamer
         ArgumentException.ThrowIfNullOrWhiteSpace(extension);
         ArgumentNullException.ThrowIfNull(isTaken);
 
-        var title = FileNameSanitizer.Sanitize(track.Title ?? string.Empty).Replace(".", " ", StringComparison.Ordinal).Trim();
+        var title = FileNameSanitizer.Truncate(FileNameSanitizer.Sanitize(track.Title ?? string.Empty).Replace(".", " ", StringComparison.Ordinal).Trim(), 40);
         var candidate = Build(videoStem, title, track, extension);
         for (var n = 2; isTaken(candidate); n++)
         {

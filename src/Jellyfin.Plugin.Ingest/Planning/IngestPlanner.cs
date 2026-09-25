@@ -226,7 +226,8 @@ public sealed class IngestPlanner
         {
             foreach (var extra in extras)
             {
-                var name = FileNameSanitizer.Sanitize(Path.GetFileNameWithoutExtension(extra));
+                var name = FileNameSanitizer.Truncate(FileNameSanitizer.Sanitize(Path.GetFileNameWithoutExtension(extra)), FileNameSanitizer.MaxStemBytes);
+                name = FileNameSanitizer.AvoidReserved(name.Length > 0 ? name : parsed[extra].Extra.ToString());
                 var folder = Path.Combine(owners.First(), MediaNamer.ExtrasFolderName(parsed[extra].Extra));
                 var destination = Path.Combine(folder, name + Path.GetExtension(extra));
                 for (var n = 2; Taken(destination); n++)

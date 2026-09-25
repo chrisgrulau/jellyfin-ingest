@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Text;
 using Jellyfin.Plugin.Ingest.Naming;
 using Xunit;
 
@@ -96,5 +98,66 @@ public class MediaNamerTests
     public void Sanitizer_removes_reserved_characters(string input, string expected)
     {
         Assert.Equal(expected, FileNameSanitizer.Sanitize(input));
+    }
+
+    [Fact]
+    public void Leading_dots_never_make_a_hidden_folder()
+    {
+        var name = MediaNamer.SeriesFolderName(new SeriesIdentity { Title = ".hack//Sign", Year = 2002, TvdbId = "1" });
+        Assert.Equal("hack--Sign (2002) [tvdbid-1]", name);
+        Assert.False(name.StartsWith('.'));
+    }
+
+    [Theory]
+    [InlineData("?")]
+    [InlineData("...")]
+    [InlineData("  ")]
+    public void A_title_with_nothing_printable_becomes_untitled(string title)
+    {
+        Assert.Equal("Untitled (2011) [tmdbid-5]", MediaNamer.MovieFolderName(new MovieIdentity { Title = title, Year = 2011, TmdbId = "5" }));
+        Assert.Equal("Untitled", MediaNamer.MovieFolderName(new MovieIdentity { Title = title }));
+    }
+
+    [Fact]
+    public void Long_titles_are_shortened_to_fit_the_file_system()
+    {
+        var series = new SeriesIdentity { Title = new string('長', 200), Year = 2020, TvdbId = "1234567890", TmdbId = "1234567890" };
+        var episode = new EpisodeIdentity { Series = series, Season = 1, Episode = 1, EndingEpisode = 2, Title = string.Concat(Enumerable.Repeat("とても長いエピソードのタイトル", 30)) };
+
+        var folder = MediaNamer.SeriesFolderName(series);
+        var file = MediaNamer.EpisodeFileName(episode, ".mkv");
+
+        Assert.True(Encoding.UTF8.GetByteCount(folder) <= 240, folder);
+        Assert.True(Encoding.UTF8.GetByteCount(Path.GetFileNameWithoutExtension(file)) <= 180, file);
+        Assert.Contains("S01E01-E02 - とても", file, StringComparison.Ordinal);
+
+        // Room left for a subtitle's title, language and flags
+        var sidecar = SubtitleNamer.SidecarName(Path.GetFileNameWithoutExtension(file), new SubtitleTrack { Title = new string('x', 100), Language = "en", Default = true, HearingImpaired = true, Forced = true }, ".srt", _ => false);
+        Assert.True(Encoding.UTF8.GetByteCount(sidecar) <= 255, sidecar);
+    }
+
+    [Fact]
+    public void Truncation_never_splits_a_character()
+    {
+        var text = "👍🏽👍🏽👍🏽";
+        var cut = FileNameSanitizer.Truncate(text, 10);
+        Assert.Equal("👍🏽", cut);
+    }
+
+    [Theory]
+    [InlineData("CON", true)]
+    [InlineData("nul.txt", true)]
+    [InlineData("COM1", true)]
+    [InlineData("Con Air", false)]
+    [InlineData("Console", false)]
+    public void Windows_device_names_are_recognised(string name, bool reserved)
+    {
+        Assert.Equal(reserved, FileNameSanitizer.IsReservedOnWindows(name));
+    }
+
+    [Fact]
+    public void A_reserved_name_gets_an_underscore()
+    {
+        Assert.Equal("Con_", MediaNamer.MovieFolderName(new MovieIdentity { Title = "Con" }));
     }
 }
