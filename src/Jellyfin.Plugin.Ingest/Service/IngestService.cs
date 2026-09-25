@@ -34,6 +34,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private readonly IngestStateStore _state;
     private readonly Dictionary<string, ReleaseTracker> _trackers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _settings = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _folderErrors = new(StringComparer.Ordinal);
     private readonly TimeProvider _clock = TimeProvider.System;
     private CancellationTokenSource? _stopping;
     private Task? _loop;
@@ -156,100 +157,138 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var libraries = Libraries(_libraryManager.GetVirtualFolders());
         foreach (var watch in config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)))
         {
-            if (!Directory.Exists(watch.Path))
+            // Each watch folder on its own: one that can't be read (permissions, offline share) mustn't stop the others
+            try
             {
-                LogMissingWatchFolder(_logger, watch.Path);
-                continue;
+                await SweepFolderAsync(plugin, config, libraries, watch, ct).ConfigureAwait(false);
+                _folderErrors.Remove(watch.Path);
             }
-
-            var destinations = DestinationsOf(watch);
-            var routing = LibraryRouting.Route(destinations, libraries);
-            foreach (var problem in routing.Problems)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                LogRoutingProblem(_logger, watch.Path, problem);
+                throw;
             }
-
-            var targets = routing.Targets;
-            if (targets.Tv is null && targets.Films is null)
-            {
-                LogNoLibrary(_logger, watch.Path);
-                continue;
-            }
-
-            var quarantine = QuarantineFor(config, watch);
-            var snapshot = Snapshot(watch.Path, quarantine);
-            if (!_trackers.TryGetValue(watch.Path, out var tracker))
-            {
-                tracker = new ReleaseTracker();
-                _trackers[watch.Path] = tracker;
-            }
-
-            // Settings that change the outcome (dry run, destinations) changed: plan everything waiting again.
-            var settings = LibraryRouting.SettingsFingerprint(config.DryRun, DestinationsOf(watch));
-            if (_settings.TryGetValue(watch.Path, out var before) && !string.Equals(before, settings, StringComparison.Ordinal))
-            {
-                LogReplanning(_logger, watch.Path);
-                tracker.ForgetAll();
-            }
-
-            _settings[watch.Path] = settings;
-
-            _state.PruneReviews(watch.Path, snapshot.Keys);
-            foreach (var review in _state.Snapshot().Reviews.Where(r => r.WatchFolder == watch.Path && r.Request != ReviewRequest.None))
-            {
-                if (review.Request == ReviewRequest.Quarantine && snapshot.TryGetValue(review.Release, out var releaseFiles))
-                {
-                    QuarantineRelease(config, watch, review, releaseFiles, quarantine);
-                }
-                else
-                {
-                    tracker.Forget(review.Release);
-                }
-            }
-
-            foreach (var release in tracker.Observe(snapshot, _clock.GetUtcNow(), TimeSpan.FromSeconds(Math.Max(5, config.SettleSeconds))))
-            {
-                ct.ThrowIfCancellationRequested();
-                try
-                {
-                    await IngestAsync(plugin.DataFolderPath, config, watch, release, snapshot[release], targets, quarantine, ct).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-#pragma warning disable CA1031 // One bad release (provider outage, unreadable file) mustn't stop the others; it is reported.
-                catch (Exception ex)
+#pragma warning disable CA1031 // A failing watch folder is reported (once per distinct error) and the sweep moves on.
+            catch (Exception ex)
 #pragma warning restore CA1031
+            {
+                LogWatchFolderFailed(_logger, watch.Path, ex);
+                if (!_folderErrors.TryGetValue(watch.Path, out var last) || !string.Equals(last, ex.Message, StringComparison.Ordinal))
                 {
-                    LogReleaseFailed(_logger, release, ex);
-                    ReportFailure(watch, release, ex.Message, []);
+                    _folderErrors[watch.Path] = ex.Message;
+                    _state.Record(new ActivityEntry
+                    {
+                        Time = _clock.GetUtcNow(),
+                        Status = ActivityStatus.Failed,
+                        Release = watch.Path,
+                        WatchFolder = watch.Path,
+                        Summary = "This watch folder couldn't be read: " + ex.Message,
+                    });
                 }
-
-                tracker.MarkHandled(release);
             }
         }
     }
 
-    private static Dictionary<string, IReadOnlyList<ReleaseFile>> Snapshot(string watchFolder, string quarantine)
+    private async Task SweepFolderAsync(IngestPlugin plugin, PluginConfiguration config, IReadOnlyCollection<MediaLibrary> libraries, WatchFolder watch, CancellationToken ct)
     {
-        var snapshot = new Dictionary<string, IReadOnlyList<ReleaseFile>>(StringComparer.Ordinal);
-        var quarantineFull = Path.GetFullPath(quarantine);
-        foreach (var entry in Directory.EnumerateFileSystemEntries(watchFolder))
+        if (!Directory.Exists(watch.Path))
         {
-            var name = Path.GetFileName(entry);
-            if (ReleaseTracker.IsIgnored(name) || string.Equals(Path.GetFullPath(entry), quarantineFull, StringComparison.Ordinal))
+            LogMissingWatchFolder(_logger, watch.Path);
+            return;
+        }
+
+        var destinations = DestinationsOf(watch);
+        var routing = LibraryRouting.Route(destinations, libraries);
+        foreach (var problem in routing.Problems)
+        {
+            LogRoutingProblem(_logger, watch.Path, problem);
+        }
+
+        var targets = routing.Targets;
+        if (targets.Tv is null && targets.Films is null)
+        {
+            LogNoLibrary(_logger, watch.Path);
+            return;
+        }
+
+        var quarantine = QuarantineFor(config, watch);
+        var scan = ReleaseScanner.Scan(watch.Path, quarantine);
+        var snapshot = scan.Releases;
+        if (!_trackers.TryGetValue(watch.Path, out var tracker))
+        {
+            tracker = new ReleaseTracker();
+            _trackers[watch.Path] = tracker;
+        }
+
+        // Settings that change the outcome (dry run, destinations) changed: plan everything waiting again.
+        var settings = LibraryRouting.SettingsFingerprint(config.DryRun, DestinationsOf(watch));
+        if (_settings.TryGetValue(watch.Path, out var before) && !string.Equals(before, settings, StringComparison.Ordinal))
+        {
+            LogReplanning(_logger, watch.Path);
+            tracker.ForgetAll();
+        }
+
+        _settings[watch.Path] = settings;
+
+        _state.PruneReviews(watch.Path, [.. snapshot.Keys, .. scan.Links, .. scan.Unsettled]);
+        ReviewLinks(watch, scan.Links);
+        foreach (var review in _state.Snapshot().Reviews.Where(r => r.WatchFolder == watch.Path && r.Request != ReviewRequest.None))
+        {
+            if (review.Request == ReviewRequest.Quarantine && snapshot.TryGetValue(review.Release, out var releaseFiles))
+            {
+                try
+                {
+                    QuarantineRelease(config, watch, review, releaseFiles, quarantine);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    LogReleaseFailed(_logger, review.Release, ex);
+                    ReportFailure(watch, review.Release, "Quarantine failed: " + ex.Message, []);
+                }
+            }
+            else
+            {
+                tracker.Forget(review.Release);
+            }
+        }
+
+        foreach (var release in tracker.Observe(snapshot, _clock.GetUtcNow(), TimeSpan.FromSeconds(Math.Max(5, config.SettleSeconds))))
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await IngestAsync(plugin.DataFolderPath, config, watch, release, snapshot[release], targets, quarantine, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+#pragma warning disable CA1031 // One bad release (provider outage, unreadable file) mustn't stop the others; it is reported.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                LogReleaseFailed(_logger, release, ex);
+                ReportFailure(watch, release, ex.Message, []);
+            }
+
+            tracker.MarkHandled(release);
+        }
+    }
+
+    // A top-level symbolic link is never followed; it waits for review so the user knows why nothing happened
+    private void ReviewLinks(WatchFolder watch, IReadOnlyList<string> links)
+    {
+        foreach (var link in links)
+        {
+            var id = IngestStateStore.ReviewId(watch.Path, link);
+            if (_state.GetReview(id) is not null)
             {
                 continue;
             }
 
-            snapshot[name] = File.Exists(entry)
-                ? [new ReleaseFile(name, new FileInfo(entry).Length)]
-                : [.. Directory.EnumerateFiles(entry, "*", SearchOption.AllDirectories)
-                    .Select(f => new ReleaseFile(Path.GetRelativePath(watchFolder, f), new FileInfo(f).Length))];
+            const string Reason = "This is a symbolic link. Links aren't followed, so nothing outside the watch folder can be moved; move or copy the files themselves into the watch folder.";
+            _state.Record(new ActivityEntry { Time = _clock.GetUtcNow(), Status = ActivityStatus.NeedsReview, Release = link, WatchFolder = watch.Path, Summary = Reason });
+            _state.PutReview(new PendingReview { Id = id, WatchFolder = watch.Path, Release = link, Time = _clock.GetUtcNow(), Items = [new PendingReviewItem(link, Reason)] });
         }
-
-        return snapshot;
     }
 
     private async Task IngestAsync(
@@ -313,6 +352,11 @@ public sealed partial class IngestService : IHostedService, IDisposable
         foreach (var op in report.Completed)
         {
             LogOperation(_logger, prefix, op.Kind, op.Source, op.Destination);
+        }
+
+        if (report.Warning is not null)
+        {
+            LogTidyWarning(_logger, release, report.Warning);
         }
 
         if (!report.Succeeded)
@@ -514,6 +558,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Ingest watch folder {Path}: settings changed, planning waiting releases again")]
     private static partial void LogReplanning(ILogger logger, string path);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Ingest watch folder {Path} couldn't be swept")]
+    private static partial void LogWatchFolderFailed(ILogger logger, string path, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest of {Release}: filed, but tidying up the release folder failed: {Warning}")]
+    private static partial void LogTidyWarning(ILogger logger, string release, string warning);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Ingest sweep failed")]
     private static partial void LogSweepFailed(ILogger logger, Exception exception);

@@ -395,4 +395,39 @@ public class PlanningTests
 
         Assert.Equal(show + "/Season 1/Lantern S01E04 - Glass Harbour.mkv", Assert.Single(plan.Operations).Destination);
     }
+
+    private sealed class TidyFails : IFileOperations
+    {
+        private readonly HashSet<string> _files = new(StringComparer.Ordinal) { Watch + "/r/Rocket.Club.2019.1080p.mkv" };
+
+        public bool Exists(string path) => _files.Contains(path) || path == Watch + "/r";
+
+        public long Length(string path) => 1;
+
+        public void CreateDirectory(string path)
+        {
+        }
+
+        public void Move(string source, string destination)
+        {
+            _files.Remove(source);
+            _files.Add(destination);
+        }
+
+        public void AppendLine(string path, string line)
+        {
+        }
+
+        public void DeleteEmptyDirectories(string path) => throw new IOException("Directory not empty");
+    }
+
+    [Fact]
+    public async Task A_tidy_up_failure_after_every_move_is_a_warning_not_a_failure()
+    {
+        var plan = await Planner().PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+        var report = new PlanExecutor(new TidyFails(), new FixedClock(DateTimeOffset.UnixEpoch)).Execute(plan, Watch + "/r", "/log", dryRun: false);
+
+        Assert.True(report.Succeeded);
+        Assert.Equal("Directory not empty", report.Warning);
+    }
 }

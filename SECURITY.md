@@ -14,4 +14,5 @@ Nothing secret belongs in this repository: no API keys, tokens, server addresses
 ## File-system scope
 
 The plugin moves and deletes files, so it only ever operates inside the watch folders, the configured library roots and
-the quarantine folder, and it never deletes anything except expired quarantine entries.
+the quarantine folder, and it never deletes anything except expired quarantine entries. Symbolic links and junctions
+in a watch folder are never followed.
