@@ -4,6 +4,7 @@ using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Ingest;
 
@@ -17,7 +18,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         // Same folder as the plugin's DataFolderPath, resolved without needing the plugin instance to exist yet
         serviceCollection.AddSingleton(sp => new IngestStateStore(
-            Path.Combine(sp.GetRequiredService<IApplicationPaths>().PluginsPath, typeof(IngestPlugin).Assembly.GetName().Name!, "state.json")));
+            Path.Combine(sp.GetRequiredService<IApplicationPaths>().PluginsPath, typeof(IngestPlugin).Assembly.GetName().Name!, "state.json"),
+            sp.GetRequiredService<ILogger<IngestStateStore>>()));
         serviceCollection.AddHostedService<IngestService>();
     }
 }

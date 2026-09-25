@@ -9,6 +9,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Planning;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Ingest.Service;
 
@@ -137,9 +138,11 @@ public sealed record IngestState
 
 /// <summary>
 /// Thread-safe access to the <see cref="IngestState"/>, shared by the sweep service, the purge task and the API.
-/// Every change is written straight to disk (write to a temporary file, then replace).
+/// Every change is written straight to disk (write to a temporary file, then replace). The file is small (activity and
+/// candidates are capped). If it can't be read or written, the dashboard carries on from memory: a damaged file is set
+/// aside rather than overwritten, and an unreadable one is never replaced.
 /// </summary>
-public sealed class IngestStateStore
+public sealed partial class IngestStateStore
 {
     /// <summary>How many activity entries are kept.</summary>
     public const int MaxActivity = 300;
@@ -153,17 +156,22 @@ public sealed class IngestStateStore
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private readonly string _path;
+    private readonly ILogger? _logger;
     private readonly Lock _lock = new();
     private StateFile? _state;
+    private bool _memoryOnly;
+    private string? _lastSaveError;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IngestStateStore"/> class.
     /// </summary>
     /// <param name="path">Absolute path of the JSON state file.</param>
-    public IngestStateStore(string path)
+    /// <param name="logger">Logger for problems with the file (optional).</param>
+    public IngestStateStore(string path, ILogger? logger = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         _path = path;
+        _logger = logger;
     }
 
     /// <summary>
@@ -378,25 +386,61 @@ public sealed class IngestStateStore
             return _state;
         }
 
+        StateFile? loaded = null;
         try
         {
-            _state = File.Exists(_path) ? JsonSerializer.Deserialize<StateFile>(File.ReadAllText(_path), JsonOptions) : null;
+            if (File.Exists(_path))
+            {
+                try
+                {
+                    loaded = JsonSerializer.Deserialize<StateFile>(File.ReadAllText(_path), JsonOptions);
+                }
+                catch (JsonException ex)
+                {
+                    // A damaged state file only loses dashboard history; the releases themselves are untouched. It is
+                    // kept to one side (not silently overwritten) so it can be inspected.
+                    var aside = _path + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+                    File.Move(_path, aside, overwrite: true);
+                    if (_logger is not null)
+                    {
+                        LogCorrupt(_logger, aside, ex);
+                    }
+                }
+            }
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // A damaged state file only loses dashboard history; the releases themselves are untouched.
-            _state = null;
+            // Can't read it (permissions, offline disk): carry on in memory and never overwrite what's there
+            _memoryOnly = true;
+            if (_logger is not null)
+            {
+                LogUnreadable(_logger, _path, ex);
+            }
         }
 
-        _state ??= new StateFile();
+        _state = loaded ?? new StateFile();
+        _state.Reviews ??= [];
+        _state.Activity ??= [];
+        _state.Activity.RemoveAll(a => a is null || a.Release is null);
+        _state.Reviews.RemoveAll(r => r is null || r.Id is null || r.WatchFolder is null || r.Release is null);
 
-        // A choice saved in an older format can come back incomplete; drop it rather than plan with it.
         for (var i = 0; i < _state.Reviews.Count; i++)
         {
-            if (_state.Reviews[i].Chosen is { } c && (c.Candidate is null || c.Target is null))
+            // Lists written as null come back as null; a choice saved in an older format can come back incomplete
+            // (dropped rather than planned with)
+            var r = _state.Reviews[i];
+            _state.Reviews[i] = r with
             {
-                _state.Reviews[i] = _state.Reviews[i] with { Chosen = null };
-            }
+                Items = r.Items ?? [],
+                Candidates = r.Candidates ?? [],
+                SearchResults = r.SearchResults ?? [],
+                Chosen = r.Chosen is { Candidate: not null, Target: not null } c ? c : null,
+            };
+        }
+
+        for (var i = 0; i < _state.Activity.Count; i++)
+        {
+            _state.Activity[i] = _state.Activity[i] with { Details = _state.Activity[i].Details ?? [], Summary = _state.Activity[i].Summary ?? string.Empty };
         }
 
         return _state;
@@ -404,11 +448,41 @@ public sealed class IngestStateStore
 
     private void Save(StateFile state)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var temp = _path + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(state, JsonOptions));
-        File.Move(temp, _path, overwrite: true);
+        if (_memoryOnly)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+            var temp = _path + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(state, JsonOptions));
+            File.Move(temp, _path, overwrite: true);
+            _lastSaveError = null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The dashboard keeps working from memory; the problem is logged once until it changes
+            if (!string.Equals(_lastSaveError, ex.Message, StringComparison.Ordinal))
+            {
+                _lastSaveError = ex.Message;
+                if (_logger is not null)
+                {
+                    LogUnwritable(_logger, _path, ex);
+                }
+            }
+        }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest: the state file was damaged and has been set aside as {Path}; the dashboard starts empty")]
+    private static partial void LogCorrupt(ILogger logger, string path, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Ingest: can't read the state file {Path}; the dashboard runs from memory until restart")]
+    private static partial void LogUnreadable(ILogger logger, string path, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Ingest: can't save the state file {Path}; changes are kept in memory")]
+    private static partial void LogUnwritable(ILogger logger, string path, Exception exception);
 
     private sealed class StateFile
     {

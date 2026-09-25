@@ -211,4 +211,72 @@ public sealed class IngestStateTests : IDisposable
         var review = Assert.Single(new IngestStateStore(StatePath).Snapshot().Reviews);
         Assert.Null(review.Chosen);
     }
+
+    [Fact]
+    public void A_damaged_state_file_is_set_aside_not_overwritten()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(StatePath, "{ not json");
+        var store = new IngestStateStore(StatePath);
+
+        store.Record(new ActivityEntry { Time = T0, Status = ActivityStatus.Filed, Release = "Lantern" });
+
+        var aside = Assert.Single(Directory.GetFiles(_dir, "state.json.corrupt-*"));
+        Assert.Equal("{ not json", File.ReadAllText(aside));
+        Assert.Single(new IngestStateStore(StatePath).Snapshot().Activity);
+    }
+
+    [Fact]
+    public void Null_lists_and_entries_in_the_file_are_tolerated()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(StatePath, """{"Reviews": null, "Activity": [null, {"Time":"2026-09-24T10:00:00+00:00","Status":"Filed","Release":"Lantern","Details":null}]}""");
+        var store = new IngestStateStore(StatePath);
+
+        var state = store.Snapshot();
+
+        Assert.Empty(state.Reviews);
+        Assert.Empty(Assert.Single(state.Activity).Details);
+        store.PutReview(Review("Kite"));
+        Assert.Single(store.Snapshot().Reviews);
+    }
+
+    [Fact]
+    public void A_file_that_cannot_be_written_keeps_the_dashboard_in_memory()
+    {
+        // The state path is a folder: every save fails
+        Directory.CreateDirectory(StatePath);
+        var store = new IngestStateStore(StatePath);
+
+        store.Record(new ActivityEntry { Time = T0, Status = ActivityStatus.Filed, Release = "Lantern" });
+        store.PutReview(Review("Kite"));
+
+        Assert.Single(store.Snapshot().Activity);
+        Assert.Single(store.Snapshot().Reviews);
+    }
+
+    [Fact]
+    public void A_file_that_cannot_be_read_is_never_replaced()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(StatePath, "{}");
+        File.SetUnixFileMode(StatePath, UnixFileMode.None);
+        try
+        {
+            var store = new IngestStateStore(StatePath);
+            store.Record(new ActivityEntry { Time = T0, Status = ActivityStatus.Filed, Release = "Lantern" });
+            Assert.Single(store.Snapshot().Activity);
+        }
+        finally
+        {
+            File.SetUnixFileMode(StatePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        Assert.Equal("{}", File.ReadAllText(StatePath));
+    }
 }
