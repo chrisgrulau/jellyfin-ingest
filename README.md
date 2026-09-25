@@ -55,7 +55,7 @@ plugin page, where you pick the right title (and library) with one click or sear
 | Clutter | Moved to a dated quarantine folder (default or user-chosen), purged after N days (default 30). |
 | Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. |
 | Activity | *Recent activity* on the plugin page: filed, dry run, needs review, decisions, failures, quarantine and purges, with what went where. |
-| Safety | Dry-run mode (on by default), never overwrites, size-verified moves, a JSON-lines action log, all-or-nothing per release. |
+| Safety | Dry-run mode (on by default), never overwrites, never files a second copy of an episode or film already on the server, size-verified moves, a JSON-lines action log, all-or-nothing per release. |
 | Library refresh | Queues a library scan after a real ingest. |
 
 ## Requirements

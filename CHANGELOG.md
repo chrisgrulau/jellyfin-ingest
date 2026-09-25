@@ -5,12 +5,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Duplicate guard (PROC-01): an episode or film that's already on the server (any library, any file name or
+  container, or not yet scanned) goes to review with the existing file's path instead of being filed as a second
+  copy. A multi-episode file overlapping an existing episode, and the same episode twice in one release, are caught
+  too. A different edition of a film you have (e.g. a Director's Cut) is still filed as another version. Editions are
+  read by comparing a film's file name with its folder, so titles with a colon (sanitised to " - ") aren't mistaken
+  for editions, and episodes are found in any season folder (`Season 1`, `S01`, `Specials` …).
+
 ### Fixed
+- New episodes of an existing show go into the season folder the show already uses (`Season 1`, `S01`, `Specials` …)
+  instead of a second `Season NN` folder (ING-16).
 - File-system, NAS and OS housekeeping entries in a watch folder (`lost+found`, `$RECYCLE.BIN`,
   `System Volume Information`, `@eaDir`, `#recycle`, `Thumbs.db`, `desktop.ini` …) are ignored rather than treated
   as releases. Hidden entries such as `.Trash-1000` already were.
 
 ## [0.1.0-alpha.3] - 2026-09-24
+
+> **Correction:** this release's notes also listed a duplicate guard, but that change missed the release (PROC-01). It
+> ships in the next release; see *Unreleased*.
 
 ### Added
 - New episodes follow their show: an episode of a series that's already on the server is filed into that series'

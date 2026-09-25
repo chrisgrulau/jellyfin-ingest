@@ -44,18 +44,32 @@ public class PlanningTests
             => Task.FromResult<string?>(season == 1 && episode == 4 ? "Glass Harbour" : null);
     }
 
-    private static IngestPlanner Planner(Func<string, bool>? exists = null, ISeriesLocator? series = null)
-        => new(new MediaIdentifier(new Lookup()), exists ?? (_ => false), _ => null, new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)), series);
+    private static IngestPlanner Planner(Func<string, bool>? exists = null, IExistingMedia? existing = null)
+        => new(new MediaIdentifier(new Lookup()), exists ?? (_ => false), _ => null, new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)), existing);
 
-    private sealed class Locator(string? folder) : ISeriesLocator
+    private sealed class Existing(string? seriesFolder = null) : IExistingMedia
     {
         public List<IReadOnlyDictionary<string, string>> Asked { get; } = [];
+
+        public Dictionary<(int Season, int Episode), string> Episodes { get; } = [];
+
+        public List<(string Tmdb, string? Edition, string Path)> Movies { get; } = [];
 
         public string? FindSeriesFolder(IReadOnlyDictionary<string, string> seriesProviderIds)
         {
             Asked.Add(seriesProviderIds);
-            return folder;
+            return seriesFolder;
         }
+
+        public string? FindEpisode(IReadOnlyDictionary<string, string> seriesProviderIds, string seriesFolder, int season, int episode)
+            => Episodes.TryGetValue((season, episode), out var p) ? p : null;
+
+        public string? SeasonFolder { get; init; }
+
+        public string? FindSeasonFolder(string seriesFolder, int season) => SeasonFolder;
+
+        public string? FindMovie(IReadOnlyDictionary<string, string> movieProviderIds, string? edition, string plannedPath)
+            => Movies.Where(m => movieProviderIds.TryGetValue("Tmdb", out var id) && id == m.Tmdb && m.Edition == edition).Select(m => m.Path).FirstOrDefault();
     }
 
     private static ReleaseFile F(string rel, long size = 500_000_000) => new(rel, size);
@@ -288,8 +302,8 @@ public class PlanningTests
     public async Task A_new_episode_joins_its_show_in_whichever_library_it_lives()
     {
         var elsewhere = "/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]";
-        var locator = new Locator(elsewhere);
-        var plan = await Planner(series: locator).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+        var locator = new Existing(elsewhere);
+        var plan = await Planner(existing: locator).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
 
         Assert.Equal(Path.Combine(elsewhere, "Season 01", "Lantern S01E04 - Glass Harbour.mkv"), Assert.Single(plan.Operations).Destination);
         Assert.Equal("7", locator.Asked[0]["Tvdb"]);
@@ -299,7 +313,7 @@ public class PlanningTests
     public async Task A_show_already_on_the_server_is_followed_even_without_a_tv_destination()
     {
         var elsewhere = "/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]";
-        var plan = await Planner(series: new Locator(elsewhere)).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+        var plan = await Planner(existing: new Existing(elsewhere)).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
 
         Assert.True(plan.IsReady);
         Assert.StartsWith(elsewhere, plan.Operations[0].Destination, StringComparison.Ordinal);
@@ -308,7 +322,7 @@ public class PlanningTests
     [Fact]
     public async Task A_new_show_goes_to_the_watch_folders_destination()
     {
-        var plan = await Planner(series: new Locator(null)).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+        var plan = await Planner(existing: new Existing(null)).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
 
         Assert.StartsWith("/lib/Shows/Lantern (2001) ", plan.Operations[0].Destination, StringComparison.Ordinal);
     }
@@ -316,11 +330,69 @@ public class PlanningTests
     [Fact]
     public async Task A_library_chosen_in_review_wins_over_following_the_show()
     {
-        var locator = new Locator("/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]");
+        var locator = new Existing("/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]");
         var chosen = new ChosenMatch(new MetadataCandidate { Name = "Lantern", Year = 2001, IsSeries = true, ProviderIds = new Dictionary<string, string> { ["Tvdb"] = "7", ["Tmdb"] = "9" } }, Tv);
-        var plan = await Planner(series: locator).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, chosen, CancellationToken.None);
+        var plan = await Planner(existing: locator).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, chosen, CancellationToken.None);
 
         Assert.StartsWith("/lib/Shows/", plan.Operations[0].Destination, StringComparison.Ordinal);
         Assert.Empty(locator.Asked);
+    }
+
+    [Fact]
+    public async Task An_episode_already_on_the_server_goes_to_review()
+    {
+        var existing = new Existing("/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]");
+        existing.Episodes[(1, 4)] = "/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]/Season 01/Lantern S01E04.mp4";
+
+        var plan = await Planner(existing: existing).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.720p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        var item = Assert.Single(plan.Review);
+        Assert.Contains("already on the server", item.Reason, StringComparison.Ordinal);
+        Assert.Contains("Lantern S01E04.mp4", item.Reason, StringComparison.Ordinal);
+        Assert.Empty(plan.Operations);
+    }
+
+    [Fact]
+    public async Task A_multi_episode_file_overlapping_an_existing_episode_goes_to_review()
+    {
+        var existing = new Existing();
+        existing.Episodes[(1, 5)] = "/lib/Shows/x/Season 01/Lantern S01E05.mkv";
+
+        var plan = await Planner(existing: existing).PlanAsync(Watch, "a", [F("a/Lantern.S01E04E05.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.Contains("already on the server", Assert.Single(plan.Review).Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_same_episode_twice_in_one_release_goes_to_review()
+    {
+        var plan = await Planner(existing: new Existing()).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.1080p.mkv"), F("a/Lantern.S01E04.720p.mp4")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.Contains("more than once", Assert.Single(plan.Review).Reason, StringComparison.Ordinal);
+        Assert.Empty(plan.Operations);
+    }
+
+    [Fact]
+    public async Task A_film_already_on_the_server_goes_to_review_but_another_edition_is_filed()
+    {
+        var existing = new Existing();
+        existing.Movies.Add(("123", null, "/lib/Other Movies/Rocket Club (2019) [tmdbid-123]/Rocket Club (2019) [tmdbid-123].mp4"));
+
+        var same = await Planner(existing: existing).PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+        var cut = await Planner(existing: existing).PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.Directors.Cut.1080p.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+
+        Assert.Contains("already on the server", Assert.Single(same.Review).Reason, StringComparison.Ordinal);
+        Assert.True(cut.IsReady);
+        Assert.EndsWith(" - Director's Cut.mkv", cut.Operations[0].Destination, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_new_episode_uses_the_season_folder_the_show_already_has()
+    {
+        var show = "/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]";
+        var existing = new Existing(show) { SeasonFolder = show + "/Season 1" };
+        var plan = await Planner(existing: existing).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.Equal(show + "/Season 1/Lantern S01E04 - Glass Harbour.mkv", Assert.Single(plan.Operations).Destination);
     }
 }
