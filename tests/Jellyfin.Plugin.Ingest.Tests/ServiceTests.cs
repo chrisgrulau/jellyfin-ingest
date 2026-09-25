@@ -219,4 +219,52 @@ public class ServiceTests
 
         Assert.Equal(["/lib/Shows/Lantern (2001)"], IngestService.FiledFolders(plan));
     }
+
+    private static string Line(DateTimeOffset time, string release = "r")
+        => $$"""{"time":"{{time:O}}","release":"{{release}}","kind":"Video","source":"/drop/a.mkv","destination":"/lib/a.mkv","bytes":1,"phase":"done"}""";
+
+    [Fact]
+    public void The_action_log_keeps_ninety_days()
+    {
+        var now = new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero);
+        string[] lines = [Line(now.AddDays(-200)), "not json", Line(now.AddDays(-91)), Line(now.AddDays(-89)), Line(now)];
+
+        var keep = ActionLog.Trim(lines, now, ActionLog.MaxAge, ActionLog.MaxBytes);
+
+        Assert.Equal([lines[3], lines[4]], keep);
+    }
+
+    [Fact]
+    public void The_action_log_keeps_the_newest_that_fit()
+    {
+        var now = new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero);
+        var lines = Enumerable.Range(0, 10).Select(i => Line(now.AddMinutes(i), "r" + i)).ToList();
+        var budget = lines.Skip(7).Sum(l => System.Text.Encoding.UTF8.GetByteCount(l) + 1);
+
+        var keep = ActionLog.Trim(lines, now.AddMinutes(10), ActionLog.MaxAge, budget);
+
+        Assert.Equal(lines.Skip(7), keep);
+    }
+
+    [Fact]
+    public void Trimming_the_action_log_file_rewrites_it_only_when_needed()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "ingest-log-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "actions.jsonl");
+            var now = new DateTimeOffset(2026, 9, 25, 0, 0, 0, TimeSpan.Zero);
+            File.WriteAllLines(path, [Line(now.AddDays(-120)), Line(now)]);
+
+            Assert.Equal(1, ActionLog.TrimFile(path, now));
+            Assert.Equal([Line(now)], File.ReadAllLines(path));
+            Assert.Equal(0, ActionLog.TrimFile(path, now));
+            Assert.Equal(0, ActionLog.TrimFile(Path.Combine(dir, "missing.jsonl"), now));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }

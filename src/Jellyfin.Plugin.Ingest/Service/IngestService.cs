@@ -42,6 +42,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private readonly IngestStateStore _state;
     private readonly IApplicationPaths _paths;
     private bool _markersMigrated;
+    private DateTimeOffset _logTrimmed;
     private readonly Dictionary<string, ReleaseTracker> _trackers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _settings = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _folderErrors = new(StringComparer.Ordinal);
@@ -255,6 +256,13 @@ public sealed partial class IngestService : IHostedService, IDisposable
             _markersMigrated = true;
             RecoverInterruptedMoves(plugin.DataFolderPath);
             MigrateQuarantineMarkers(plugin.DataFolderPath, config, problems);
+        }
+
+        // Keep only recent history in the action log (after any recovery has read it), checked daily
+        if (_clock.GetUtcNow() - _logTrimmed >= TimeSpan.FromDays(1))
+        {
+            _logTrimmed = _clock.GetUtcNow();
+            TrimActionLog(plugin.DataFolderPath);
         }
         // Reviews of a watch folder that has been removed from the settings can never be acted on
         _state.PruneWatchFolders([.. config.WatchFolders.Select(w => w.Path)]);
@@ -495,6 +503,22 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
     }
 
+    private void TrimActionLog(string dataFolder)
+    {
+        try
+        {
+            var removed = ActionLog.TrimFile(Path.Combine(dataFolder, "actions.jsonl"), _clock.GetUtcNow());
+            if (removed > 0)
+            {
+                LogActionLogTrimmed(_logger, removed);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            LogActionLogTrimFailed(_logger, ex);
+        }
+    }
+
     // Dated quarantine folders created before markers existed are marked if the action log shows Ingest filled them
     private void MigrateQuarantineMarkers(string dataFolder, PluginConfiguration config, IReadOnlyList<FolderProblem> problems)
     {
@@ -581,9 +605,10 @@ public sealed partial class IngestService : IHostedService, IDisposable
         {
             var retryAt = ScheduleRetry(id, watch, release, plan.Retry);
             var items = plan.Review.Select(r => new PendingReviewItem(Path.GetRelativePath(watch.Path, r.Source), r.Reason)).ToList();
+            LogNeedsReview(_logger, release, items.Count);
             foreach (var item in items)
             {
-                LogNeedsReview(_logger, release, item.Source, item.Reason);
+                LogNeedsReviewItem(_logger, release, item.Source, item.Reason);
             }
 
             // Only report a review once per distinct set of reasons (restarts and retries plan the release again).
@@ -628,9 +653,19 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var report = new PlanExecutor(new PhysicalFileOperations(), _clock)
             .Execute(plan, Path.Combine(watch.Path, release), Path.Combine(dataFolder, "actions.jsonl"), config.DryRun, ct);
         var prefix = config.DryRun ? "[dry run] would" : "Did";
-        foreach (var op in report.Completed)
+        // Per-file detail (paths can hold user and share names) only at Debug; one line per release at Information
+        if (_logger.IsEnabled(LogLevel.Debug))
         {
-            LogOperation(_logger, prefix, op.Kind, op.Source, op.Destination);
+            foreach (var (op, source) in report.Completed.Select(o => (o, Path.GetRelativePath(watch.Path, o.Source))))
+            {
+                LogOperation(_logger, prefix, op.Kind, source, op.Destination);
+            }
+        }
+
+        var summaryLine = Summarise(report.Completed, config.DryRun);
+        if (report.Succeeded)
+        {
+            LogFiled(_logger, release, summaryLine);
         }
 
         if (report.Warning is not null)
@@ -658,7 +693,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
             Status = config.DryRun ? ActivityStatus.DryRun : ActivityStatus.Filed,
             Release = release,
             WatchFolder = watch.Path,
-            Summary = Summarise(report.Completed, config.DryRun),
+            Summary = summaryLine,
             Details = Describe(watch.Path, report.Completed),
         });
 
@@ -901,11 +936,23 @@ public sealed partial class IngestService : IHostedService, IDisposable
     [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest watch folder {Path} has no valid target library")]
     private static partial void LogNoLibrary(ILogger logger, string path);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: {Release} needs review - {Source}: {Reason}")]
-    private static partial void LogNeedsReview(ILogger logger, string release, string source, string reason);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: {Release} needs review ({Count} item(s); see the Ingest page)")]
+    private static partial void LogNeedsReview(ILogger logger, string release, int count);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: {Prefix} {Kind} {Source} -> {Destination}")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Ingest: {Release} needs review - {Source}: {Reason}")]
+    private static partial void LogNeedsReviewItem(ILogger logger, string release, string source, string reason);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Ingest: {Prefix} {Kind} {Source} -> {Destination}")]
     private static partial void LogOperation(ILogger logger, string prefix, OperationKind kind, string source, string destination);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: {Release}: {Summary}")]
+    private static partial void LogFiled(ILogger logger, string release, string summary);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest: removed {Count} old line(s) from the action log")]
+    private static partial void LogActionLogTrimmed(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest: couldn't trim the action log")]
+    private static partial void LogActionLogTrimFailed(ILogger logger, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Ingest of {Release} failed")]
     private static partial void LogReleaseFailed(ILogger logger, string release, Exception exception);
