@@ -116,6 +116,9 @@ from, so check a log before posting it publicly.
 dotnet build src/Jellyfin.Plugin.Ingest/Jellyfin.Plugin.Ingest.csproj -c Release
 ```
 
+The SDK version is pinned in `global.json`, and package versions are locked in `packages.lock.json`. The Jellyfin
+packages are pinned to the server version in `build.yaml`'s `targetAbi`; bump them together.
+
 The output `Jellyfin.Plugin.Ingest.dll` goes in `<jellyfin data>/plugins/Ingest_<version>/`.
 Continuous integration builds every push and pull request; tagged commits (`v*`) produce a release zip.
 
@@ -145,4 +148,4 @@ already configured inside Jellyfin. Please report security issues as described i
 
 ## Licence
 
-[GPL-3.0](LICENSE), in line with Jellyfin and its official plugins.
+[GPL-3.0](LICENSE), in line with Jellyfin's official plugins (the server itself is GPL-2.0).
