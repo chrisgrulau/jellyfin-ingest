@@ -201,4 +201,22 @@ public class ServiceTests
         Assert.Null(IngestService.RetryDelay(RetryKind.NothingFound, 4));
         Assert.Null(IngestService.RetryDelay(RetryKind.None, 1));
     }
+
+    [Fact]
+    public void Only_the_folders_filed_into_are_refreshed()
+    {
+        var plan = new IngestPlan
+        {
+            ReleaseName = "r",
+            Operations =
+            [
+                new PlannedOperation(OperationKind.Video, "/drop/r/a.mkv", "/lib/Shows/Lantern (2001)/Season 01/a.mkv"),
+                new PlannedOperation(OperationKind.Subtitle, "/drop/r/a.srt", "/lib/Shows/Lantern (2001)/Season 01/a.en.srt"),
+                new PlannedOperation(OperationKind.Quarantine, "/drop/r/x.nfo", "/drop/.ingest-quarantine/2026-09-25/r/x.nfo"),
+            ],
+            AllowedRoots = ["/lib/Shows/Lantern (2001)", "/drop/.ingest-quarantine/2026-09-25"],
+        };
+
+        Assert.Equal(["/lib/Shows/Lantern (2001)"], IngestService.FiledFolders(plan));
+    }
 }

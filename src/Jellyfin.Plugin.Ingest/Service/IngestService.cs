@@ -36,6 +36,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private const long MaxSubtitleBytesToRead = 4L * 1024 * 1024;
 
     private readonly ILibraryManager _libraryManager;
+    private readonly ILibraryMonitor _libraryMonitor;
     private readonly IProviderManager _providerManager;
     private readonly ILogger<IngestService> _logger;
     private readonly IngestStateStore _state;
@@ -56,12 +57,14 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// Initializes a new instance of the <see cref="IngestService"/> class.
     /// </summary>
     /// <param name="libraryManager">Jellyfin library manager.</param>
+    /// <param name="libraryMonitor">Jellyfin library monitor (told which folders changed, so only those are refreshed).</param>
     /// <param name="providerManager">Jellyfin provider manager.</param>
     /// <param name="state">Reviews and activity shown on the dashboard.</param>
     /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
     /// <param name="logger">Logger.</param>
-    public IngestService(ILibraryManager libraryManager, IProviderManager providerManager, IngestStateStore state, IApplicationPaths paths, ILogger<IngestService> logger)
+    public IngestService(ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IProviderManager providerManager, IngestStateStore state, IApplicationPaths paths, ILogger<IngestService> logger)
     {
+        _libraryMonitor = libraryMonitor ?? throw new ArgumentNullException(nameof(libraryMonitor));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
@@ -671,8 +674,26 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
         if (!config.DryRun && config.ScanLibraryAfterIngest)
         {
-            _libraryManager.QueueLibraryScan();
+            // Only the film or show folders that changed are refreshed (as Jellyfin's real-time monitoring would), not
+            // every library on the server; a new folder is picked up through its library folder
+            foreach (var folder in FiledFolders(plan))
+            {
+                _libraryMonitor.ReportFileSystemChanged(folder);
+            }
         }
+    }
+
+    /// <summary>
+    /// The film and show folders a plan files into (not the quarantine), for refreshing just those.
+    /// </summary>
+    /// <param name="plan">The executed plan.</param>
+    /// <returns>The folders.</returns>
+    public static IReadOnlyList<string> FiledFolders(IngestPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return [.. plan.AllowedRoots
+            .Where(root => plan.Operations.Any(o => o.Kind != OperationKind.Quarantine && PathGuard.IsUnder(o.Destination, root)))
+            .Distinct(PathGuard.Comparer)];
     }
 
     /// <summary>

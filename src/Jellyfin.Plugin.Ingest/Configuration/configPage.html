@@ -126,8 +126,9 @@
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
               <input id="ScanLibraryAfterIngest" name="ScanLibraryAfterIngest" type="checkbox" is="emby-checkbox" />
-              <span>Scan the library after ingesting</span>
+              <span>Refresh filed folders in Jellyfin after ingesting</span>
             </label>
+            <div class="fieldDescription checkboxFieldDescription">Only the film or show folders that were filed into are refreshed, so new items appear within a minute or so without scanning whole libraries.</div>
           </div>
           <div>
             <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
