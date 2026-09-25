@@ -141,6 +141,22 @@ public sealed partial class IngestService : IHostedService, IDisposable
     }
 
     /// <summary>
+    /// The quarantine folders in use that pass the folder rules (one pointed at a library, say, is never purged or listed).
+    /// </summary>
+    /// <param name="config">Plugin configuration.</param>
+    /// <param name="problems">Problems from <see cref="FolderProblems"/>.</param>
+    /// <returns>The quarantine folders, each once.</returns>
+    public static IReadOnlyList<string> SafeQuarantineRoots(PluginConfiguration config, IReadOnlyList<FolderProblem> problems)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(problems);
+        return [.. config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path))
+            .Where(w => !problems.Any(p => PathGuard.SamePath(p.Folder, w.Path) || PathGuard.SamePath(p.Folder, config.QuarantinePath)))
+            .Select(w => PathGuard.Normalise(QuarantineFor(config, w)))
+            .Distinct(PathGuard.Comparer)];
+    }
+
+    /// <summary>
     /// Reduces Jellyfin's libraries to what routing needs.
     /// </summary>
     /// <param name="libraries">The server's libraries.</param>
