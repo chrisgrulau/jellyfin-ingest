@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Ingest"
 guid: "88d6ced9-052e-45f6-b21d-fc4eefa7998d"
-version: "0.1.3.0"
+version: "0.1.4.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -15,6 +15,7 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Ingest.dll"
 changelog: >
-  0.1.3-alpha: episodes and films already on the server are never filed twice (sent to review with the existing
-  file; this was listed for 0.1.0-alpha.3 but missed that release); new episodes of an existing show use its own season
-  folder; system folders such as lost+found in a watch folder are ignored.
+  0.1.4-alpha: safety release. Symbolic links are never followed; provider ids are validated and every move is
+  checked to stay inside its library or the quarantine; unsafe watch and quarantine folders are refused, and the purge
+  only deletes folders Ingest created; downloads still being written are not mistaken for finished ones; moves are
+  crash-safe and all-or-nothing; one unreadable folder no longer stops the others.
