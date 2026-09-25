@@ -6,10 +6,10 @@ Working notes for Jellyfin Ingest. Descriptive of intent; will be updated as the
 
 ```text
  watch folder ──► Watcher ──► Settler ──► Classifier ──► Planner ──► Executor ──► Folder refresh
-   (FileSystemWatcher      (size stable   (parse name +   (target      (move / quarantine,
-    + periodic sweep)       for N s)       provider        paths per     activity log,
-                                           lookup)         naming        dry-run)
-                                                           rules)
+   (periodic sweep)       (unchanged     (parse name +   (target       (move / quarantine,
+                           for N s)       provider        paths per      action log,
+                                          lookup)         naming         dry-run)
+                                                          rules)
                                                │
                                                └─► low confidence / collision ─► left in place, reported
 ```
@@ -17,11 +17,11 @@ Working notes for Jellyfin Ingest. Descriptive of intent; will be updated as the
 | Component | Jellyfin integration |
 |---|---|
 | **Watcher** | `IHostedService` sweeping each watch folder every 30 s. File-system notifications are deliberately not used: they are unreliable on network and virtualised shares, and a sweep is needed as a safety net anyway. Ignores hidden entries, the quarantine folder and partial downloads (`.part`, `.!qb`, `.crdownload`, `~$*`). |
-| **Settler** | A release is processed only after every file in it has had a stable size for the settle time. |
-| **Classifier** | `Emby.Naming` (`EpisodeResolver`, `VideoResolver`) for title / year / season / episode / edition parsing, then `IProviderManager` remote search against the libraries' configured providers. Scores candidates (title similarity, year, episode existence); below the threshold → review. |
-| **Planner** | Pure function: `(classification, library root, options) → planned operations`. No I/O, fully unit-testable. |
+| **Settler** | A release is processed only after its files, sizes and last-write times have stayed unchanged for the settle time. |
+| **Classifier** | The plugin's own release-name parser (`ReleaseNameParser`: title, year, season, episode, edition, extras, release tags), then `IProviderManager` remote search against the server's configured providers (cached; see *Identification*). Scores candidates (title similarity, year, titles already on the server); below the threshold → review. |
+| **Planner** | `(release files, identification, library targets) → planned operations`, all-or-nothing per release. Disk access is only through callbacks (does a path exist, read a subtitle's text), so it is fully unit-testable. |
 | **Executor** | Every file moves first to a hidden `.ingest-<id>.partial` name in its destination folder (a rename, or a copy across file systems), is size-verified, then renamed into place, so a half-copied file never appears under a real name (Jellyfin ignores hidden files). Each move is logged before (`intent`) and after (`done`) in `actions.jsonl`; a failure undoes the moves already made (and removes folders it created), and moves interrupted by a crash are finished or discarded at the next start. Never overwrites; every destination is re-checked against the plan's allowed folders first; free space is checked before a cross-file-system copy. |
-| **Quarantine purge** | `IScheduledTask`, daily; deletes quarantined releases older than the retention period. |
+| **Quarantine purge** | `IScheduledTask`, daily; deletes dated quarantine folders older than the retention period, but only ones Ingest created and marked (`.ingest-created`), never through links. |
 | **Refresh** | `ILibraryMonitor.ReportFileSystemChanged` for each film or show folder filed into, the same path Jellyfin's real-time monitoring uses; never a server-wide scan. |
 
 ## Naming rules
@@ -37,7 +37,8 @@ Key points that are easy to get wrong:
 1. **Movie files must start with the exact folder name, including provider IDs**, or multiple versions won't group:
    `Movie (2021) [tmdbid-123]/Movie (2021) [tmdbid-123] - Director's Cut.mkv`.
 2. **Unknown tokens in subtitle names become the track title.** Use `.Alternate 2.en.srt`, never `.en.2.srt`.
-3. Season folders are `Season 01`, never `S01`; specials are `Season 00`.
+3. New season folders are `Season 01`, never `S01`; specials are `Season 00`. A show that already has its own season
+   folder naming (`Season 1`, `S01`, `Specials`) keeps it.
 4. Multi-episode files: `S01E01-E02`.
 5. Series folders may carry several IDs: `[tvdbid-N] [tmdbid-N]` — helps whichever provider is primary.
 6. Strip `< > : " / \ | ? *`; replace `:` with ` -`; no trailing dots.
@@ -70,7 +71,8 @@ Language from the filename token (`en`, `eng`, `English`) or, failing that, from
 
 ## Clutter
 
-Everything that isn't a video, a paired subtitle or recognised artwork goes to quarantine:
+Everything that isn't a main video, an extra or a paired subtitle goes to quarantine (artwork such as `poster.jpg`
+included: Jellyfin fetches its own):
 `<quarantine>/<yyyy-MM-dd>/<release name>/…` — dated folders make the retention purge trivial and safe.
 Samples (`sample` in the name and under ~300 MB) are clutter too.
 
