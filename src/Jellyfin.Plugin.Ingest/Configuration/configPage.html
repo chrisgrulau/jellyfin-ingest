@@ -7,6 +7,11 @@
 <body>
   <div id="IngestConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
     <style>
+      /* Theme-aware colours (FAM-07): dark theme by default; .ingest-light is set when the theme's text is dark */
+      #IngestConfigPage { --ingest-error: #ff9aa2; --ingest-field-bg: rgba(0,0,0,.25); --ingest-option-bg: #202020; --ingest-option-fg: #eee; color-scheme: dark; }
+      #IngestConfigPage.ingest-light { --ingest-error: #b3261e; --ingest-field-bg: #fff; --ingest-option-bg: #fff; --ingest-option-fg: #111; color-scheme: light; }
+      #IngestConfigPage select option { background: var(--ingest-option-bg); color: var(--ingest-option-fg); }
+      #IngestConfigPage .ingest-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
       #IngestConfigPage .ingest-row { padding: 1em; margin: .75em 0; border-radius: 6px; border: 1px solid rgba(128,128,128,.25); }
       #IngestConfigPage .ingest-row.invalid { border-color: rgba(220,53,69,.8); }
       #IngestConfigPage .wf-top { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 1em; align-items: end; }
@@ -15,7 +20,7 @@
       #IngestConfigPage .ingest-row .inputContainer, #IngestConfigPage .ingest-row .selectContainer { margin: 0; }
       #IngestConfigPage .ingest-row .emby-button { margin: 0; }
       #IngestConfigPage .wf-hint { margin: .25em 0 0; }
-      #IngestConfigPage .wf-error { color: #ff6b76; margin: .5em 0 0; }
+      #IngestConfigPage .wf-error { color: var(--ingest-error); margin: .5em 0 0; }
       #IngestConfigPage .wf-error:empty { display: none; }
       #IngestConfigPage .ingest-banner { padding: .75em 1em; border-radius: 4px; margin: 1em 0; background: rgba(255,170,0,.15); }
       #IngestConfigPage .ingest-banner[hidden] { display: none; }
@@ -29,8 +34,7 @@
       #IngestConfigPage .ingest-reasons li { word-break: break-word; }
       #IngestConfigPage .ingest-pick { max-width: 56em; margin: .75em 0; }
       #IngestConfigPage .ingest-into { display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1em; margin-bottom: .25em; }
-      #IngestConfigPage .ingest-into select { min-width: 14em; max-width: 100%; padding: .35em .5em; background: rgba(0,0,0,.25); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
-      #IngestConfigPage .ingest-into select option { background: #202020; }
+      #IngestConfigPage .ingest-into select { min-width: 14em; max-width: 100%; padding: .35em .5em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
       #IngestConfigPage .ingest-cands { width: 100%; border-collapse: collapse; }
       #IngestConfigPage .ingest-cands td { padding: .4em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; }
       #IngestConfigPage .ingest-cands td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%; }
@@ -41,17 +45,19 @@
       #IngestConfigPage .ingest-more { background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; padding: .4em .5em; font: inherit; opacity: .8; }
       #IngestConfigPage .ingest-actions { display: flex; flex-wrap: wrap; gap: .5em; margin-top: .75em; }
       #IngestConfigPage .ingest-files { margin-top: .75em; }
-      #IngestConfigPage .wf-transfer { margin: .5em 0; }
-      #IngestConfigPage .wf-transfer select { padding: .3em .45em; background: rgba(128,128,128,.15); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; max-width: 100%; }
+      #IngestConfigPage .wf-transfer { margin: .5em 0; display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1.5em; }
+      #IngestConfigPage .wf-transfer select { padding: .3em .45em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; max-width: 100%; }
       #IngestConfigPage .ingest-files > summary { cursor: pointer; }
       #IngestConfigPage .ingest-files table { width: 100%; border-collapse: collapse; margin: .5em 0; }
       #IngestConfigPage .ingest-files td { padding: .3em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; word-break: break-word; }
-      #IngestConfigPage .ingest-files select { padding: .3em .4em; background: rgba(128,128,128,.15); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
+      #IngestConfigPage .ingest-files td.ingest-num { white-space: nowrap; }
+      #IngestConfigPage .ingest-files input[type=number] { width: 4.5em; padding: .3em .4em; background: transparent; color: inherit; border: 1px solid rgba(128,128,128,.5); border-radius: 4px; font: inherit; }
+      #IngestConfigPage .ingest-files select { padding: .3em .4em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
       #IngestConfigPage .ingest-actions .emby-button { margin: 0; }
       #IngestConfigPage .ingest-chosen { padding: .5em .75em; border-radius: 4px; background: rgba(0,164,220,.15); border-left: 3px solid rgba(0,164,220,.7); margin: .5em 0; }
       #IngestConfigPage .ingest-search summary { cursor: pointer; margin-top: .75em; opacity: .85; }
       #IngestConfigPage .ingest-search form { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; margin: .5em 0; }
-      #IngestConfigPage .ingest-search input, #IngestConfigPage .ingest-search select { padding: .4em .5em; background: rgba(0,0,0,.25); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
+      #IngestConfigPage .ingest-search input, #IngestConfigPage .ingest-search select { padding: .4em .5em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
       #IngestConfigPage .ingest-search input[name=q] { flex: 1 1 14em; min-width: 0; }
       #IngestConfigPage .ingest-search input[name=y] { width: 5.5em; }
       #IngestConfigPage .ingest-search .emby-button { margin: 0; }
@@ -79,6 +85,10 @@
       #IngestConfigPage .ingest-q li { display: flex; justify-content: space-between; gap: 1em; padding: .1em 0; }
       #IngestConfigPage .ingest-q li span:first-child { min-width: 0; word-break: break-word; }
       #IngestConfigPage .ingest-q .size { font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .75; }
+      #IngestConfigPage .ingest-waiting { list-style: none; margin: 0 0 1em; padding: 0; }
+      #IngestConfigPage .ingest-waiting > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5em 1em; padding: .5em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
+      #IngestConfigPage .ingest-waiting .what { min-width: 0; word-break: break-word; }
+      #IngestConfigPage .ingest-waiting .emby-button { margin: 0; }
       #IngestConfigPage .ingest-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; flex-wrap: wrap; }
       @media (max-width: 720px) {
         #IngestConfigPage .wf-top, #IngestConfigPage .wf-dest { grid-template-columns: 1fr; }
@@ -90,14 +100,21 @@
     <div data-role="content">
       <div class="content-primary">
         <h2 class="sectionTitle">Shoal Ingest</h2>
+        <div id="IngestStatus" class="ingest-visually-hidden" role="status" aria-live="polite"></div>
         <p>New media dropped into a watch folder is identified, renamed to Jellyfin's naming standard and moved into the chosen library with its subtitles. Anything else in the release is quarantined and deleted after the retention period. Releases that can't be identified confidently are left where they are and listed under <em>Needs review</em>.</p>
 
         <div class="ingest-banner setup" id="SetupBanner" hidden>
           <strong>Ingest isn't set up yet.</strong> Add a watch folder and at least one destination library under <a href="#" id="GoToSetup" style="color:inherit">Watch folders</a>, then save. Nothing is watched until then.
         </div>
 
-        <div class="ingest-banner" id="DryRunBanner">
-          <strong>Dry run is on.</strong> Ingest records what it would do and moves nothing. Check <em>Recent activity</em>, then turn dry run off.
+        <div class="ingest-banner" id="DryRunBanner" hidden>
+          <strong id="DryRunBannerTitle">Dry run is on.</strong> Ingest records what it would do in these watch folders and moves nothing. Check <em>Recent activity</em>, then turn dry run off for the folder under <em>Watch folders</em> and save.
+        </div>
+
+        <div id="WaitingBox" hidden>
+          <h3 class="sectionTitle">Waiting <span class="ingest-muted" id="WaitingCount"></span></h3>
+          <p class="ingest-muted">Releases seen in a watch folder that haven't finished arriving yet. Each is processed once nothing in it has changed for the settle time.</p>
+          <ul class="ingest-waiting" id="Waiting"></ul>
         </div>
 
         <div class="ingest-head">
@@ -116,7 +133,7 @@
 
         <form id="IngestConfigForm">
           <h3 class="sectionTitle" style="margin-top:2em" id="WatchFoldersHead">Watch folders</h3>
-          <p class="ingest-muted">Each release is filed by type into the watch folder's destination for that kind: shows into a Shows library, films into a Movies library, or both into a Mixed Movies and Shows library. A watch folder can have one destination per kind, so a mixed library must be its only destination. Media with no destination of its kind is left for review. To split films between two Movies libraries, use a watch folder for each.</p>
+          <p class="ingest-muted">A new watch folder starts in <strong>dry run</strong>: Ingest records what it would do (see <em>Recent activity</em>) and moves nothing until you untick it for that folder. Each release is filed by type into the watch folder's destination for that kind: shows into a Shows library, films into a Movies library, or both into a Mixed Movies and Shows library. A watch folder can have one destination per kind, so a mixed library must be its only destination. Media with no destination of its kind is left for review. To split films between two Movies libraries, use a watch folder for each.</p>
           <div id="WatchFolders"></div>
           <button is="emby-button" type="button" class="raised button-alt" id="AddWatchFolder"><span>Add watch folder</span></button>
 
@@ -125,7 +142,7 @@
             <label class="inputLabel inputLabelUnfocused" for="QuarantinePath">Quarantine folder</label>
             <input id="QuarantinePath" name="QuarantinePath" type="text" is="emby-input" />
             <div class="fieldDescription">Leave empty to use a hidden <code>.ingest-quarantine</code> folder inside each watch folder (same disk, so moves are instant). It must not be, contain or sit inside a library folder; only the dated folders Ingest creates there are ever deleted.</div>
-            <div class="wf-error" id="QuarantinePathError"></div>
+            <div class="wf-error" id="QuarantinePathError" aria-live="polite"></div>
           </div>
           <div class="inputContainer">
             <label class="inputLabel inputLabelUnfocused" for="QuarantineRetentionDays">Keep quarantined items for (days)</label>
@@ -135,12 +152,6 @@
             <label class="inputLabel inputLabelUnfocused" for="SettleSeconds">Wait until a release has stopped changing for (seconds)</label>
             <input id="SettleSeconds" name="SettleSeconds" type="number" min="5" is="emby-input" />
             <div class="fieldDescription">A release is processed once no file in it has been added, resized or written for this long. <strong>Download clients must not write straight into a watch folder:</strong> use their "incomplete" or temporary folder outside it (or an in-progress suffix such as <code>.part</code> or <code>.!qb</code>) and let them move finished downloads in. A download that stalls for longer than this can otherwise look finished.</div>
-          </div>
-          <div class="checkboxContainer checkboxContainer-withDescription">
-            <label class="emby-checkbox-label">
-              <input id="DryRun" name="DryRun" type="checkbox" is="emby-checkbox" />
-              <span>Dry run (record only, move nothing)</span>
-            </label>
           </div>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
@@ -184,6 +195,20 @@
         var config = { WatchFolders: [] };
         var rowCount = 0;
 
+        // Status messages for screen readers (FAM-07)
+        function announce(text) {
+          var box = page.querySelector('#IngestStatus');
+          box.textContent = '';
+          setTimeout(function () { box.textContent = text; }, 50);
+        }
+
+        // Light or dark theme: dark text on the page means a light theme (FAM-07)
+        function syncTheme() {
+          var m = (getComputedStyle(page).color || '').match(/\d+(\.\d+)?/g);
+          var light = !!m && (0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2]) < 128;
+          page.classList.toggle('ingest-light', light);
+        }
+
         function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
         // ---- libraries ----
@@ -208,10 +233,7 @@
         function kinds(l) { return l ? { tv: isTvLib(l), film: isFilmLib(l) } : { tv: false, film: false }; }
         function overlaps(a, b) { return (a.tv && b.tv) || (a.film && b.film); }
 
-        function destinationsOf(w) {
-          if (w.Destinations && w.Destinations.length) { return w.Destinations; }
-          return w.TargetLibraryId ? [{ LibraryId: w.TargetLibraryId, Path: w.TargetPath }] : [];
-        }
+        function destinationsOf(w) { return w.Destinations || []; }
 
         // Rebuilds each destination's library list so it only offers libraries that don't overlap the row's others.
         function refreshDestinations(row) {
@@ -257,7 +279,9 @@
         }
 
         function addRow(w) {
-          w = w || { Path: '', Destinations: [], Enabled: true };
+          // A new folder starts in dry run (ING-32); one saved before dry run was per folder shows the old global setting
+          w = w || { Path: '', Destinations: [], Enabled: true, DryRun: true };
+          var dry = w.DryRun == null ? config.DryRun !== false : !!w.DryRun;
           var n = rowCount++;
           var row = document.createElement('div');
           row.className = 'ingest-row';
@@ -266,15 +290,18 @@
             '<input is="emby-input" type="text" id="wf-path-' + n + '" class="wf-path" value="' + esc(w.Path) + '" placeholder="/media/incoming" /></div>' +
             '<label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" id="wf-on-' + n + '" class="wf-on"' + (w.Enabled ? ' checked' : '') + ' /><span>On</span></label>' +
             '<button is="emby-button" type="button" class="raised button-cancel wf-remove"><span>Remove folder</span></button></div>' +
-            '<div class="wf-transfer"><label>Files are <select class="wf-mode">' +
+            '<div class="wf-transfer"><label for="wf-mode-' + n + '">Files are</label> <select id="wf-mode-' + n + '" class="wf-mode">' +
             '<option value="Move"' + (!w.Transfer || w.Transfer === 'Move' ? ' selected' : '') + '>moved (Usenet, or downloads nothing else needs)</option>' +
             '<option value="HardLink"' + (w.Transfer === 'HardLink' ? ' selected' : '') + '>hard-linked (torrents keep seeding; no extra space, same drive)</option>' +
             '<option value="Copy"' + (w.Transfer === 'Copy' ? ' selected' : '') + '>copied (torrents keep seeding; uses the space twice)</option>' +
-            '</select></label></div>' +
+            '</select>' +
+            '<label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" id="wf-dry-' + n + '" class="wf-dry"' + (dry ? ' checked' : '') + ' /><span>Dry run (record only, move nothing)</span></label></div>' +
             '<div class="wf-dests"></div>' +
             '<button is="emby-button" type="button" class="raised button-alt wf-add-dest"><span>Add destination</span></button>' +
-            '<p class="ingest-muted wf-hint"></p><p class="wf-error"></p>';
-          row.querySelector('.wf-remove').addEventListener('click', function () { row.remove(); });
+            '<p class="ingest-muted wf-hint"></p><p class="wf-error" aria-live="polite"></p>';
+          row.querySelector('.wf-remove').addEventListener('click', function () { row.remove(); syncBanner(); });
+          row.querySelector('.wf-dry').addEventListener('change', syncBanner);
+          row.querySelector('.wf-on').addEventListener('change', syncBanner);
           row.querySelector('.wf-add-dest').addEventListener('click', function () { addDestination(row); });
           page.querySelector('#WatchFolders').appendChild(row);
           var dests = destinationsOf(w);
@@ -287,7 +314,11 @@
         }
 
         function syncBanner() {
-          page.querySelector('#DryRunBanner').hidden = !page.querySelector('#DryRun').checked;
+          var dry = Array.prototype.filter.call(page.querySelectorAll('.ingest-row'), function (row) {
+            return row.querySelector('.wf-dry').checked && row.querySelector('.wf-on').checked;
+          }).length;
+          page.querySelector('#DryRunBanner').hidden = !dry;
+          page.querySelector('#DryRunBannerTitle').textContent = dry === 1 ? 'Dry run is on for a watch folder.' : 'Dry run is on for ' + dry + ' watch folders.';
           page.querySelector('#SetupBanner').hidden = isSetUp(config);
         }
 
@@ -305,16 +336,38 @@
           var mine = fileChoices[r.Id] && fileChoices[r.Id][i.Source];
           return mine || decisionNames[(r.FileDecisions || {})[i.Source]] || 'later';
         }
-        function perFile(r) {
+        // Season and episode typed for a video (ING-30), kept until applied like the choices above
+        var fileNums = {};
+        function fileNum(r, i) {
+          var mine = fileNums[r.Id] && fileNums[r.Id][i.Source];
+          if (mine) { return mine; }
+          var saved = (r.FileEpisodes || {})[i.Source];
+          return saved ? { s: String(saved.Season), e: String(saved.Episode) } : { s: '', e: '' };
+        }
+        // A show was chosen or suggested, so its videos can be given a season and episode
+        function looksTv(r) {
+          return r.Chosen ? !!r.Chosen.Candidate.IsSeries : (r.Candidates || []).some(function (c) { return c.Candidate.IsSeries; });
+        }
+        function videoCount(r) { return (r.Items || []).filter(function (i) { return i.IsVideo; }).length; }
+        function perFile(r, n) {
           var items = r.Items || [];
-          if (items.length < 2) { return ''; }
-          return '<details class="ingest-files"' + (filesOpen[r.Id] ? ' open' : '') + '><summary>Choose file by file</summary><table>' + items.map(function (i) {
+          var numbers = looksTv(r) && videoCount(r) > 0;
+          if (items.length < 2 && !numbers) { return ''; }
+          return '<details class="ingest-files"' + (filesOpen[r.Id] ? ' open' : '') + '><summary>Choose file by file</summary><table>' + items.map(function (i, k) {
             var c = fileChoice(r, i);
+            var id = 'ingest-f-' + n + '-' + k;
             var opt = function (v, t) { return '<option value="' + v + '"' + (c === v ? ' selected' : '') + '>' + t + '</option>'; };
-            return '<tr><td>' + esc(i.Source.split(/[\\/]/).pop()) + '<div class="ingest-muted">' + esc(i.Reason) + '</div></td><td><select class="ingest-file-choice" data-source="' + esc(i.Source) + '">' +
-              opt('later', 'Decide later') + (i.Existing ? opt('replace', 'Replace existing') : '') + opt('quarantine', 'Quarantine this file') + '</select></td></tr>';
+            var num = numbers && i.IsVideo ? fileNum(r, i) : null;
+            return '<tr><td>' + esc(i.Source.split(/[\\/]/).pop()) + '<div class="ingest-muted">' + esc(i.Reason) + '</div></td>' +
+              '<td><label class="ingest-visually-hidden" for="' + id + '">What to do with ' + esc(i.Source.split(/[\\/]/).pop()) + '</label><select id="' + id + '" class="ingest-file-choice" data-source="' + esc(i.Source) + '">' +
+              opt('later', 'Decide later') + (i.Existing ? opt('replace', 'Replace existing') : '') + opt('quarantine', 'Quarantine this file') + '</select></td>' +
+              '<td class="ingest-num">' + (num
+                ? '<label for="' + id + '-s">Season</label> <input id="' + id + '-s" class="ingest-file-num" data-part="s" data-source="' + esc(i.Source) + '" type="number" min="0" max="2999" inputmode="numeric" value="' + esc(num.s) + '" />' +
+                  ' <label for="' + id + '-e">Episode</label> <input id="' + id + '-e" class="ingest-file-num" data-part="e" data-source="' + esc(i.Source) + '" type="number" min="1" max="9999" inputmode="numeric" value="' + esc(num.e) + '" />'
+                : '') + '</td></tr>';
           }).join('') + '</table><button is="emby-button" type="button" class="raised button-alt ingest-apply-files"><span>Apply these choices</span></button>' +
-            '<div class="ingest-muted">Files left as "Decide later" keep the release waiting; the others are handled and the rest of the release is filed.</div></details>';
+            '<div class="ingest-muted">Files left as "Decide later" keep the release waiting; the others are handled and the rest of the release is filed.' +
+            (numbers ? ' A season and episode files that video as that episode of the chosen show, whatever its name says (season 0 for specials); leave both empty to go by the name.' : '') + '</div></details>';
         }
 
         // A release held back only by copies already on the server can replace them (they go to quarantine)
@@ -358,6 +411,12 @@
           return any ? any.ItemId : '';
         }
 
+        // Whether a watch folder is in dry run, as saved
+        function isDryRun(watchPath) {
+          var w = (config.WatchFolders || []).filter(function (x) { return x.Path === watchPath; })[0];
+          return !!w && (w.DryRun == null ? config.DryRun !== false : !!w.DryRun);
+        }
+
         function libraryFor(root) {
           var l = libraries.filter(function (x) { return (x.Locations || []).indexOf(root) >= 0; })[0];
           return l ? l.Name : root;
@@ -383,17 +442,20 @@
           }).join('');
           var more = cands.length > SHOWN && !expanded[key]
             ? '<button type="button" class="ingest-more" data-key="' + esc(key) + '">Show ' + (cands.length - SHOWN) + ' more</button>' : '';
+          var videos = videoCount(r);
+          var libId = 'ingest-lib-' + r.Id + '-' + list;
+          var warn = videos > 1 ? '<div class="ingest-muted">“Use this” files all ' + videos + ' waiting videos as this title. To set one aside, use <em>Choose file by file</em> below.</div>' : '';
           return '<div class="ingest-pick" data-list="' + list + '">' +
             '<div class="ingest-into"><strong>' + (list === 'suggested' ? 'Possible matches' : 'Search results') + '</strong>' +
-            '<label>File into <select class="ingest-lib" data-key="' + esc(key) + '">' + (opts || '<option value="">No ' + (isTv ? 'TV' : 'film') + ' library</option>') + '</select></label></div>' +
-            '<table class="ingest-cands"><tbody>' + rows + '</tbody></table>' + more + '</div>';
+            '<label for="' + esc(libId) + '">File into</label> <select id="' + esc(libId) + '" class="ingest-lib" data-key="' + esc(key) + '">' + (opts || '<option value="">No ' + (isTv ? 'TV' : 'film') + ' library</option>') + '</select></div>' +
+            warn + '<table class="ingest-cands"><tbody>' + rows + '</tbody></table>' + more + '</div>';
         }
 
         function renderReviews() {
           var box = page.querySelector('#Reviews');
           page.querySelector('#ReviewCount').textContent = reviews.length ? '(' + reviews.length + ')' : '';
           if (!reviews.length) { box.innerHTML = '<p class="ingest-muted">Nothing waiting. Releases Ingest can\'t file confidently will appear here.</p>'; return; }
-          box.innerHTML = reviews.map(function (r) {
+          box.innerHTML = reviews.map(function (r, n) {
             var pending = r.Request && r.Request !== 'None';
             var html = '<div class="ingest-card" data-id="' + esc(r.Id) + '">' +
               '<h4>' + esc(r.Release) + '</h4>' +
@@ -406,7 +468,7 @@
             }
             if (r.Chosen) {
               html += '<div class="ingest-chosen">Chosen: <strong>' + title(r.Chosen.Candidate) + '</strong> into <strong>' + esc(libraryFor(r.Chosen.Target.Root)) + '</strong> &nbsp;' + links(r.Chosen.Candidate.ProviderIds, r.Chosen.Candidate.IsSeries) +
-                (config.DryRun ? '<div class="ingest-muted">Dry run is on, so it has only been planned (see Recent activity). It will be filed once dry run is off.</div>' : '') + '</div>';
+                (isDryRun(r.WatchFolder) ? '<div class="ingest-muted">Dry run is on, so it has only been planned (see Recent activity). It will be filed once dry run is off.</div>' : '') + '</div>';
             }
             if (pending) {
               return html + '<p class="ingest-muted">' + (r.Request === 'Quarantine' ? 'Quarantining' : r.Request === 'Replace' ? 'Replacing what\'s on the server' : 'Planning again') + ' on the next sweep (within 30 seconds)…</p></div>';
@@ -417,17 +479,43 @@
             else if (sr) { html += '<p class="ingest-muted">No results for “' + esc(sr.q) + '”.</p>'; }
             var guessTv = (r.Candidates || []).length ? !!r.Candidates[0].Candidate.IsSeries : !!(libById(defaultLibrary(r.WatchFolder, true)) && !defaultLibrary(r.WatchFolder, false));
             html += '<details class="ingest-search"' + (sr || !(r.Candidates || []).length ? ' open' : '') + '><summary>Search for a different title</summary>' +
-              '<form><input name="q" type="text" placeholder="Title" value="' + esc(sr ? sr.q : '') + '" required />' +
-              '<input name="y" type="number" min="1880" max="2100" placeholder="Year" value="' + esc(sr ? sr.y : '') + '" />' +
-              '<select name="k"><option value="film"' + ((sr ? sr.k === 'film' : !guessTv) ? ' selected' : '') + '>Film</option><option value="tv"' + ((sr ? sr.k === 'tv' : guessTv) ? ' selected' : '') + '>Show</option></select>' +
+              '<form><label class="ingest-visually-hidden" for="ingest-q-' + esc(r.Id) + '">Title to search for</label><input id="ingest-q-' + esc(r.Id) + '" name="q" type="text" placeholder="Title" value="' + esc(sr ? sr.q : '') + '" required />' +
+              '<label class="ingest-visually-hidden" for="ingest-y-' + esc(r.Id) + '">Year (optional)</label><input id="ingest-y-' + esc(r.Id) + '" name="y" type="number" min="1880" max="2100" placeholder="Year" value="' + esc(sr ? sr.y : '') + '" />' +
+              '<label class="ingest-visually-hidden" for="ingest-k-' + esc(r.Id) + '">Film or show</label><select id="ingest-k-' + esc(r.Id) + '" name="k"><option value="film"' + ((sr ? sr.k === 'film' : !guessTv) ? ' selected' : '') + '>Film</option><option value="tv"' + ((sr ? sr.k === 'tv' : guessTv) ? ' selected' : '') + '>Show</option></select>' +
               '<button is="emby-button" type="submit" class="raised button-alt"><span>Search</span></button></form></details>';
             html += '<div class="ingest-actions">' +
               '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>' + (r.Chosen ? 'Clear choice and retry' : 'Retry') + '</span></button>' +
               (canReplace(r) ? '<button is="emby-button" type="button" class="raised button-submit ingest-replace"><span>' + (confirmReplace[r.Id] ? 'Confirm: replace ' + existingCount(r) + ' file' + (existingCount(r) === 1 ? '' : 's') + ' on the server' : 'Replace existing copies') + '</span></button>' : '') +
               '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>' +
-              '</div>' + perFile(r);
+              '</div>' + perFile(r, n);
             return html + '</div>';
           }).join('');
+        }
+
+        // ---- Waiting (ING-36) ----
+        var waiting = [], working = null;
+        function minutesFromNow(iso) { return Math.max(0, Math.round((new Date(iso) - new Date()) / 60000)); }
+        function renderWaiting() {
+          var shown = waiting.filter(function (w) { return !working || w.Id !== working.Id; });
+          page.querySelector('#WaitingBox').hidden = !shown.length && !working;
+          page.querySelector('#WaitingCount').textContent = shown.length ? '(' + shown.length + ')' : '';
+          var items = [];
+          if (working) {
+            items.push('<li><div class="what"><strong>' + esc(working.Release) + '</strong><div class="ingest-muted">' + esc(working.WatchFolder) + '</div></div><span>' +
+              (working.Stage === 'Filing' && working.Files ? 'Filing file ' + working.File + ' of ' + working.Files + '…' : 'Identifying…') + '</span></li>');
+          }
+          shown.forEach(function (w) {
+            var state, button = '';
+            if (!w.SettlesAt) { state = 'Still downloading (in-progress files such as .part are in it)'; }
+            else if (w.ProcessNow) { state = 'Processing on the next sweep…'; }
+            else {
+              var m = minutesFromNow(w.SettlesAt);
+              state = m < 1 ? 'Settled; processing on the next sweep' : 'Settles at ' + when(w.SettlesAt) + ' (in about ' + m + ' min) if nothing changes';
+              button = '<button is="emby-button" type="button" class="raised button-alt ingest-process-now" data-id="' + esc(w.Id) + '"><span>Process now</span></button>';
+            }
+            items.push('<li><div class="what"><strong>' + esc(w.Release) + '</strong><div class="ingest-muted">' + esc(w.WatchFolder) + ' · ' + esc(state) + '</div></div>' + button + '</li>');
+          });
+          page.querySelector('#Waiting').innerHTML = items.join('');
         }
 
         // ---- Recent activity ----
@@ -457,6 +545,9 @@
             var open = Array.prototype.map.call(page.querySelectorAll('#Activity details[open]'), function (d) { return d.closest('li').getAttribute('data-k'); });
             activity = s.Activity || [];
             reviews = s.Reviews || [];
+            waiting = s.Waiting || [];
+            working = s.Working || null;
+            renderWaiting();
             renderReviews();
             renderActivity();
             open.forEach(function (k) {
@@ -513,7 +604,9 @@
         function failed(xhr) {
           var p = xhr && xhr.text ? xhr.text() : Promise.resolve('');
           return p.then(function (t) {
-            Dashboard.alert(t && t.length < 300 ? t.replace(/^"|"$/g, '') : 'That review has changed or gone; refreshing.');
+            var msg = t && t.length < 300 ? t.replace(/^"|"$/g, '') : 'That review has changed or gone; refreshing.';
+            announce(msg);
+            Dashboard.alert(msg);
             return loadStatus();
           }, loadStatus);
         }
@@ -521,7 +614,7 @@
         function post(path, body) {
           var req = { type: 'POST', url: ApiClient.getUrl(path) };
           if (body) { req.data = JSON.stringify(body); req.contentType = 'application/json'; }
-          return ApiClient.ajax(req).then(loadStatus, failed);
+          return ApiClient.ajax(req).then(function () { announce('Done. The page is being refreshed.'); return loadStatus(); }, failed);
         }
 
         // Same as ReviewChoice.KeyOf on the server: name|year|provider ids sorted by name
@@ -557,8 +650,16 @@
           } else if (btn.classList.contains('ingest-apply-files')) {
             var rf = reviewById(id);
             if (!rf) { return; }
-            var decisions = rf.Items.map(function (i) { return { Source: i.Source, Action: fileChoice(rf, i), Existing: i.Existing }; });
+            var decisions = rf.Items.map(function (i) {
+              var d = { Source: i.Source, Action: fileChoice(rf, i), Existing: i.Existing };
+              var s = card.querySelector('.ingest-file-num[data-part="s"][data-source="' + CSS.escape(i.Source) + '"]');
+              var ep = card.querySelector('.ingest-file-num[data-part="e"][data-source="' + CSS.escape(i.Source) + '"]');
+              // Both empty clears numbers given before; the server checks the rest
+              if (s && ep) { d.Season = s.value === '' ? null : parseInt(s.value, 10); d.Episode = ep.value === '' ? null : parseInt(ep.value, 10); }
+              return d;
+            });
             delete fileChoices[id];
+            delete fileNums[id];
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Files', { Decisions: decisions });
           } else if (btn.classList.contains('ingest-replace')) {
             var rr = reviewById(id);
@@ -576,6 +677,17 @@
         page.querySelector('#Reviews').addEventListener('change', function (e) {
           var lib = e.target.closest('.ingest-lib');
           if (lib) { libChoice[lib.getAttribute('data-key')] = lib.value; return; }
+          var num = e.target.closest('.ingest-file-num');
+          if (num) {
+            var nc = e.target.closest('.ingest-card').getAttribute('data-id');
+            var src = num.getAttribute('data-source');
+            fileNums[nc] = fileNums[nc] || {};
+            var cur = fileNums[nc][src] || fileNum(reviewById(nc), { Source: src });
+            cur = { s: cur.s, e: cur.e };
+            cur[num.getAttribute('data-part')] = num.value;
+            fileNums[nc][src] = cur;
+            return;
+          }
           var sel = e.target.closest('.ingest-file-choice');
           var card = e.target.closest('.ingest-card');
           if (!sel || !card) { return; }
@@ -602,9 +714,18 @@
           Dashboard.showLoadingMsg();
           ApiClient.getJSON(ApiClient.getUrl('Ingest/Search', params)).then(function () {
             searchResults[id] = { q: q, y: f.y.value, k: f.k.value };
+            announce('Search finished for ' + q + '.');
             if (document.activeElement) { document.activeElement.blur(); }
             return loadStatus();
           }, function () { Dashboard.alert('Search failed; check the Jellyfin log.'); }).then(function () { busyCard = null; Dashboard.hideLoadingMsg(); });
+        });
+
+        page.querySelector('#Waiting').addEventListener('click', function (e) {
+          var b = e.target.closest('.ingest-process-now');
+          if (!b) { return; }
+          b.disabled = true;
+          // Starts a sweep now; refresh again once it has had a moment to pick the release up
+          post('Ingest/Waiting/' + encodeURIComponent(b.getAttribute('data-id')) + '/ProcessNow').then(function () { setTimeout(loadStatus, 5000); });
         });
 
         page.querySelector('#ActivityFilters').addEventListener('click', function (e) {
@@ -617,6 +738,7 @@
 
         // ---- load / save ----
         page.addEventListener('pageshow', function () {
+          syncTheme();
           Dashboard.showLoadingMsg();
           Promise.all([ApiClient.getVirtualFolders(), ApiClient.getPluginConfiguration(pluginId)]).then(function (res) {
             libraries = res[0] || [];
@@ -627,7 +749,6 @@
             page.querySelector('#QuarantinePath').value = config.QuarantinePath || '';
             page.querySelector('#QuarantineRetentionDays').value = config.QuarantineRetentionDays;
             page.querySelector('#SettleSeconds').value = config.SettleSeconds;
-            page.querySelector('#DryRun').checked = config.DryRun;
             page.querySelector('#ScanLibraryAfterIngest').checked = config.ScanLibraryAfterIngest;
             page.querySelector('#UseAiTiebreak').checked = config.UseAiTiebreak !== false;
             page.querySelector('#UseTranscripts').checked = config.UseTranscripts !== false;
@@ -640,8 +761,7 @@
           });
         });
 
-        page.querySelector('#DryRun').addEventListener('change', syncBanner);
-        page.querySelector('#AddWatchFolder').addEventListener('click', function () { addRow(); });
+        page.querySelector('#AddWatchFolder').addEventListener('click', function () { addRow(); syncBanner(); });
 
         page.querySelector('#GoToSetup').addEventListener('click', function (e) {
           e.preventDefault();
@@ -667,7 +787,7 @@
             row.querySelector('.wf-error').textContent = error;
             row.classList.toggle('invalid', !!error);
             if (error) { ok = false; }
-            return { Path: path, Destinations: dests, TargetLibraryId: '', TargetPath: '', Enabled: row.querySelector('.wf-on').checked, Transfer: row.querySelector('.wf-mode').value };
+            return { Path: path, Destinations: dests, Enabled: row.querySelector('.wf-on').checked, Transfer: row.querySelector('.wf-mode').value, DryRun: row.querySelector('.wf-dry').checked };
           }).filter(Boolean);
           if (!ok) { return null; }
           if (!folders.length) { addRow(); return null; }
@@ -730,7 +850,6 @@
             current.QuarantinePath = quarantinePath;
             current.QuarantineRetentionDays = Math.max(1, parseInt(page.querySelector('#QuarantineRetentionDays').value, 10) || 30);
             current.SettleSeconds = Math.max(5, parseInt(page.querySelector('#SettleSeconds').value, 10) || 300);
-            current.DryRun = page.querySelector('#DryRun').checked;
             current.ScanLibraryAfterIngest = page.querySelector('#ScanLibraryAfterIngest').checked;
             current.UseAiTiebreak = page.querySelector('#UseAiTiebreak').checked;
             current.UseTranscripts = page.querySelector('#UseTranscripts').checked;
@@ -738,6 +857,7 @@
             config = current;
             return ApiClient.updatePluginConfiguration(pluginId, current).then(function (r) {
               Dashboard.processPluginConfigurationUpdateResult(r);
+              announce('Settings saved.');
               syncBanner();
               renderReviews();
             });

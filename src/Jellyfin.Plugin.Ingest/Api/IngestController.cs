@@ -30,6 +30,7 @@ public class IngestController : ControllerBase
     private const int MaxSearchResults = 10;
 
     private readonly IngestStateStore _state;
+    private readonly IngestProgress _progress;
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
     private readonly IApplicationPaths _paths;
@@ -39,21 +40,23 @@ public class IngestController : ControllerBase
     /// Initializes a new instance of the <see cref="IngestController"/> class.
     /// </summary>
     /// <param name="state">Reviews and activity.</param>
+    /// <param name="progress">What the sweep is waiting for and working on.</param>
     /// <param name="libraryManager">Jellyfin library manager.</param>
     /// <param name="providerManager">Jellyfin provider manager.</param>
     /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
     /// <param name="configuration">Jellyfin's configuration (for the transcode folder).</param>
-    public IngestController(IngestStateStore state, ILibraryManager libraryManager, IProviderManager providerManager, IApplicationPaths paths, IConfigurationManager configuration)
+    public IngestController(IngestStateStore state, IngestProgress progress, ILibraryManager libraryManager, IProviderManager providerManager, IApplicationPaths paths, IConfigurationManager configuration)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
+        _progress = progress ?? throw new ArgumentNullException(nameof(progress));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
         _providerManager = providerManager ?? throw new ArgumentNullException(nameof(providerManager));
     }
 
     /// <summary>
-    /// Gets pending reviews and recent activity.
+    /// Gets pending reviews, recent activity, releases waiting to settle and the release being worked on.
     /// </summary>
     /// <param name="limit">Maximum activity entries to return.</param>
     /// <returns>The dashboard state.</returns>
@@ -66,8 +69,24 @@ public class IngestController : ControllerBase
         {
             Reviews = [.. s.Reviews.OrderByDescending(r => r.Time)],
             Activity = [.. s.Activity.Take(Math.Clamp(limit, 1, IngestStateStore.MaxActivity))],
+            Waiting = _progress.Waiting(),
+            Working = _progress.Working,
         };
     }
+
+    /// <summary>
+    /// Processes a waiting release on the next sweep, which starts now, without waiting for the rest of its settle time.
+    /// It is still only processed if nothing in it has changed since the last sweep.
+    /// </summary>
+    /// <param name="id">The waiting release's id.</param>
+    /// <returns>No content.</returns>
+    [HttpPost("Waiting/{id}/ProcessNow")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult ProcessNow([FromRoute] string id)
+        => _progress.RequestProcessNow(id)
+            ? NoContent()
+            : NotFound("That release isn't waiting any more, or it still holds files that are downloading.");
 
     /// <summary>
     /// Lists what is in quarantine: the dated folders, newest first, with their releases and files, and when each is
@@ -316,6 +335,7 @@ public class IngestController : ControllerBase
         }
 
         var decisions = new Dictionary<string, FileDecision?>(StringComparer.Ordinal);
+        var episodes = new Dictionary<string, EpisodeNumber?>(StringComparer.Ordinal);
         foreach (var choice in request.Decisions ?? [])
         {
             var item = review.Items.FirstOrDefault(i => string.Equals(i.Source, choice.Source, StringComparison.Ordinal));
@@ -323,6 +343,14 @@ public class IngestController : ControllerBase
             {
                 return BadRequest("That file isn't waiting in this review.");
             }
+
+            // A season and episode (ING-30): both or neither, for a video, in range
+            if (EpisodeNumber.Read(choice.Season, choice.Episode, item, choice.Action, out var number) is { } problem)
+            {
+                return BadRequest(problem);
+            }
+
+            episodes[item.Source] = number;
 
             switch (choice.Action)
             {
@@ -350,14 +378,22 @@ public class IngestController : ControllerBase
             }
         }
 
-        if (!_state.RequestFiles(id, decisions))
+        // Two videos given the same episode would only wait again
+        var repeated = episodes.Values.OfType<EpisodeNumber>().GroupBy(n => n).FirstOrDefault(g => g.Count() > 1)?.Key;
+        if (repeated is not null)
+        {
+            return BadRequest(string.Create(CultureInfo.InvariantCulture, $"Two files are given season {repeated.Season}, episode {repeated.Episode}; each file needs its own episode."));
+        }
+
+        if (!_state.RequestFiles(id, decisions, episodes))
         {
             return NotFound();
         }
 
         var replace = decisions.Values.Count(d => d == FileDecision.Replace);
         var quarantine = decisions.Values.Count(d => d == FileDecision.Quarantine);
-        RecordDecision(review, string.Create(CultureInfo.InvariantCulture, $"Chose file by file: {replace} to replace what's on the server, {quarantine} to quarantine."));
+        var numbered = episodes.Values.Count(n => n is not null);
+        RecordDecision(review, string.Create(CultureInfo.InvariantCulture, $"Chose file by file: {replace} to replace what's on the server, {quarantine} to quarantine, {numbered} given a season and episode."));
         return NoContent();
     }
 
@@ -448,4 +484,10 @@ public sealed record FileChoice
 
     /// <summary>Gets the copies on the server the page showed for this file (for <c>replace</c>).</summary>
     public string? Existing { get; init; }
+
+    /// <summary>Gets the season to file this video as (with <see cref="Episode"/>; both empty to use its name).</summary>
+    public int? Season { get; init; }
+
+    /// <summary>Gets the episode to file this video as (with <see cref="Season"/>).</summary>
+    public int? Episode { get; init; }
 }

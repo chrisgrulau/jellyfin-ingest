@@ -349,6 +349,58 @@ public sealed class IngestStateTests : IDisposable
     }
 
     [Fact]
+    public void Episode_numbers_are_merged_kept_saved_and_cleared_by_retry()
+    {
+        var store = new IngestStateStore(StatePath);
+        var id = IngestStateStore.ReviewId("/w", "r");
+        store.PutReview(new PendingReview { Id = id, WatchFolder = "/w", Release = "r", Time = DateTimeOffset.UtcNow, Items = [new("r/a.mkv", "x"), new("r/b.mkv", "y")] });
+
+        store.RequestFiles(id, new Dictionary<string, FileDecision?>(), new Dictionary<string, EpisodeNumber?> { ["r/a.mkv"] = new(1, 2), ["r/b.mkv"] = new(1, 3) });
+        store.RequestFiles(id, new Dictionary<string, FileDecision?>(), new Dictionary<string, EpisodeNumber?> { ["r/b.mkv"] = null });
+        store.RequestFiles(id, new Dictionary<string, FileDecision?> { ["r/b.mkv"] = FileDecision.Quarantine }); // numbers not sent: kept
+        store.PutReview(new PendingReview { Id = id, WatchFolder = "/w", Release = "r", Time = DateTimeOffset.UtcNow, Items = [new("r/a.mkv", "x")] });
+
+        var saved = new IngestStateStore(StatePath).GetReview(id)!;
+        Assert.Equal(new EpisodeNumber(1, 2), Assert.Single(saved.FileEpisodes).Value);
+
+        store.RequestRetry(id, null);
+        Assert.Empty(store.GetReview(id)!.FileEpisodes);
+    }
+
+    [Theory]
+    [InlineData(1, 4, "r/a.mkv", "later", null)]
+    [InlineData(0, 1, "r/a.mkv", "replace", null)]
+    [InlineData(2024, 150, "r/a.mkv", "later", null)]
+    [InlineData(1, null, "r/a.mkv", "later", "both")]
+    [InlineData(null, 3, "r/a.mkv", "later", "both")]
+    [InlineData(1, 0, "r/a.mkv", "later", "season must be")]
+    [InlineData(-1, 2, "r/a.mkv", "later", "season must be")]
+    [InlineData(1, 2, "r/a.srt", "later", "Only a video")]
+    [InlineData(1, 2, "r/a.mkv", "quarantine", "quarantined")]
+    public void Episode_numbers_sent_from_the_page_are_checked(int? season, int? episode, string source, string action, string? problem)
+    {
+        var error = EpisodeNumber.Read(season, episode, new PendingReviewItem(source, "x"), action, out var number);
+
+        if (problem is null)
+        {
+            Assert.Null(error);
+            Assert.Equal(new EpisodeNumber(season!.Value, episode!.Value), number);
+        }
+        else
+        {
+            Assert.Contains(problem, error, StringComparison.Ordinal);
+            Assert.Null(number);
+        }
+    }
+
+    [Fact]
+    public void No_numbers_means_none_and_clears_earlier_ones()
+    {
+        Assert.Null(EpisodeNumber.Read(null, null, new PendingReviewItem("r/a.mkv", "x"), "later", out var number));
+        Assert.Null(number);
+    }
+
+    [Fact]
     public void A_copied_release_is_remembered_until_it_changes_or_leaves()
     {
         var store = new IngestStateStore(StatePath);

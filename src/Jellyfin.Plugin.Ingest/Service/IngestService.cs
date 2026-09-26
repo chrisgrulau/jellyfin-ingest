@@ -41,6 +41,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private readonly IProviderManager _providerManager;
     private readonly ILogger<IngestService> _logger;
     private readonly IngestStateStore _state;
+    private readonly IngestProgress _progress;
     private readonly IApplicationPaths _paths;
     private readonly IConfigurationManager _configuration;
     private bool _markersMigrated;
@@ -69,11 +70,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// <param name="libraryMonitor">Jellyfin library monitor (told which folders changed, so only those are refreshed).</param>
     /// <param name="providerManager">Jellyfin provider manager.</param>
     /// <param name="state">Reviews and activity shown on the dashboard.</param>
+    /// <param name="progress">What the sweep is waiting for and working on, shown on the dashboard.</param>
     /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
     /// <param name="configuration">Jellyfin's configuration (for the transcode folder).</param>
     /// <param name="logger">Logger.</param>
     /// <param name="activity">Jellyfin's Activity log (entries that need attention are copied there).</param>
-    public IngestService(ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IProviderManager providerManager, IngestStateStore state, IApplicationPaths paths, IConfigurationManager configuration, ILogger<IngestService> logger, MediaBrowser.Model.Activity.IActivityManager? activity = null)
+    public IngestService(ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IProviderManager providerManager, IngestStateStore state, IngestProgress progress, IApplicationPaths paths, IConfigurationManager configuration, ILogger<IngestService> logger, MediaBrowser.Model.Activity.IActivityManager? activity = null)
     {
         // What needs attention (and what was done) is copied to Jellyfin's Activity log, unless switched off (FAM-05)
         if (activity is not null && state is not null)
@@ -99,6 +101,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         _libraryMonitor = libraryMonitor ?? throw new ArgumentNullException(nameof(libraryMonitor));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
+        _progress = progress ?? throw new ArgumentNullException(nameof(progress));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
         _providerManager = providerManager ?? throw new ArgumentNullException(nameof(providerManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -213,16 +216,14 @@ public sealed partial class IngestService : IHostedService, IDisposable
             .Select(l => new MediaLibrary(l.ItemId, l.Name ?? l.ItemId, LibraryRouting.KindOf(l.CollectionType?.ToString()), l.Locations ?? []))];
 
     /// <summary>
-    /// A watch folder's configured destinations (a configuration from 0.1.0-alpha.1 has a single library instead).
+    /// A watch folder's configured destinations.
     /// </summary>
     /// <param name="watch">The watch folder.</param>
     /// <returns>The destinations, in order.</returns>
     public static IReadOnlyList<DestinationSetting> DestinationsOf(WatchFolder watch)
     {
         ArgumentNullException.ThrowIfNull(watch);
-        return watch.Destinations.Count > 0
-            ? [.. watch.Destinations.Select(d => new DestinationSetting(d.LibraryId, d.Path))]
-            : [new DestinationSetting(watch.TargetLibraryId, watch.TargetPath)];
+        return [.. watch.Destinations.Select(d => new DestinationSetting(d.LibraryId, d.Path))];
     }
 
     /// <summary>
@@ -286,7 +287,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
             try
             {
-                await Task.Delay(SweepInterval, ct).ConfigureAwait(false);
+                // Sooner when "Process now" is pressed (ING-36)
+                await _progress.WaitForNextSweepAsync(SweepInterval, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -328,6 +330,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
         // Reviews of a watch folder that has been removed from the settings can never be acted on
         _state.PruneWatchFolders([.. config.WatchFolders.Select(w => w.Path)]);
+        _progress.KeepOnly([.. config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)).Select(w => w.Path)]);
         foreach (var watch in config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)))
         {
             // Each watch folder on its own: one that can't be read (permissions, offline share) mustn't stop the others
@@ -390,6 +393,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 });
             }
 
+            _progress.SetWaiting(watch.Path, []);
             return;
         }
 
@@ -419,7 +423,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
 
         // Settings that change the outcome (dry run, destinations) changed: plan everything waiting again.
-        var settings = LibraryRouting.SettingsFingerprint(config.DryRun, DestinationsOf(watch));
+        var settings = LibraryRouting.SettingsFingerprint(watch.IsDryRun(config.DryRun), DestinationsOf(watch));
         if (_settings.TryGetValue(watch.Path, out var before) && !string.Equals(before, settings, StringComparison.Ordinal))
         {
             LogReplanning(_logger, watch.Path);
@@ -465,7 +469,16 @@ public sealed partial class IngestService : IHostedService, IDisposable
             }
         }
 
-        foreach (var release in tracker.Observe(snapshot, _clock.GetUtcNow(), TimeSpan.FromSeconds(Math.Max(5, config.SettleSeconds))))
+        // "Process now" skips the rest of a release's settle wait (ING-36)
+        foreach (var release in snapshot.Keys.Where(r => _progress.TakeProcessNow(IngestStateStore.ReviewId(watch.Path, r))))
+        {
+            tracker.SettleNow(release);
+        }
+
+        var settle = TimeSpan.FromSeconds(Math.Max(5, config.SettleSeconds));
+        var ready = tracker.Observe(snapshot, _clock.GetUtcNow(), settle);
+        PublishWaiting(watch, tracker, settle, snapshot);
+        foreach (var release in ready)
         {
             ct.ThrowIfCancellationRequested();
 
@@ -484,6 +497,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
             // The request this planning acts on; one made while planning runs is kept for the next sweep
             var seen = _state.GetReview(IngestStateStore.ReviewId(watch.Path, release))?.RequestVersion ?? 0;
+            _progress.SetWorking(new WorkInProgress { Id = IngestStateStore.ReviewId(watch.Path, release), WatchFolder = watch.Path, Release = release, Stage = "Identifying", Since = _clock.GetUtcNow() });
             try
             {
                 await IngestAsync(plugin.DataFolderPath, config, sweep, watch, release, snapshot[release], targets, quarantine, seen, ct).ConfigureAwait(false);
@@ -499,10 +513,42 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 LogReleaseFailed(_logger, release, ex);
                 ReportFailure(watch, release, ex.Message, [], seen);
             }
+            finally
+            {
+                _progress.SetWorking(null);
+            }
 
             tracker.MarkHandled(release);
+            PublishWaiting(watch, tracker, settle, snapshot);
             PauseIfProvidersLookDown();
         }
+    }
+
+    // What this watch folder is still waiting for, for the page (ING-36). Releases with a review are shown there instead,
+    // and one filed by copy or hard link that is only being checked again isn't news.
+    private void PublishWaiting(WatchFolder watch, ReleaseTracker tracker, TimeSpan settle, IReadOnlyDictionary<string, IReadOnlyList<ReleaseFile>> snapshot)
+    {
+        var now = _clock.GetUtcNow();
+        var waiting = new List<WaitingRelease>();
+        foreach (var (release, settlesAt) in tracker.Pending(settle))
+        {
+            var id = IngestStateStore.ReviewId(watch.Path, release);
+            if (_state.GetReview(id) is not null
+                || (watch.Transfer != TransferMode.Move && snapshot.TryGetValue(release, out var files) && _state.WasCopied(watch.Path, release, IngestStateStore.CopySignature(files))))
+            {
+                continue;
+            }
+
+            waiting.Add(new WaitingRelease
+            {
+                Id = id,
+                WatchFolder = watch.Path,
+                Release = release,
+                SettlesAt = settlesAt is { } at && at < now ? now : settlesAt,
+            });
+        }
+
+        _progress.SetWaiting(watch.Path, waiting);
     }
 
     // Many searches in a row found nothing: most likely an outage, so stop spending quota and try again later
@@ -692,6 +738,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         CancellationToken ct)
     {
         var id = IngestStateStore.ReviewId(watch.Path, release);
+        var dryRun = watch.IsDryRun(config.DryRun);
         var previous = _state.GetReview(id);
         if (previous is not null && previous.RequestVersion != seenVersion)
         {
@@ -713,6 +760,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         {
             ReplaceExisting = previous?.Request == ReviewRequest.Replace,
             FileDecisions = previous?.FileDecisions ?? new Dictionary<string, FileDecision>(StringComparer.Ordinal),
+            EpisodeNumbers = previous?.FileEpisodes ?? new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal),
             Transfer = watch.Transfer,
         };
         var plan = await planner.PlanAsync(watch.Path, release, files, targets, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
@@ -759,7 +807,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         _retries.Remove(id);
 
         // Mark the dated quarantine folder as Ingest's own before anything is moved into it (the purge only deletes marked folders)
-        if (!config.DryRun)
+        if (!dryRun)
         {
             foreach (var dated in plan.Operations.Where(o => o.Kind == OperationKind.Quarantine).Select(o => DatedFolder(quarantine, o.Destination)).OfType<string>().Distinct(StringComparer.Ordinal))
             {
@@ -767,9 +815,10 @@ public sealed partial class IngestService : IHostedService, IDisposable
             }
         }
 
-        var report = new PlanExecutor(new PhysicalFileOperations(), _clock)
-            .Execute(plan, Path.Combine(watch.Path, release), Path.Combine(dataFolder, "actions.jsonl"), config.DryRun, ct);
-        var prefix = config.DryRun ? "[dry run] would" : "Did";
+        var working = new WorkInProgress { Id = id, WatchFolder = watch.Path, Release = release, Stage = "Filing", Since = _clock.GetUtcNow() };
+        var report = new PlanExecutor(new PhysicalFileOperations(), _clock) { Filing = (file, count) => _progress.SetWorking(working with { File = file, Files = count }) }
+            .Execute(plan, Path.Combine(watch.Path, release), Path.Combine(dataFolder, "actions.jsonl"), dryRun, ct);
+        var prefix = dryRun ? "[dry run] would" : "Did";
         // Per-file detail (paths can hold user and share names) only at Debug; one line per release at Information
         if (_logger.IsEnabled(LogLevel.Debug))
         {
@@ -779,7 +828,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
             }
         }
 
-        var summaryLine = Summarise(report.Completed, config.DryRun);
+        var summaryLine = Summarise(report.Completed, dryRun);
         if (report.Succeeded)
         {
             LogFiled(_logger, release, summaryLine);
@@ -807,7 +856,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         _state.RecordUnlessRepeat(new ActivityEntry
         {
             Time = _clock.GetUtcNow(),
-            Status = config.DryRun ? ActivityStatus.DryRun : ActivityStatus.Filed,
+            Status = dryRun ? ActivityStatus.DryRun : ActivityStatus.Filed,
             Release = release,
             WatchFolder = watch.Path,
             Summary = summaryLine
@@ -818,12 +867,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
         });
 
         // A release filed by copy or hard link stays in the watch folder: remember it so it isn't filed again
-        if (!config.DryRun && watch.Transfer != TransferMode.Move)
+        if (!dryRun && watch.Transfer != TransferMode.Move)
         {
             _state.MarkCopied(new CopiedRelease(watch.Path, release, IngestStateStore.CopySignature(files)));
         }
 
-        if (config.DryRun && previous?.Chosen is { } chosen)
+        if (dryRun && previous?.Chosen is { } chosen)
         {
             // Keep the decision so the release files the same way once dry run is turned off.
             _state.MarkPlannedInDryRun(id, $"Dry run: planned as {chosen.Candidate.Name}{(chosen.Candidate.Year is { } y ? $" ({y})" : string.Empty)}; it will be filed once dry run is off.", seenVersion);
@@ -833,7 +882,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
             _state.RemoveReview(id);
         }
 
-        if (!config.DryRun && config.ScanLibraryAfterIngest)
+        if (!dryRun && config.ScanLibraryAfterIngest)
         {
             // Only the film or show folders that changed are refreshed (as Jellyfin's real-time monitoring would), not
             // every library on the server; a new folder is picked up through its library folder
@@ -959,6 +1008,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     // temporary name then rename, write-ahead action log, rollback on failure, best-effort tidy-up
     private void QuarantineRelease(PluginConfiguration config, WatchFolder watch, PendingReview review, IReadOnlyList<ReleaseFile> files, string quarantine)
     {
+        var dryRun = watch.IsDryRun(config.DryRun);
         var dated = QuarantineMarkers.DatedFolderFor(quarantine, DateOnly.FromDateTime(_clock.GetLocalNow().DateTime));
         var fs = new PhysicalFileOperations();
         var taken = new HashSet<string>(PathGuard.Comparer);
@@ -986,13 +1036,13 @@ public sealed partial class IngestService : IHostedService, IDisposable
         ExecutionReport report;
         try
         {
-            if (!config.DryRun)
+            if (!dryRun)
             {
                 QuarantineMarkers.Mark(quarantine, dated);
             }
 
             var dataFolder = IngestPlugin.Instance?.DataFolderPath ?? throw new InvalidOperationException("The plugin isn't loaded.");
-            report = new PlanExecutor(fs, _clock).Execute(plan, Path.Combine(watch.Path, review.Release), Path.Combine(dataFolder, "actions.jsonl"), config.DryRun);
+            report = new PlanExecutor(fs, _clock).Execute(plan, Path.Combine(watch.Path, review.Release), Path.Combine(dataFolder, "actions.jsonl"), dryRun);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -1020,15 +1070,15 @@ public sealed partial class IngestService : IHostedService, IDisposable
         _state.Record(new ActivityEntry
         {
             Time = _clock.GetUtcNow(),
-            Status = config.DryRun ? ActivityStatus.DryRun : ActivityStatus.Quarantined,
+            Status = dryRun ? ActivityStatus.DryRun : ActivityStatus.Quarantined,
             Release = review.Release,
             WatchFolder = watch.Path,
             Summary = string.Create(
                 CultureInfo.InvariantCulture,
-                $"{(config.DryRun ? "Would quarantine" : "Quarantined")} the whole release ({files.Count} file{(files.Count == 1 ? string.Empty : "s")}) to {dated}."),
+                $"{(dryRun ? "Would quarantine" : "Quarantined")} the whole release ({files.Count} file{(files.Count == 1 ? string.Empty : "s")}) to {dated}."),
             Details = Describe(watch.Path, report.Completed),
         });
-        if (config.DryRun)
+        if (dryRun)
         {
             _state.ClearRequest(review.Id, review.RequestVersion);
         }

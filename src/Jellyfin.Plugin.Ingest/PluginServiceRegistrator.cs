@@ -20,6 +20,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton(sp => new IngestStateStore(
             Path.Combine(sp.GetRequiredService<IApplicationPaths>().PluginsPath, typeof(IngestPlugin).Assembly.GetName().Name!, "state.json"),
             sp.GetRequiredService<ILogger<IngestStateStore>>()));
+        serviceCollection.AddSingleton<IngestProgress>();
         serviceCollection.AddHostedService<IngestService>();
     }
 }

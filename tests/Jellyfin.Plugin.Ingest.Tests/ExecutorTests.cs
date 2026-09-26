@@ -155,6 +155,19 @@ public class ExecutorTests
     }
 
     [Fact]
+    public void Says_which_file_it_is_filing()
+    {
+        var fs = Seeded();
+        var seen = new List<(int, int)>();
+
+        var report = new PlanExecutor(fs, TimeProvider.System) { Filing = (file, count) => seen.Add((file, count)) }
+            .Execute(Plan(), "/drop/r", "/log", dryRun: false);
+
+        Assert.True(report.Succeeded);
+        Assert.Equal([(1, 3), (2, 3), (3, 3)], seen);
+    }
+
+    [Fact]
     public void A_failure_undoes_the_moves_already_made()
     {
         var fs = Seeded();

@@ -5,6 +5,46 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **ING-36: Waiting**, on the plugin page and in the Status API. Before, nothing showed while a release settled (five
+  minutes by default) or while a long copy ran. Now the page lists:
+  - releases seen but not handled yet, and when each will settle if nothing changes (or that it is still downloading);
+  - the release being identified or filed, with "Filing file 2 of 5".
+
+  **Process now** skips the rest of a release's settle wait and starts a sweep straight away. The release is still
+  only processed if nothing in it has changed since the last look. After a restart, releases settle again as before.
+- **ING-30: Season and episode in review.** Under **Choose file by file**, each video of a show can be given a season and
+  episode, for names Ingest can't read numbers from ("Show - 125", a date, no number at all). The video is then filed
+  as that episode of the chosen or suggested show, whatever its name says; season 0 is for specials. The numbers are
+  checked on the server (both or neither, in range, a video, not a file being quarantined, no episode given twice)
+  and kept when the release is planned again. **Clear choice and retry** clears them.
+  - A card with several waiting videos now says that **Use this** files all of them as that title.
+
+### Changed
+
+- **ING-32: Dry run per watch folder.** Each watch folder has its own **Dry run** tick box, next to how its files are
+  filed, and a new folder starts in dry run. Before, dry run was one setting for everything, so a folder added after
+  it was turned off went live straight away.
+  - Upgrading changes nothing: each saved folder takes the old global setting when the plugin loads.
+  - The banner says how many watch folders are in dry run.
+
+### Fixed
+
+- **FAM-07 (Ingest page): Light theme and accessibility.**
+  - The "File into" choices and the page's other drop-downs were dark text on a dark background in the Light theme.
+    Field, option and error colours now follow the theme.
+  - Labels in generated rows are linked to their fields, and the title, year and kind fields of a review search have
+    labels for screen readers.
+  - Results of actions (a decision sent, a search finished, settings saved, an error) are announced to screen readers.
+
+### Removed
+
+- **FAM-08:** the 0.1.0-alpha.1 single-library settings of a watch folder (`TargetLibraryId`, `TargetPath`) are no
+  longer read. Every release since has saved destinations instead. A configuration that still holds them loads as
+  before, without them: a watch folder saved only by 0.1.0-alpha.1 and never since needs its destination chosen again.
+- Unused code: `MediaNamer.EpisodeRelativePath`, which only the tests called.
+
 ## [0.7.0-alpha] - 2026-09-26
 
 ### Added

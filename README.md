@@ -65,9 +65,10 @@ plugin page, where you pick the right title (and library) with one click or sear
 | AI tie-breaker | Optional, with the Shoal AI plugin: a close call between candidates Ingest already found is settled by the AI choosing one of them (or none). Only file names, titles and years are sent for this (see [What Ingest sends](#what-ingest-sends)); every choice is shown in *Recent activity*. |
 | Episodes from a transcript | Optional, with the Shoal Subtitles and AI plugins: when a name doesn't say which episode it is, two minutes of it are transcribed (built-in speech-to-text by default, on this server) and the AI picks the listed episode whose synopsis fits, or none. |
 | Episodes named by title | A file that gives the episode title but no number (typically a special) is matched against that season's episode list from your providers; if no title clearly matches, the AI plugin (when installed) may choose one of the listed episodes. |
-| Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. |
+| Waiting | *Waiting* on the plugin page: releases that are still arriving, when each will settle, and the release being identified or filed ("Filing file 2 of 5"). **Process now** skips the rest of a release's settle wait. |
+| Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. *Choose file by file* replaces or quarantines single files, and gives a video of a show a season and episode when its name has none it can read. |
 | Activity | *Recent activity* on the plugin page: filed, dry run, needs review, decisions, failures, quarantine and purges, with what went where. |
-| Safety | Dry-run mode (on by default), never overwrites, never files a second copy of an episode or film already on the server, crash-safe moves (hidden temporary name, size check, then rename; interrupted moves are finished or discarded at the next start), all-or-nothing per release (a failure undoes the moves already made), a JSON-lines action log. |
+| Safety | Dry-run mode per watch folder (on for a new folder), never overwrites, never files a second copy of an episode or film already on the server, crash-safe moves (hidden temporary name, size check, then rename; interrupted moves are finished or discarded at the next start), all-or-nothing per release (a failure undoes the moves already made), a JSON-lines action log. |
 | Library refresh | Asks Jellyfin to refresh just the film or show folders filed into after a real ingest. |
 
 ## Download clients
@@ -113,7 +114,7 @@ like, `gh attestation verify <zip> --repo chrisgrulau/jellyfin-ingest`), extract
 `<jellyfin data>/plugins/Ingest_<version>/`, and restart Jellyfin.
 
 After installing, open **Dashboard → Plugins → Ingest** and add at least one watch folder with a destination library;
-nothing is watched until you do. Dry run is on until you turn it off.
+nothing is watched until you do. A new watch folder starts in dry run until you turn it off for that folder.
 
 ## Configuration
 
@@ -125,7 +126,7 @@ nothing is watched until you do. Dry run is on until you turn it off.
 | Files are (per watch folder) | moved | **moved**, **hard-linked** (the release stays for seeding; no extra space; copied instead if the library is on another drive) or **copied** (the release stays; uses the space twice). With hard link or copy, clutter stays in the release too. |
 | Quarantine folder | `<watch folder>/.ingest-quarantine` | Keep it on the same filesystem as the watch folder so moves are instant. |
 | Quarantine retention | 30 days | Enforced by the *Purge Ingest quarantine* scheduled task. |
-| Dry run | On | Records what would happen (see *Recent activity*) without moving anything. Turn off once you are happy with the results. |
+| Dry run (per watch folder) | On for a new folder | Records what would happen (see *Recent activity*) without moving anything. Turn it off for a folder once you are happy with its results. Folders saved before 0.8 keep the old global setting. |
 | Settle time | 300 s | How long nothing in a release (files, sizes, write times) may change before it is processed. |
 | Refresh filed folders after ingest | On | Only the film or show folders filed into are refreshed, never whole libraries. |
 | Let the AI plugin settle close matches | On | Does nothing unless the Shoal AI plugin is installed and allows Ingest. |

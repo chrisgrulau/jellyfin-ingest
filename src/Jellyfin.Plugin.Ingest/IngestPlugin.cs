@@ -24,6 +24,19 @@ public class IngestPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
         : base(applicationPaths, xmlSerializer)
     {
         Instance = this;
+
+        // Watch folders saved before dry run was per folder keep the old global setting (ING-32)
+        if (WatchFolder.MigrateDryRun(Configuration.WatchFolders, Configuration.DryRun))
+        {
+            try
+            {
+                SaveConfiguration();
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                // Not saved: the same values are read as the fallback until the settings are next saved
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -50,6 +63,9 @@ public class IngestPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
             {
                 w.Path = PathGuard.Tidy(w.Path);
             }
+
+            // A folder sent without its own dry-run setting (an older page or an API client) takes the fallback
+            WatchFolder.MigrateDryRun(c.WatchFolders, c.DryRun);
         }
 
         base.UpdateConfiguration(configuration);
