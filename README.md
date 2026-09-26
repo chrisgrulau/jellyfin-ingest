@@ -146,7 +146,7 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Refresh of the filed folders after ingest
 - [x] Destinations per watch folder; review screen (library choice, title search); activity panel
 - [x] Unit tests; CI; release packaging (pre-releases)
-- [ ] Plugin repository manifest
+- [x] Plugin repository manifest (the Shoal repository)
 - [x] New episodes of a show you already have follow it to the library it's in
 - [x] Optional AI tie-breaker for close calls (Shoal AI plugin)
 
