@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0-alpha] - 2026-09-26
+
 ### Added
 
 - **Episodes with no usable name identified from a short transcript** (optional; **Identify unnamed episodes from a
