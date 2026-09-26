@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Ingest"
 guid: "88d6ced9-052e-45f6-b21d-fc4eefa7998d"
-version: "0.1.8.0"
+version: "0.2.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -15,8 +15,6 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Ingest.dll"
 changelog: >
-  0.1.8-alpha: review fixes. Libraries on a whole drive can be filed into; Jellyfin's metadata and transcode folders
-  are protected; folder links and unreadable releases are handled. Quarantine never touches date folders Ingest didn't
-  create, and "Quarantine release" is crash-safe and logged. Recovery only touches Ingest's own temporary files, a
-  full disk after a move no longer splits a release, a hung network share can't stall filing, and choices on the
-  review screen are checked against what the page showed.
+  0.2.0-alpha: optional AI tie-breaker. With the Shoal AI plugin installed and allowing Ingest, a close call between
+  candidates Ingest already found is settled by the AI choosing one of them (or none), sending only file names,
+  titles and years. Every choice is shown in Recent activity; anything else still waits for review.
