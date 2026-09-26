@@ -75,8 +75,43 @@ public class IngestController : ControllerBase
             Activity = [.. s.Activity.Take(Math.Clamp(limit, 1, IngestStateStore.MaxActivity))],
             Waiting = _progress.Waiting(),
             Working = _progress.Working,
+            Paused = s.Paused,
             Queued = _progress.Queued(),
         };
+    }
+
+    /// <summary>
+    /// Pauses Ingest: sweeps file and quarantine nothing until it is resumed (releases are still shown as waiting).
+    /// Survives a restart.
+    /// </summary>
+    /// <returns>No content.</returns>
+    [HttpPost("Pause")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public ActionResult Pause()
+    {
+        if (_state.SetPaused(true))
+        {
+            RecordAdmin("Ingest", "Paused by an administrator: nothing is filed until it is resumed.");
+        }
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Resumes Ingest after <see cref="Pause"/>, and starts a sweep now.
+    /// </summary>
+    /// <returns>No content.</returns>
+    [HttpPost("Resume")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public ActionResult Resume()
+    {
+        if (_state.SetPaused(false))
+        {
+            RecordAdmin("Ingest", "Resumed by an administrator.");
+        }
+
+        _progress.Wake();
+        return NoContent();
     }
 
     /// <summary>
@@ -107,6 +142,80 @@ public class IngestController : ControllerBase
 
         _progress.Queue(new QueuedAction { Kind = QueuedActionKind.Undo, Run = run });
         return Accepted();
+    }
+
+    /// <summary>
+    /// Restores a quarantined release on the next sweep (which starts now): each file goes back to where the action log
+    /// says it came from. Refused if any file isn't in the action log or has changed, came from outside the watch
+    /// folders and libraries, or its place is taken. A release put back into a watch folder waits for review.
+    /// </summary>
+    /// <param name="request">The quarantine folder, dated folder and release.</param>
+    /// <returns>Accepted, or why it can't be restored.</returns>
+    [HttpPost("Quarantine/Restore")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult Restore([FromBody, Required] QuarantineEntryRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var refusal = new QuarantineRestore(_state, new PhysicalFileOperations(), TimeProvider.System).Check(ReturnScope(), request.Root, request.Folder, request.Name, ActionLogLines());
+        if (refusal is not null)
+        {
+            return Conflict(refusal);
+        }
+
+        _progress.Queue(new QueuedAction { Kind = QueuedActionKind.Restore, Root = request.Root, Folder = request.Folder, Name = request.Name });
+        return Accepted();
+    }
+
+    /// <summary>
+    /// Deletes a dated quarantine folder, or one release in it, now instead of waiting for the retention period. Only
+    /// inside a quarantine folder Ingest uses, only in a dated folder Ingest created, never through a link.
+    /// </summary>
+    /// <param name="request">The quarantine folder, dated folder and (optionally) release.</param>
+    /// <returns>No content, or why not.</returns>
+    [HttpPost("Quarantine/Delete")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult DeleteQuarantined([FromBody, Required] QuarantineEntryRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var name = string.IsNullOrEmpty(request.Name) ? null : request.Name;
+        if (QuarantineRestore.Locate(ReturnScope(), request.Root, request.Folder, name, out var path) is { } problem)
+        {
+            return BadRequest(problem);
+        }
+
+        // Never while the sweep is moving files (it may be quarantining into this very folder)
+        if (!_progress.FileGate.TryEnter(TimeSpan.FromSeconds(10)))
+        {
+            return Conflict("Ingest is moving files right now; try again in a moment.");
+        }
+
+        try
+        {
+            QuarantinePurger.DeleteNow(name is null ? path : System.IO.Path.GetDirectoryName(path)!, name);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return Conflict("It couldn't be (fully) deleted: " + ex.Message);
+        }
+        finally
+        {
+            _progress.FileGate.Exit();
+        }
+
+        _state.Record(new ActivityEntry
+        {
+            Time = DateTimeOffset.UtcNow,
+            Status = ActivityStatus.Purged,
+            Release = name ?? request.Folder!,
+            Summary = "Deleted from quarantine now by an administrator.",
+            Details = [path],
+        });
+        return NoContent();
     }
 
     /// <summary>
@@ -252,7 +361,7 @@ public class IngestController : ControllerBase
             : FolderPolicy.DestinationsOf(watch).FirstOrDefault(d => string.Equals(d.LibraryId, request.LibraryId, StringComparison.OrdinalIgnoreCase))?.Path;
         var library = FolderPolicy.Libraries(_libraryManager.GetVirtualFolders())
             .FirstOrDefault(l => string.Equals(l.Id, request.LibraryId, StringComparison.OrdinalIgnoreCase));
-        var targets = library is null ? null : LibraryRouting.TargetsOf(library, path);
+        var targets = library is null ? null : LibraryRouting.TargetsOf(library, path, PhysicalFileOperations.FreeBytes);
         var target = candidate.IsSeries ? targets?.Tv : targets?.Films;
         if (target is null)
         {
@@ -456,6 +565,10 @@ public class IngestController : ControllerBase
         }
     }
 
+    // Who acted isn't stored, as for review decisions
+    private void RecordAdmin(string release, string summary)
+        => _state.Record(new ActivityEntry { Time = DateTimeOffset.UtcNow, Status = ActivityStatus.Decision, Release = release, Summary = summary });
+
     /// <summary>
     /// The copies holding a review back, as the page sends them back: every item's, in order, one per line.
     /// </summary>
@@ -549,4 +662,20 @@ public sealed record FileChoice
 
     /// <summary>Gets the episode to file this video as (with <see cref="Season"/>).</summary>
     public int? Episode { get; init; }
+}
+
+/// <summary>
+/// Body of <see cref="IngestController.Restore"/> and <see cref="IngestController.DeleteQuarantined"/>: an entry of the
+/// quarantine listing.
+/// </summary>
+public sealed record QuarantineEntryRequest
+{
+    /// <summary>Gets the quarantine folder (<see cref="QuarantineFolder.Root"/>).</summary>
+    public string? Root { get; init; }
+
+    /// <summary>Gets the dated folder's name (<see cref="QuarantineFolder.Folder"/>).</summary>
+    public string? Folder { get; init; }
+
+    /// <summary>Gets the release's name in it (<see cref="QuarantinedRelease.Name"/>); empty for the whole dated folder (delete only).</summary>
+    public string? Name { get; init; }
 }

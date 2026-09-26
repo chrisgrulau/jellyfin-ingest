@@ -56,12 +56,13 @@ plugin page, where you pick the right title (and library) with one click or sear
 
 | Area | Behaviour |
 |---|---|
-| Watch folders | Any number. Each has one or more destinations, at most one per kind: a Shows library, a Movies library, or a single Mixed Movies and Shows library. Releases go to the destination for their kind; new episodes of a show already on the server join it in whichever library it's in. |
+| Watch folders | Any number. Each has one or more destinations, at most one per kind: a Shows library, a Movies library, or a single Mixed Movies and Shows library. Releases go to the destination for their kind; new episodes of a show already on the server join it in whichever library it's in. In a library with several folders, new titles go to the folder with the most free space unless you pick one. |
 | Identification | Own release-name parser + your configured metadata providers; TMDb/TheTVDB matches preferred over IMDb-only ones; titles already in the library preferred; a confidence threshold and a clear lead over the runner-up before anything moves. |
 | Naming | Movies: `Title (Year) [tmdbid-N]/Title (Year) [tmdbid-N].ext` (editions as ` - Label`). Shows: `Series (Year) [tvdbid-N] [tmdbid-N]/Season NN/Series SNNEMM - Title.ext`, multi-episode `S01E01-E02`, specials in `Season 00`. Reserved characters (`< > : " / \ \| ? *`) removed. |
 | Subtitles | Matched by name, by folder (`Subs/`), or by being the only video in the release; renamed `<video>[.Title].<lang>[.default][.sdh][.forced].srt`. When a language has several tracks, the main one is marked default. |
 | Extras | Trailers, featurettes, deleted scenes … filed into Jellyfin's extras folders. |
-| Clutter | Moved to a dated quarantine folder (default or user-chosen), purged after N days (default 30). *Quarantine* on the plugin page shows what is there and when each day's folder is deleted. |
+| Clutter | Moved to a dated quarantine folder (default or user-chosen), purged after N days (default 30). *Quarantine* on the plugin page shows what is there and when each day's folder is deleted; **Restore** puts a release back where it came from (into the watch folder, where it waits for review, or a replaced copy into the library), and **Delete now** removes a release or a day's folder straight away. |
+| Pause | **Pause Ingest** on the plugin page (or `POST Ingest/Pause`) stops all filing until you resume; releases are still listed as waiting. It survives a restart. |
 | AI tie-breaker | Optional, with the Shoal AI plugin: a close call between candidates Ingest already found is settled by the AI choosing one of them (or none). Only file names, titles and years are sent for this (see [What Ingest sends](#what-ingest-sends)); every choice is shown in *Recent activity*. |
 | Episodes from a transcript | Optional, with the Shoal Subtitles and AI plugins: when a name doesn't say which episode it is, two minutes of it are transcribed (built-in speech-to-text by default, on this server) and the AI picks the listed episode whose synopsis fits, or none. |
 | Episodes named by title | A file that gives the episode title but no number (typically a special) is matched against that season's episode list from your providers; if no title clearly matches, the AI plugin (when installed) may choose one of the listed episodes. |
@@ -199,6 +200,7 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Episodes named by title only (specials), with the AI plugin as a fallback
 - [x] Episodes with no usable name: a short transcript compared with episode synopses
 - [x] Undo a filed release from *Recent activity*
+- [x] Restore from quarantine, delete now, pause switch; new titles into the library folder with the most free space
 
 Design notes live in [`docs/DESIGN.md`](docs/DESIGN.md).
 

@@ -59,6 +59,7 @@ public sealed class ActivityNotifier
             ActivityStatus.Filed => ("Ingest filed ", LogLevel.Information),
             ActivityStatus.Quarantined => ("Ingest quarantined ", LogLevel.Information),
             ActivityStatus.Undone => ("Ingest undid the filing of ", LogLevel.Information),
+            ActivityStatus.Restored => ("Ingest restored from quarantine: ", LogLevel.Information),
             _ => ((string?)null, LogLevel.None),
         };
         if (headline is null)

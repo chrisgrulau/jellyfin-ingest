@@ -182,7 +182,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var problems = FolderPolicy.FolderProblems(config, libraries, _paths, _configuration);
         _maintenance.RunDue(config, libraries, problems);
 
-        // Undos asked for on the page, between releases so they never race a filing or a scan
+        // Undos and restores asked for on the page, between releases so they never race a filing or a scan
         RunQueued(config, libraries, problems);
 
         // Reviews of a watch folder that has been removed from the settings can never be acted on
@@ -257,7 +257,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         _missingReported.Remove(watch.Path);
 
         var destinations = FolderPolicy.DestinationsOf(watch);
-        var routing = LibraryRouting.Route(destinations, libraries);
+        var routing = LibraryRouting.Route(destinations, libraries, PhysicalFileOperations.FreeBytes);
         foreach (var problem in routing.Problems)
         {
             LogRoutingProblem(_logger, watch.Path, problem);
@@ -303,6 +303,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
         {
             if (review.Request == ReviewRequest.Quarantine && snapshot.TryGetValue(review.Release, out var releaseFiles))
             {
+                // Paused: nothing is moved; the request waits
+                if (_state.IsPaused)
+                {
+                    continue;
+                }
+
                 try
                 {
                     lock (_progress.FileGate)
@@ -335,8 +341,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
         {
             ct.ThrowIfCancellationRequested();
 
-            // Providers look down: leave the release unhandled so it is planned once the pause ends
-            if (_breaker.IsPaused)
+            // Providers look down, or Ingest is paused: leave the release unhandled so it is planned once the pause ends
+            if (_breaker.IsPaused || _state.IsPaused)
             {
                 continue;
             }
@@ -589,7 +595,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
     }
 
-    // Carries out the undos asked for on the page (each checked again now), and refreshes what changed
+    // Carries out the undos and restores asked for on the page (each checked again now), and refreshes what changed
     private void RunQueued(PluginConfiguration config, IReadOnlyList<MediaLibrary> libraries, IReadOnlyList<FolderProblem> problems)
     {
         var queued = _progress.Queued();
@@ -609,7 +615,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 ReturnOutcome outcome;
                 lock (_progress.FileGate)
                 {
-                    outcome = new ReleaseUndo(_state, fs, _clock).Undo(action.Run ?? string.Empty, scope, lines, _ingestPaths.ActionLog);
+                    outcome = action.Kind == QueuedActionKind.Undo
+                        ? new ReleaseUndo(_state, fs, _clock).Undo(action.Run ?? string.Empty, scope, lines, _ingestPaths.ActionLog)
+                        : new QuarantineRestore(_state, fs, _clock).Restore(scope, action.Root, action.Folder, action.Name, lines, _ingestPaths.ActionLog);
                 }
 
                 LogReturned(_logger, action.Kind, outcome.Succeeded ? "carried out" : "not carried out (see Recent activity)");
@@ -625,7 +633,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 LogReturnFailed(_logger, action.Kind, ex);
-                _state.Record(new ActivityEntry { Time = _clock.GetUtcNow(), Status = ActivityStatus.Failed, Release = action.Run ?? string.Empty, Summary = "The undo couldn't be carried out: " + ex.Message });
+                _state.Record(new ActivityEntry { Time = _clock.GetUtcNow(), Status = ActivityStatus.Failed, Release = action.Name ?? action.Run ?? string.Empty, Summary = $"The {(action.Kind == QueuedActionKind.Undo ? "undo" : "restore")} couldn't be carried out: {ex.Message}" });
             }
             finally
             {

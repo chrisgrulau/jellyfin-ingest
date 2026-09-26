@@ -43,6 +43,9 @@ public enum ActivityStatus
 
     /// <summary>A filed release was undone by an administrator: its files went back to where they came from.</summary>
     Undone,
+
+    /// <summary>Quarantined files were put back where they came from by an administrator.</summary>
+    Restored,
 }
 
 /// <summary>
@@ -285,7 +288,10 @@ public sealed record IngestState
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public WorkInProgress? Working { get; init; }
 
-    /// <summary>Gets the undos asked for and not yet carried out (only in the Status API; never saved).</summary>
+    /// <summary>Gets a value indicating whether Ingest is paused: sweeps file nothing until it is resumed.</summary>
+    public bool Paused { get; init; }
+
+    /// <summary>Gets the undos and restores asked for and not yet carried out (only in the Status API; never saved).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<QueuedAction>? Queued { get; init; }
 }
@@ -350,7 +356,7 @@ public sealed partial class IngestStateStore
         lock (_lock)
         {
             var s = Load();
-            return new IngestState { Reviews = [.. s.Reviews], Activity = [.. s.Activity] };
+            return new IngestState { Reviews = [.. s.Reviews], Activity = [.. s.Activity], Paused = s.Paused };
         }
     }
 
@@ -576,6 +582,42 @@ public sealed partial class IngestStateStore
             {
                 Save(s);
             }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether Ingest is paused (sweeps file nothing). Kept in the state file, so it survives a
+    /// restart, and not in the plugin settings, which the settings page saves as a whole.
+    /// </summary>
+    public bool IsPaused
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return Load().Paused;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Pauses or resumes Ingest.
+    /// </summary>
+    /// <param name="paused">Whether to pause.</param>
+    /// <returns>Whether that changed anything.</returns>
+    public bool SetPaused(bool paused)
+    {
+        lock (_lock)
+        {
+            var s = Load();
+            if (s.Paused == paused)
+            {
+                return false;
+            }
+
+            s.Paused = paused;
+            Save(s);
+            return true;
         }
     }
 
@@ -877,5 +919,8 @@ public sealed partial class IngestStateStore
 
         // Releases filed by copy or hard link (still in their watch folder), so they aren't filed again
         public List<CopiedRelease> Copied { get; set; } = [];
+
+        // Sweeps file nothing while paused
+        public bool Paused { get; set; }
     }
 }

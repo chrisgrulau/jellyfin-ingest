@@ -177,6 +177,34 @@ filing's entry gets `UndoneAt` (the page shows **Undone**), and an `Undone` entr
 Activity log). A crash part-way leaves each file whole (the executor's recovery finishes or discards the interrupted
 move) and the release held for review, possibly partly returned; nothing is filed again by itself.
 
+## Restore, delete now, pause
+
+**Restore** (`POST Ingest/Quarantine/Restore`, `{Root, Folder, Name}`) works on one entry of a dated quarantine folder
+(a release folder, `Replaced`, or a single file). The entry is found on disk by name (`QuarantineRestore.Locate`: a
+quarantine folder in use, a dated folder Ingest marked, never a path built from what the page sent). Each file's origin
+is the source of the latest completed quarantine move to it in the action log. It is refused as a whole if any file
+isn't in the log (older than 90 days, or not put there by Ingest) or has changed size, came from outside the current
+watch folders and library folders (or from inside a quarantine), or its place is taken. The moves go through the
+executor as an undo's do (`IngestPlan.Returning`), and emptied folders inside the dated folder are removed. Releases
+put back into a watch folder are held for review first, exactly as after an undo. Like undo, the page asks and the next
+sweep does it.
+
+**Delete now** (`POST Ingest/Quarantine/Delete`; without `Name`, the whole dated folder) uses the purge's deletion
+(`QuarantinePurger.DeleteNow`): only in a marked dated folder of a quarantine in use, entries found on disk by name,
+read-only files made writable, links removed rather than followed, and the marker last. It runs at once, holding
+`IngestProgress.FileGate` so it never overlaps the sweep moving files (409 "busy" after 10 s).
+
+**Pause** (`POST Ingest/Pause` / `Resume`) is kept in `state.json` rather than the plugin settings, which the settings
+page saves as a whole. While paused the sweep still scans, tracks and shows waiting releases, and carries out undos and
+restores, but plans and files nothing and doesn't act on quarantine requests.
+
+**Libraries with several folders.** Jellyfin libraries can have several folders (`MediaLibrary.Locations`). A
+destination names one, or none; with none, `LibraryRouting.TargetsOf` now takes the folder with the most free space
+(`PhysicalFileOperations.FreeBytes`, the mount's available space; first folder on a tie or when unknown), for each
+sweep and for a library chosen in review. The planner still reuses existing titles wherever they are: shows the server
+knows (any library), a replaced copy's folder, and now a film or show folder of the same name in another folder of
+the same library (`IngestPlanner.RootHolding`), so a title is never split across folders.
+
 ## Subtitle pairing
 
 For each video in a release, in order:

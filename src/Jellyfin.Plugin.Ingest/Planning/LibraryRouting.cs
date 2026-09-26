@@ -68,12 +68,15 @@ public static class LibraryRouting
     /// The targets one library provides: a Movies library takes films, a Shows library shows, a mixed library both.
     /// </summary>
     /// <param name="library">The library.</param>
-    /// <param name="path">One of its folders; anything else (or empty) means its first folder.</param>
+    /// <param name="path">One of its folders; anything else (or empty) means the folder with the most free space when
+    /// <paramref name="freeBytes"/> is given, else its first folder.</param>
+    /// <param name="freeBytes">The free space on a folder's drive (<c>null</c> if unknown), for libraries with several
+    /// folders; <c>null</c> to always use the first.</param>
     /// <returns>The targets; both <c>null</c> for other library types or a library without folders.</returns>
-    public static LibraryTargets TargetsOf(MediaLibrary library, string? path)
+    public static LibraryTargets TargetsOf(MediaLibrary library, string? path, Func<string, long?>? freeBytes = null)
     {
         ArgumentNullException.ThrowIfNull(library);
-        var root = library.Locations.FirstOrDefault(l => PathGuard.SamePath(l, path)) ?? (library.Locations.Count > 0 ? library.Locations[0] : null);
+        var root = library.Locations.FirstOrDefault(l => PathGuard.SamePath(l, path)) ?? RoomiestOf(library.Locations, freeBytes);
         if (string.IsNullOrWhiteSpace(root))
         {
             return new LibraryTargets(null, null);
@@ -89,13 +92,48 @@ public static class LibraryRouting
     }
 
     /// <summary>
+    /// The folder with the most free space, for new titles in a library with several folders (existing film and show
+    /// folders are still used wherever they are). The first folder wins ties, and when no folder's space is known.
+    /// </summary>
+    /// <param name="locations">The library's folders.</param>
+    /// <param name="freeBytes">The free space on a folder's drive, or <c>null</c> if unknown; <c>null</c> to take the first.</param>
+    /// <returns>The folder, or <c>null</c> if there are none.</returns>
+    public static string? RoomiestOf(IReadOnlyList<string> locations, Func<string, long?>? freeBytes)
+    {
+        ArgumentNullException.ThrowIfNull(locations);
+        if (locations.Count == 0)
+        {
+            return null;
+        }
+
+        if (locations.Count == 1 || freeBytes is null)
+        {
+            return locations[0];
+        }
+
+        string? best = null;
+        long most = -1;
+        foreach (var location in locations.Where(l => !string.IsNullOrWhiteSpace(l)))
+        {
+            if (freeBytes(location) is { } free && free > most)
+            {
+                (best, most) = (location, free);
+            }
+        }
+
+        return best ?? locations[0];
+    }
+
+    /// <summary>
     /// Routes a watch folder's destinations. At most one destination may take each kind; a destination that overlaps an
     /// earlier one (e.g. a Movies library after a mixed one) is ambiguous and ignored, and reported.
     /// </summary>
     /// <param name="destinations">The configured destinations, in order.</param>
     /// <param name="libraries">The server's libraries.</param>
+    /// <param name="freeBytes">The free space on a folder's drive, to choose between a library's folders when a
+    /// destination names none (see <see cref="TargetsOf"/>); <c>null</c> for the first folder.</param>
     /// <returns>The targets and any problems.</returns>
-    public static RoutingResult Route(IEnumerable<DestinationSetting> destinations, IReadOnlyCollection<MediaLibrary> libraries)
+    public static RoutingResult Route(IEnumerable<DestinationSetting> destinations, IReadOnlyCollection<MediaLibrary> libraries, Func<string, long?>? freeBytes = null)
     {
         ArgumentNullException.ThrowIfNull(destinations);
         ArgumentNullException.ThrowIfNull(libraries);
@@ -111,7 +149,7 @@ public static class LibraryRouting
                 continue;
             }
 
-            var t = TargetsOf(library, d.Path);
+            var t = TargetsOf(library, d.Path, freeBytes);
             if (t.Tv is null && t.Films is null)
             {
                 problems.Add($"'{library.Name}' isn't a Movies, Shows or mixed library.");

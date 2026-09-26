@@ -23,6 +23,22 @@ All notable changes to this project are documented here. The format follows
     log. API: `POST Ingest/Activity/{run}/Undo` (409 with the reason when it can't be undone).
 
   Each action-log line now also records its run, the destination's modified time and whether the source was kept.
+- **FEAT-05: Restore from quarantine.** **Restore** on a quarantined release puts each file back where the action log
+  says it came from: clutter or a whole release back into the watch folder, replaced copies back into the library. All
+  or nothing, through the same executor; refused, with the reason, if a file isn't in the action log or has changed
+  size, came from outside the watch folders and libraries, or its place is taken. A release put back into a watch
+  folder waits under *Needs review* ("Restored from quarantine by an administrator — choose what to do") instead of
+  being filed. API: `POST Ingest/Quarantine/Restore` with `{Root, Folder, Name}`.
+- **FEAT-05: Delete now**, per dated quarantine folder or per release in it (two clicks on the page): the purge's own
+  deletion, only in dated folders Ingest created and marked, never through a link. API: `POST Ingest/Quarantine/Delete`
+  (without `Name` for the whole folder).
+- **FEAT-05: Pause Ingest.** While paused, sweeps file and quarantine nothing (releases are still listed as waiting;
+  undo and restore still work). Shown as a banner on the page with **Resume Ingest**; kept in `state.json`, so it
+  survives a restart. API: `POST Ingest/Pause`, `POST Ingest/Resume`; `Paused` in `GET Ingest/Status`.
+- **FEAT-05: Libraries with several folders.** When a destination doesn't name one of the library's folders, a new
+  film or show goes into the folder with the most free space (the first when that can't be read). A film or show
+  folder that already exists in another folder of the same library is used where it is, as are shows found on the
+  server. The settings page now says "The folder with the most free space" instead of "First folder".
 
 ## [0.10.0-alpha] - 2026-09-27
 
