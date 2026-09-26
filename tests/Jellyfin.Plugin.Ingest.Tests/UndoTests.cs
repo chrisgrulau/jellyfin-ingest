@@ -205,10 +205,10 @@ public sealed class UndoTests : IDisposable
     }
 
     [Fact]
-    public void A_file_changed_since_filing_refuses_the_whole_undo()
+    public void A_video_changed_since_filing_refuses_the_whole_undo()
     {
         var run = FileRelease();
-        File.AppendAllText(Subtitle, "edited");
+        File.AppendAllText(Video, "edited");
 
         var outcome = Undo(run);
 
@@ -218,6 +218,47 @@ public sealed class UndoTests : IDisposable
         Assert.True(File.Exists(Path.Combine(Dated, "r", "info.nfo")));
         Assert.Null(Review);
         Assert.Contains(State.Snapshot().Activity, a => a.Status == ActivityStatus.Failed && a.Summary.StartsWith("Couldn't undo", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_subtitle_changed_since_filing_goes_back_as_it_is_now()
+    {
+        var run = FileRelease();
+        File.AppendAllText(Subtitle, "synced");
+
+        var outcome = Undo(run);
+
+        Assert.True(outcome.Succeeded, outcome.Message);
+        Assert.Equal(16, new FileInfo(Path.Combine(Drop, "r", "english.srt")).Length);
+        Assert.Equal(1000, new FileInfo(Path.Combine(Drop, "r", "Rocket.Club.2019.mkv")).Length);
+        Assert.Contains("1 subtitles had changed since filing and were moved back as they are", outcome.Message, StringComparison.Ordinal);
+        Assert.True(Review!.Held);
+    }
+
+    [Theory]
+    [InlineData(TransferMode.Copy)]
+    [InlineData(TransferMode.HardLink)]
+    public void A_changed_subtitle_of_a_copied_release_doesnt_block_the_undo(TransferMode transfer)
+    {
+        var run = FileRelease(transfer, clutter: false);
+        File.AppendAllText(Subtitle, "synced");
+
+        var outcome = Undo(run);
+
+        Assert.True(outcome.Succeeded, outcome.Message);
+        Assert.False(File.Exists(Subtitle));
+        Assert.True(File.Exists(Path.Combine(Drop, "r", "english.srt")));
+        Assert.Contains("1 subtitles had changed", outcome.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_missing_subtitle_still_refuses_the_undo()
+    {
+        var run = FileRelease();
+        File.Delete(Subtitle);
+
+        Assert.Contains("is missing", Undo(run).Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(Video));
     }
 
     [Fact]

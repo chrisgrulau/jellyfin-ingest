@@ -154,10 +154,14 @@ exactly those lines (`ActionLogLine.CompletedMoves`: done or recovered, not roll
 - the entry isn't a filing with a run, was already undone, or is older than the action log keeps (90 days);
 - the watch folder it came from is no longer configured (or fails the folder rules), or isn't there;
 - a source is outside that watch folder, other than a replaced copy inside one of the server's library folders;
-- a filed file (or quarantined clutter or replaced copy) is missing, or its size or modified time differ from the log;
+- a filed file (or quarantined clutter or replaced copy) is missing, or its size or modified time differ from the log,
+  except a subtitle filed as one (`OperationKind.Subtitle`): the Subtitles plugin routinely syncs and cleans sidecars
+  after filing, so a changed subtitle goes back as it is now (the executor verifies against its current size) and the
+  undo's entry says "N subtitles had changed since filing and were moved back as they are";
 - a place a file goes back to is taken, unless an earlier step of the same undo frees it (a replaced copy goes back
   where its replacement was, after the replacement has left);
-- for a kept source (copy or hard link), the original in the watch folder has gone or changed size.
+- for a kept source (copy or hard link), the original in the watch folder has gone or changed size (for a changed
+  subtitle only its presence is checked: a hard-linked one corrected in place changed the original too).
 
 The undo is a plan for the ordinary executor: its moves are the filing's in reverse order, destination back to source,
 and `IngestPlan.Returning` lists the exact files it may take (so the "source must be inside the release" guard becomes

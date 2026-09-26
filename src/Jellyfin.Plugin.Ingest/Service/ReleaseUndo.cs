@@ -78,6 +78,9 @@ public sealed record ReturnPlan
     /// <summary>Gets the library folders whose contents change, for refreshing just those.</summary>
     public IReadOnlyList<string> Refresh { get; init; } = [];
 
+    /// <summary>Gets how many subtitle files had changed since filing (an undo moves them back as they are now).</summary>
+    public int ChangedSubtitles { get; init; }
+
     /// <summary>Creates a refusal.</summary>
     /// <param name="reason">Why.</param>
     /// <returns>The plan.</returns>
@@ -169,6 +172,7 @@ public sealed class ReleaseUndo
         var taken = new HashSet<string>(PathGuard.Comparer);
         var required = new HashSet<string>(PathGuard.Comparer) { watch };
         var refresh = new HashSet<string>(PathGuard.Comparer);
+        var changedSubtitles = 0;
         foreach (var m in moves.Reverse())
         {
             var kind = m.OperationKind;
@@ -194,15 +198,24 @@ public sealed class ReleaseUndo
                 return ReturnPlan.Refuse($"{m.Destination} is missing, so the filing can't be undone completely. Nothing was changed.");
             }
 
-            if (fs.Length(m.Destination) != m.Bytes || (m.ModifiedUtc is { } logged && fs.LastWriteUtc(m.Destination) is { } current && current.ToUniversalTime() != logged))
+            // Subtitles are routinely corrected after filing (the Subtitles plugin syncs and cleans them), so a changed
+            // subtitle goes back as it is now; anything else must be exactly as filed
+            var changed = fs.Length(m.Destination) != m.Bytes || (m.ModifiedUtc is { } logged && fs.LastWriteUtc(m.Destination) is { } current && current.ToUniversalTime() != logged);
+            if (changed && kind != OperationKind.Subtitle)
             {
                 return ReturnPlan.Refuse($"{m.Destination} has changed since it was filed, so the filing isn't undone. Nothing was changed.");
+            }
+
+            if (changed)
+            {
+                changedSubtitles++;
             }
 
             if (m.Kept == true)
             {
                 // Filed by copy or hard link: the original stayed in the watch folder, so the library copy is deleted
-                if (!fs.Exists(m.Source) || fs.Length(m.Source) != m.Bytes)
+                // (a hard-linked subtitle corrected in place changed the original too, so only its presence is checked)
+                if (!fs.Exists(m.Source) || (!changed && fs.Length(m.Source) != m.Bytes))
                 {
                     return ReturnPlan.Refuse($"The original {m.Source} in the watch folder has gone or changed, so the library copy isn't deleted. Nothing was changed.");
                 }
@@ -252,6 +265,7 @@ public sealed class ReleaseUndo
                 RequiredFolders = [.. required],
             },
             SetAside = setAside,
+            ChangedSubtitles = changedSubtitles,
             Tidy = scope.FoldersLeftBy(moves.Select(m => m.Destination)),
             Releases = [(watch, release)],
             Refresh = [.. refresh],
@@ -334,7 +348,9 @@ public sealed class ReleaseUndo
             parts.Add(string.Create(CultureInfo.InvariantCulture, $"{restored} replaced copy(ies) put back into the library"));
         }
 
-        var summary = "Undone by an administrator: " + string.Join("; ", parts) + ". It now waits under Needs review.";
+        var summary = "Undone by an administrator: " + string.Join("; ", parts) + "."
+            + (planned.ChangedSubtitles > 0 ? string.Create(CultureInfo.InvariantCulture, $" {planned.ChangedSubtitles} subtitles had changed since filing and were moved back as they are.") : string.Empty)
+            + " It now waits under Needs review.";
         Record(filing, ActivityStatus.Undone, summary, [.. problems.Select(p => "Needs attention: " + p), .. planned.Plan.Operations.Select(o => $"{o.Kind}: {o.Source} → {(planned.SetAside.Contains(o) ? "deleted" : o.Destination)}")]);
         return new ReturnOutcome(true, summary, planned.Refresh);
     }

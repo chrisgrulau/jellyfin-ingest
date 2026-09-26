@@ -15,8 +15,10 @@ All notable changes to this project are documented here. The format follows
     filing replaced go back into the library; folders the filing created are removed if left empty;
   - for a copy or hard-link watch folder the library copies are deleted instead, after checking the originals are
     still there at the same size (each is first set aside under a hidden name, so a failure can still put it back);
-  - all or nothing: it is refused, with the reason, if any file has changed (size or modified time) or gone since
-    filing, or a place it would go back to is taken, or the watch folder is no longer set up;
+  - all or nothing: it is refused, with the reason, if any file has gone since filing, a video or extra has changed
+    (size or modified time), a place it would go back to is taken, or the watch folder is no longer set up. Subtitle
+    files are routinely corrected after filing (the Shoal Subtitles plugin syncs and cleans them), so a changed
+    subtitle doesn't block the undo: it goes back as it is now, and the undo's entry says how many did;
   - the release then waits under *Needs review* ("Undone by an administrator — choose what to do") and is not filed
     again by itself; a copied release's "already filed" record is cleared so the review sees it;
   - the filing shows **Undone**, and the undo is recorded in *Recent activity*, Jellyfin's Activity log and the action
