@@ -161,6 +161,13 @@
             </label>
             <div class="fieldDescription checkboxFieldDescription">When an episode's name doesn't say which episode it is, the Shoal Subtitles plugin transcribes two minutes of it and the AI plugin compares that with the episode synopses. Needs both plugins, with <strong>Let Ingest ask for short transcripts</strong> on in the Subtitles plugin (built-in speech-to-text is free and stays on this server). The AI must pick one of the show's listed episodes; anything else waits for review.</div>
           </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="WriteToActivityLog" name="WriteToActivityLog" type="checkbox" is="emby-checkbox" />
+              <span>Also write to Jellyfin's Activity log</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">Releases waiting for your decision, failures, filings and quarantines also appear under Dashboard → Activity (at most once a day for the same release and outcome), so they're seen without opening this page.</div>
+          </div>
           <div>
             <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
           </div>
@@ -617,6 +624,7 @@
             page.querySelector('#ScanLibraryAfterIngest').checked = config.ScanLibraryAfterIngest;
             page.querySelector('#UseAiTiebreak').checked = config.UseAiTiebreak !== false;
             page.querySelector('#UseTranscripts').checked = config.UseTranscripts !== false;
+            page.querySelector('#WriteToActivityLog').checked = config.WriteToActivityLog !== false;
             syncBanner();
             Dashboard.hideLoadingMsg();
             loadStatus();
@@ -719,6 +727,7 @@
             current.ScanLibraryAfterIngest = page.querySelector('#ScanLibraryAfterIngest').checked;
             current.UseAiTiebreak = page.querySelector('#UseAiTiebreak').checked;
             current.UseTranscripts = page.querySelector('#UseTranscripts').checked;
+            current.WriteToActivityLog = page.querySelector('#WriteToActivityLog').checked;
             config = current;
             return ApiClient.updatePluginConfiguration(pluginId, current).then(function (r) {
               Dashboard.processPluginConfigurationUpdateResult(r);

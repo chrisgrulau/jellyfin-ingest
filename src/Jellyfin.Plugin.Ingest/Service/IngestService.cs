@@ -72,8 +72,29 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
     /// <param name="configuration">Jellyfin's configuration (for the transcode folder).</param>
     /// <param name="logger">Logger.</param>
-    public IngestService(ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IProviderManager providerManager, IngestStateStore state, IApplicationPaths paths, IConfigurationManager configuration, ILogger<IngestService> logger)
+    /// <param name="activity">Jellyfin's Activity log (entries that need attention are copied there).</param>
+    public IngestService(ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IProviderManager providerManager, IngestStateStore state, IApplicationPaths paths, IConfigurationManager configuration, ILogger<IngestService> logger, MediaBrowser.Model.Activity.IActivityManager? activity = null)
     {
+        // What needs attention (and what was done) is copied to Jellyfin's Activity log, unless switched off (FAM-05)
+        if (activity is not null && state is not null)
+        {
+            var notifier = new ActivityNotifier(
+                note => activity.CreateAsync(new Jellyfin.Database.Implementations.Entities.ActivityLog(note.Name, ActivityNotifier.Type, Guid.Empty)
+                {
+                    ShortOverview = note.ShortOverview,
+                    Overview = note.Overview,
+                    LogSeverity = note.Severity,
+                }),
+                TimeProvider.System);
+            state.Recorded = entry =>
+            {
+                if (IngestPlugin.Instance?.Configuration.WriteToActivityLog != false)
+                {
+                    _ = notifier.NotifyAsync(entry);
+                }
+            };
+        }
+
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _libraryMonitor = libraryMonitor ?? throw new ArgumentNullException(nameof(libraryMonitor));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
