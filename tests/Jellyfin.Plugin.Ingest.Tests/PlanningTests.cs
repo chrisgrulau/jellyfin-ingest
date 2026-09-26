@@ -759,4 +759,122 @@ public class PlanningTests
         Assert.DoesNotContain(plan.Operations, o => o.Kind == OperationKind.Quarantine);
         Assert.Equal(Jellyfin.Plugin.Ingest.Configuration.TransferMode.HardLink, plan.Transfer);
     }
+
+    // A replacement is filed where the copy it replaces lives
+    private static readonly MediaLibrary[] ServerLibraries =
+    [
+        new("f1", "Films One", LibraryKind.Films, ["/lib/Movies"]),
+        new("f2", "Films Two", LibraryKind.Films, ["/lib/Films Two"]),
+        new("s1", "Shows One", LibraryKind.Shows, ["/lib/Shows"]),
+        new("s2", "Shows Two", LibraryKind.Shows, ["/lib/Other Shows"]),
+        new("h", "Home Videos", LibraryKind.Other, ["/lib/Home"]),
+    ];
+
+    private static IngestPlanner Following(IExistingMedia existing) =>
+        new IngestPlanner(
+            new MediaIdentifier(new Lookup()),
+            p => !Path.HasExtension(p),
+            _ => null,
+            new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)),
+            existing,
+            p => PathGuard.IsUnder(p, "/lib"))
+        {
+            ReplaceExisting = true,
+            Libraries = ServerLibraries,
+        };
+
+    private static PlannedOperation VideoOf(IngestPlan plan, string name)
+        => Assert.Single(plan.Operations, o => o.Kind == OperationKind.Video && o.Source.EndsWith(name, StringComparison.Ordinal));
+
+    [Fact]
+    public async Task A_film_replacing_a_copy_in_another_movies_library_is_filed_there_in_the_same_folder()
+    {
+        var old = "/lib/Films Two/Rocket Club (2019)/Rocket Club.avi";
+        var existing = new Existing();
+        existing.Movies.Add(("123", null, old));
+
+        var plan = await Following(existing).PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv"), F("r/Featurettes/Building the Rocket.mkv", 300_000_000)], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.IsReady, string.Join("; ", plan.Review.Select(r => r.Reason)));
+        Assert.Equal([old], plan.Replacing);
+        Assert.Equal("/lib/Films Two/Rocket Club (2019)", Path.GetDirectoryName(VideoOf(plan, "Rocket.Club.2019.1080p.mkv").Destination));
+        Assert.Contains(plan.Operations, o => o.Kind == OperationKind.Extra && o.Destination == "/lib/Films Two/Rocket Club (2019)/featurettes/Building the Rocket.mkv");
+        Assert.Contains("/lib/Films Two", plan.RequiredFolders);
+        Assert.DoesNotContain(plan.Operations, o => o.Destination.StartsWith("/lib/Movies/", StringComparison.Ordinal));
+        Assert.Empty(plan.TidyIfEmpty);
+        Assert.Equal("Replacing 1 copy in Films Two.", plan.ReplacementSummary);
+        Assert.Equal("Rocket.Club.2019.1080p.mkv: replacing Rocket Club.avi in Films Two.", Assert.Single(plan.ReplacementNotes));
+    }
+
+    [Fact]
+    public async Task A_library_chosen_in_review_wins_over_where_the_replaced_copy_lives()
+    {
+        var old = "/lib/Films Two/Rocket Club (2019)/Rocket Club.avi";
+        var existing = new Existing();
+        existing.Movies.Add(("123", null, old));
+        var chosen = new ChosenMatch(new MetadataCandidate { Name = "Rocket Club", Year = 2019, ProviderIds = new Dictionary<string, string> { ["Tmdb"] = "123" } }, Films);
+
+        var plan = await Following(existing).PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], LibraryTargets.Of(Films), Quarantine, chosen, CancellationToken.None);
+
+        Assert.True(plan.IsReady, string.Join("; ", plan.Review.Select(r => r.Reason)));
+        Assert.Equal([old], plan.Replacing);
+        Assert.StartsWith("/lib/Movies/Rocket Club (2019) [tmdbid-123]/", VideoOf(plan, "Rocket.Club.2019.1080p.mkv").Destination, StringComparison.Ordinal);
+        Assert.Equal("Replacing 1 copy in Films One.", plan.ReplacementSummary);
+        Assert.Contains("chosen in review", Assert.Single(plan.ReplacementNotes), StringComparison.Ordinal);
+
+        // The old film folder is removed after filing, if nothing is left in it
+        Assert.Equal([new EmptiedFolder("/lib/Films Two/Rocket Club (2019)", "/lib/Films Two")], plan.TidyIfEmpty);
+    }
+
+    [Fact]
+    public async Task Episodes_of_a_season_pack_each_follow_the_copy_they_replace()
+    {
+        // The show is in two libraries, so there's no single show folder to join
+        var existing = new Existing();
+        existing.Episodes[(1, 4)] = "/lib/Shows/Lantern (2001)/Season 1/Lantern S01E04.avi";
+        existing.Episodes[(1, 5)] = "/lib/Other Shows/Lantern/S01/Lantern 1x05.avi";
+
+        var plan = await Following(existing).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.1080p.mkv"), F("a/Lantern.S01E05.1080p.mkv"), F("a/Lantern.S01E06.1080p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.IsReady, string.Join("; ", plan.Review.Select(r => r.Reason)));
+        Assert.Equal(2, plan.Replacing.Count);
+        Assert.Equal("/lib/Shows/Lantern (2001)/Season 1/Lantern S01E04 - Glass Harbour.mkv", VideoOf(plan, "S01E04.1080p.mkv").Destination);
+        Assert.Equal("/lib/Other Shows/Lantern/S01/Lantern S01E05.mkv", VideoOf(plan, "S01E05.1080p.mkv").Destination);
+        Assert.Equal(Path.Combine("/lib/Shows", "Lantern (2001) [tvdbid-7] [tmdbid-9]", "Season 01", "Lantern S01E06.mkv"), VideoOf(plan, "S01E06.1080p.mkv").Destination);
+        Assert.Equal("Replacing 2 copies in Shows One, Shows Two.", plan.ReplacementSummary);
+        Assert.Empty(plan.TidyIfEmpty);
+    }
+
+    [Fact]
+    public async Task A_replaced_copy_outside_a_library_of_its_kind_falls_back_to_normal_routing_and_its_folder_is_tidied()
+    {
+        var old = "/lib/Home/Rocket Club/Rocket Club.avi";
+        var existing = new Existing();
+        existing.Movies.Add(("123", null, old));
+
+        var plan = await Following(existing).PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.IsReady, string.Join("; ", plan.Review.Select(r => r.Reason)));
+        Assert.Equal([old], plan.Replacing);
+        Assert.StartsWith("/lib/Movies/Rocket Club (2019) [tmdbid-123]/", VideoOf(plan, "Rocket.Club.2019.1080p.mkv").Destination, StringComparison.Ordinal);
+        var note = Assert.Single(plan.ReplacementNotes);
+        Assert.Contains("in Films One", note, StringComparison.Ordinal);
+        Assert.Contains("isn't in one of the server's Movies libraries", note, StringComparison.Ordinal);
+        Assert.Equal([new EmptiedFolder("/lib/Home/Rocket Club", "/lib/Home")], plan.TidyIfEmpty);
+    }
+
+    [Fact]
+    public async Task A_replaced_copy_in_a_library_that_is_no_longer_known_falls_back_and_nothing_is_tidied()
+    {
+        var old = "/lib/Removed/Rocket Club (2019)/Rocket Club.avi";
+        var existing = new Existing();
+        existing.Movies.Add(("123", null, old));
+
+        var plan = await Following(existing).PlanAsync(Watch, "r", [F("r/Rocket.Club.2019.1080p.mkv")], LibraryTargets.Of(Films), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.IsReady, string.Join("; ", plan.Review.Select(r => r.Reason)));
+        Assert.StartsWith("/lib/Movies/", VideoOf(plan, "Rocket.Club.2019.1080p.mkv").Destination, StringComparison.Ordinal);
+        Assert.Contains("isn't in one of the server's Movies libraries", Assert.Single(plan.ReplacementNotes), StringComparison.Ordinal);
+        Assert.Empty(plan.TidyIfEmpty);
+    }
 }

@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Replace files the new copy where the replaced copy lives.** Replacing a copy kept in a second Movies (or Shows)
+  library quarantined the old file correctly but filed the new one into the watch folder's usual library, leaving an
+  empty folder behind. The new copy now goes into the same library folder, reusing the film or show folder (and an
+  episode's season folder), unless a library was chosen in review. Each episode of a season pack follows its own
+  replaced copy. If the old copy isn't in a Movies/Shows/mixed library the server knows, the file is routed as usual,
+  the activity entry says why, and the old folder is removed if it is left empty. The review card and the activity
+  entry say where the replacement is filed ("Replacing 1 copy in <library>").
+
 ## [0.9.0-alpha] - 2026-09-26
 
 ### Changed

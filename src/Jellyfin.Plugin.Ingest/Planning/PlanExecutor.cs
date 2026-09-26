@@ -57,6 +57,13 @@ public interface IFileOperations
     /// <param name="path">Absolute path.</param>
     void DeleteEmptyDirectories(string path);
 
+    /// <summary>
+    /// Removes a directory only if it is empty (nothing in it at all) and isn't a link.
+    /// </summary>
+    /// <param name="path">Absolute path.</param>
+    /// <returns>Whether it was removed.</returns>
+    bool DeleteIfEmpty(string path) => false;
+
     /// <summary>Appends a line to a text file (the action log).</summary>
     /// <param name="path">Absolute path.</param>
     /// <param name="line">The line.</param>
@@ -289,6 +296,19 @@ public sealed class PlanExecutor
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 warning = ex.Message;
+            }
+        }
+
+        // A replaced copy's folder left empty because its replacement went elsewhere; never outside its library folder
+        foreach (var emptied in plan.TidyIfEmpty.Where(e => PathGuard.IsUnder(e.Folder, e.LibraryRoot)))
+        {
+            try
+            {
+                _fs.DeleteIfEmpty(emptied.Folder);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                warning ??= ex.Message;
             }
         }
 
@@ -582,6 +602,19 @@ public sealed class PhysicalFileOperations : IFileOperations
             // Can't tell: don't block the move; a real shortage still fails the copy and is rolled back
             return true;
         }
+    }
+
+    /// <inheritdoc />
+    public bool DeleteIfEmpty(string path)
+    {
+        if (!Directory.Exists(path) || new DirectoryInfo(path).LinkTarget is not null || Directory.EnumerateFileSystemEntries(path).Any())
+        {
+            return false;
+        }
+
+        // Not recursive: fails rather than deletes if something arrived in the meantime
+        Directory.Delete(path, recursive: false);
+        return true;
     }
 
     /// <inheritdoc />

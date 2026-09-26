@@ -97,6 +97,16 @@ public class ExecutorTests
             }
         }
 
+        public bool DeleteIfEmpty(string path)
+        {
+            if (!Dirs.Contains(path) || Files.Keys.Any(f => f.StartsWith(path + "/", StringComparison.Ordinal)) || Dirs.Any(x => x.StartsWith(path + "/", StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            return Dirs.Remove(path);
+        }
+
         public Func<string, bool>? FailAppend { get; set; }
 
         public void AppendLine(string path, string line)
@@ -456,5 +466,34 @@ public class ExecutorTests
         {
             Directory.Delete(dir, recursive: true);
         }
+    }
+
+    // A replaced copy's folders left behind when its replacement was filed elsewhere
+    [Fact]
+    public void Folders_a_replaced_copy_leaves_empty_are_removed_but_only_inside_their_library_and_only_when_empty()
+    {
+        var fs = Seeded();
+        fs.Dirs.UnionWith(["/lib/Old", "/lib/Old/A", "/lib/Old/A/Season 01", "/lib/Old/B", "/lib/Old/C"]);
+        fs.Files["/lib/Old/B/poster.jpg"] = 1;
+        var plan = Plan() with
+        {
+            TidyIfEmpty =
+            [
+                new EmptiedFolder("/lib/Old/A/Season 01", "/lib/Old"),
+                new EmptiedFolder("/lib/Old/A", "/lib/Old"),
+                new EmptiedFolder("/lib/Old/B", "/lib/Old"),
+                new EmptiedFolder("/lib/Old", "/lib/Old"),
+                new EmptiedFolder("/lib/Old/C", "/lib/Films"),
+            ],
+        };
+
+        var report = new PlanExecutor(fs, TimeProvider.System).Execute(plan, "/drop/r", "/log", dryRun: false);
+
+        Assert.True(report.Succeeded);
+        Assert.DoesNotContain("/lib/Old/A/Season 01", fs.Dirs);
+        Assert.DoesNotContain("/lib/Old/A", fs.Dirs);
+        Assert.Contains("/lib/Old/B", fs.Dirs);
+        Assert.Contains("/lib/Old", fs.Dirs);
+        Assert.Contains("/lib/Old/C", fs.Dirs);
     }
 }

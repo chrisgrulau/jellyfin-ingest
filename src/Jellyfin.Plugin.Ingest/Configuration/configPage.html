@@ -373,6 +373,25 @@
         // A release held back only by copies already on the server can replace them (they go to quarantine)
         function canReplace(r) { return (r.Items || []).length > 0 && r.Items.every(function (i) { return i.Existing; }); }
         function existingCount(r) { return r.Items.reduce(function (n, i) { return n + i.Existing.split('\n').length; }, 0); }
+        // Where replacements are filed: the library chosen in review, else the library each replaced copy is in
+        function replacingIn(r) {
+          if (r.Chosen) { return libraryFor(r.Chosen.Target.Root); }
+          var names = [];
+          (r.Items || []).forEach(function (i) {
+            (i.Existing || '').split('\n').forEach(function (p) { if (!p) { return; } var n = libraryOfPath(p); if (names.indexOf(n) < 0) { names.push(n); } });
+          });
+          return names.join(', ');
+        }
+        function libraryOfPath(p) {
+          var best = null, len = -1;
+          libraries.forEach(function (l) {
+            (l.Locations || []).forEach(function (loc) {
+              var root = loc.replace(/[\\/]+$/, '');
+              if (root && p.indexOf(root) === 0 && /[\\/]/.test(p.charAt(root.length)) && root.length > len) { best = l; len = root.length; }
+            });
+          });
+          return best ? best.Name : 'the library it is in';
+        }
         var expanded = {};
         var searchResults = {};
         var busyCard = null;
@@ -471,7 +490,7 @@
                 (isDryRun(r.WatchFolder) ? '<div class="ingest-muted">Dry run is on, so it has only been planned (see Recent activity). It will be filed once dry run is off.</div>' : '') + '</div>';
             }
             if (pending) {
-              return html + '<p class="ingest-muted">' + (r.Request === 'Quarantine' ? 'Quarantining' : r.Request === 'Replace' ? 'Replacing what\'s on the server' : 'Planning again') + ' on the next sweep (within 30 seconds)…</p></div>';
+              return html + '<p class="ingest-muted">' + (r.Request === 'Quarantine' ? 'Quarantining' : r.Request === 'Replace' ? 'Replacing what\'s on the server in ' + esc(replacingIn(r)) : 'Planning again') + ' on the next sweep (within 30 seconds)…</p></div>';
             }
             html += pickTable(r, r.Candidates || [], 'suggested');
             var sr = searchResults[r.Id];
@@ -487,7 +506,7 @@
               '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>' + (r.Chosen ? 'Clear choice and retry' : 'Retry') + '</span></button>' +
               (canReplace(r) ? '<button is="emby-button" type="button" class="raised button-submit ingest-replace"><span>' + (confirmReplace[r.Id] ? 'Confirm: replace ' + existingCount(r) + ' file' + (existingCount(r) === 1 ? '' : 's') + ' on the server' : 'Replace existing copies') + '</span></button>' : '') +
               '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>' +
-              '</div>' + perFile(r, n);
+              '</div>' + (canReplace(r) ? '<p class="ingest-muted">Replacing ' + existingCount(r) + ' file' + (existingCount(r) === 1 ? '' : 's') + ' in ' + esc(replacingIn(r)) + '. The new copy is filed where the old one is, unless you chose a library above.</p>' : '') + perFile(r, n);
             return html + '</div>';
           }).join('');
         }
