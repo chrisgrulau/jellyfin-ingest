@@ -48,4 +48,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// one of the candidates found; otherwise the release waits for review as before.
     /// </summary>
     public bool UseAiTiebreak { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether an episode whose name doesn't say which episode it is may be identified from
+    /// a short transcript: the family's Subtitles plugin transcribes two minutes of it (only if its settings allow Ingest
+    /// to ask; built-in speech-to-text by default) and the AI plugin compares that with the episode synopses. Needs
+    /// <see cref="UseAiTiebreak"/>.
+    /// </summary>
+    public bool UseTranscripts { get; set; } = true;
 }

@@ -47,4 +47,15 @@ public interface IEpisodePicker
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The pick; never throws for an unavailable or failed picker.</returns>
     Task<TiebreakPick> PickEpisodeAsync(string fileName, string series, string episodeTitle, int? year, IReadOnlyList<EpisodeListing> options, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Picks the listed episode a short transcript of the video best fits.
+    /// </summary>
+    /// <param name="fileName">The video's file name (no folders).</param>
+    /// <param name="series">The series title.</param>
+    /// <param name="transcript">A couple of minutes of what is said in the video.</param>
+    /// <param name="options">The episodes it could be.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The pick; never throws for an unavailable or failed picker.</returns>
+    Task<TiebreakPick> PickFromTranscriptAsync(string fileName, string series, string transcript, IReadOnlyList<EpisodeListing> options, CancellationToken cancellationToken);
 }

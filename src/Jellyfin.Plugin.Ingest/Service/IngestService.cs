@@ -51,6 +51,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private readonly Dictionary<string, (string WatchFolder, string Release, DateTimeOffset At, int Attempt)> _retries = new(StringComparer.Ordinal);
     private readonly TimeProvider _clock = TimeProvider.System;
     private CachingMetadataLookup? _lookup;
+
+    // Kept for the service's life, so a file is transcribed once while it is unchanged
+    private readonly SpeechTranscriber _transcriber = new();
     private DateTimeOffset _identificationPausedUntil;
     private int _pauses;
     private CancellationTokenSource? _stopping;
@@ -283,7 +286,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         _lookup ??= new CachingMetadataLookup(new JellyfinMetadataLookup(_providerManager), _clock, Path.Combine(plugin.DataFolderPath, "search-cache.json"));
         _lookup.BeginSweep();
         var sweep = new Sweep(
-            new MediaIdentifier(_lookup, new JellyfinLibraryIndex(_libraryManager, []), config.UseAiTiebreak ? new AiTiebreaker() : null),
+            new MediaIdentifier(_lookup, new JellyfinLibraryIndex(_libraryManager, []), config.UseAiTiebreak ? new AiTiebreaker() : null, config.UseTranscripts ? _transcriber : null),
             [.. libraries.SelectMany(l => l.Locations)]);
         var problems = FolderProblems(config, libraries, _paths, _configuration);
         if (!_markersMigrated)
@@ -752,7 +755,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
             Status = config.DryRun ? ActivityStatus.DryRun : ActivityStatus.Filed,
             Release = release,
             WatchFolder = watch.Path,
-            Summary = summaryLine + (plan.Notes.Count > 0 ? " A close match was settled by the AI plugin." : string.Empty),
+            Summary = summaryLine + (plan.Notes.Count > 0 ? " The AI plugin decided part of this (see the details)." : string.Empty),
             Details = [.. plan.Notes, .. Describe(watch.Path, report.Completed)],
         });
 
