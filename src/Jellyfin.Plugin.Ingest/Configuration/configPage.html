@@ -431,10 +431,10 @@
           if (!folders.length) { box.innerHTML = '<p class="ingest-muted">Nothing in quarantine.</p>'; return; }
           box.innerHTML = folders.map(function (f) {
             var fate = f.Managed ? 'deleted on ' + day(f.DeletesOn) : 'not created by Ingest, so never deleted';
-            return '<div class="ingest-q"><h4><span>' + esc(day(f.Date)) + '</span><span class="ingest-muted">' + plural(f.FileCount, 'file') + ', ' + size(f.Bytes) + ', ' + esc(fate) + '</span></h4>' +
+            return '<div class="ingest-q"><h4><span>' + esc(day(f.Date)) + (f.Folder && f.Folder !== f.Date ? ' <span class="ingest-muted">' + esc(f.Folder) + '</span>' : '') + '</span><span class="ingest-muted">' + plural(f.FileCount, 'file') + ', ' + size(f.Bytes) + ', ' + esc(fate) + '</span></h4>' +
               (roots.length > 1 ? '<div class="ingest-muted">' + esc(f.Root) + '</div>' : '') +
               f.Releases.map(function (r) {
-                var k = f.Root + '|' + f.Date + '|' + r.Name;
+                var k = f.Root + '|' + (f.Folder || f.Date) + '|' + r.Name;
                 var more = r.FileCount - r.Files.length;
                 return '<details data-k="' + esc(k) + '"><summary>' + esc(r.Name) + ' <span class="ingest-muted">' + plural(r.FileCount, 'file') + ', ' + size(r.Bytes) + '</span></summary><ul>' +
                   r.Files.map(function (x) { return '<li><span>' + esc(x.Path) + '</span><span class="size">' + size(x.Bytes) + '</span></li>'; }).join('') +

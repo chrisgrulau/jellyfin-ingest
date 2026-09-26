@@ -109,6 +109,8 @@ public sealed class PlanExecutor
     private const string TempPrefix = ".ingest-";
     private const string TempSuffix = ".partial";
 
+    private static readonly System.Buffers.SearchValues<char> HexDigits = System.Buffers.SearchValues.Create("0123456789abcdef");
+
     private readonly IFileOperations _fs;
     private readonly TimeProvider _clock;
 
@@ -265,10 +267,13 @@ public sealed class PlanExecutor
     /// </summary>
     /// <param name="actionLogLines">Lines of the action log.</param>
     /// <param name="actionLogPath">The action log, to record what recovery did.</param>
+    /// <param name="allowedRoots">The current library and quarantine folders: recovery only touches a temporary file that
+    /// has Ingest's own name, sits beside its destination, and is inside one of these.</param>
     /// <returns>A description of each thing done or needing attention.</returns>
-    public IReadOnlyList<string> Recover(IEnumerable<string> actionLogLines, string actionLogPath)
+    public IReadOnlyList<string> Recover(IEnumerable<string> actionLogLines, string actionLogPath, IReadOnlyCollection<string> allowedRoots)
     {
         ArgumentNullException.ThrowIfNull(actionLogLines);
+        ArgumentNullException.ThrowIfNull(allowedRoots);
 
         var open = new Dictionary<string, LogEntry>(StringComparer.Ordinal);
         foreach (var line in actionLogLines)
@@ -292,6 +297,14 @@ public sealed class PlanExecutor
         foreach (var e in open.Values)
         {
             var op = new PlannedOperation(Enum.TryParse<OperationKind>(e.Kind, out var k) ? k : OperationKind.Video, e.Source, e.Destination);
+
+            // Defence in depth: the log's contents alone never decide what is deleted or renamed
+            if (!IsOwnTemp(e.Temp!, e.Destination, allowedRoots))
+            {
+                results.Add($"Needs attention: the action log names an interrupted move that doesn't look like Ingest's ({e.Temp} for {e.Destination}); nothing was changed.");
+                continue;
+            }
+
             try
             {
                 if (!_fs.Exists(e.Temp!))
@@ -325,6 +338,30 @@ public sealed class PlanExecutor
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Whether a temporary file named in the action log is one Ingest would have made for that destination: its hidden
+    /// temporary name, in the destination's folder, inside a current library or quarantine folder.
+    /// </summary>
+    /// <param name="temp">The temporary file.</param>
+    /// <param name="destination">The destination.</param>
+    /// <param name="allowedRoots">Current library and quarantine folders.</param>
+    /// <returns><c>true</c> if recovery may act on it.</returns>
+    public static bool IsOwnTemp(string temp, string destination, IReadOnlyCollection<string> allowedRoots)
+    {
+        ArgumentNullException.ThrowIfNull(allowedRoots);
+        if (string.IsNullOrEmpty(temp) || string.IsNullOrEmpty(destination) || !Path.IsPathFullyQualified(temp) || !Path.IsPathFullyQualified(destination))
+        {
+            return false;
+        }
+
+        var name = Path.GetFileName(temp);
+        return name.Length == TempPrefix.Length + 32 + TempSuffix.Length
+            && name.StartsWith(TempPrefix, StringComparison.Ordinal) && name.EndsWith(TempSuffix, StringComparison.Ordinal)
+            && !name.AsSpan(TempPrefix.Length, 32).ContainsAnyExcept(HexDigits)
+            && PathGuard.SamePath(Path.GetDirectoryName(temp), Path.GetDirectoryName(destination))
+            && PathGuard.IsUnderAny(destination, allowedRoots);
     }
 
     private (IReadOnlyList<PlannedOperation> RolledBack, IReadOnlyList<string> Problems) RollBack(

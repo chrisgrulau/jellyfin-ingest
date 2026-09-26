@@ -99,5 +99,13 @@ public sealed record IngestPlan
         : RetryKind.NothingFound;
 
     /// <summary>Gets a value indicating whether the plan can be executed as is.</summary>
-    public bool IsReady => Review.Count == 0 && Operations.Any(o => o.Kind is OperationKind.Video);
+    public bool IsReady => Review.Count == 0
+        && (Operations.Any(o => o.Kind is OperationKind.Video)
+            || (WholeReleaseQuarantine && Operations.Count > 0 && Operations.All(o => o.Kind is OperationKind.Quarantine)));
+
+    /// <summary>
+    /// Gets a value indicating whether this plan quarantines a whole release on request (every operation a quarantine,
+    /// no video filed). Only such a plan may run without a video.
+    /// </summary>
+    public bool WholeReleaseQuarantine { get; init; }
 }

@@ -195,13 +195,13 @@ public class ExecutorTests
     public void An_interrupted_move_whose_file_had_arrived_is_finished()
     {
         var fs = new Fs();
-        fs.Files["/lib/Films/A/.ingest-1.partial"] = 1000;
+        fs.Files["/lib/Films/A/.ingest-11111111111111111111111111111111.partial"] = 1000;
 
-        var results = new PlanExecutor(fs, TimeProvider.System).Recover([Line("intent", "/drop/r/a.mkv", "/lib/Films/A/A.mkv", "/lib/Films/A/.ingest-1.partial", 1000)], "/log");
+        var results = new PlanExecutor(fs, TimeProvider.System).Recover([Line("intent", "/drop/r/a.mkv", "/lib/Films/A/A.mkv", "/lib/Films/A/.ingest-11111111111111111111111111111111.partial", 1000)], "/log", Roots);
 
         Assert.Single(results);
         Assert.Equal(1000, fs.Files["/lib/Films/A/A.mkv"]);
-        Assert.False(fs.Exists("/lib/Films/A/.ingest-1.partial"));
+        Assert.False(fs.Exists("/lib/Films/A/.ingest-11111111111111111111111111111111.partial"));
         Assert.Equal(["recovered"], fs.Phases());
     }
 
@@ -210,11 +210,11 @@ public class ExecutorTests
     {
         var fs = new Fs();
         fs.Files["/drop/r/a.mkv"] = 1000;
-        fs.Files["/lib/Films/A/.ingest-2.partial"] = 300;
+        fs.Files["/lib/Films/A/.ingest-22222222222222222222222222222222.partial"] = 300;
 
-        new PlanExecutor(fs, TimeProvider.System).Recover([Line("intent", "/drop/r/a.mkv", "/lib/Films/A/A.mkv", "/lib/Films/A/.ingest-2.partial", 1000)], "/log");
+        new PlanExecutor(fs, TimeProvider.System).Recover([Line("intent", "/drop/r/a.mkv", "/lib/Films/A/A.mkv", "/lib/Films/A/.ingest-22222222222222222222222222222222.partial", 1000)], "/log", Roots);
 
-        Assert.False(fs.Exists("/lib/Films/A/.ingest-2.partial"));
+        Assert.False(fs.Exists("/lib/Films/A/.ingest-22222222222222222222222222222222.partial"));
         Assert.Equal(1000, fs.Files["/drop/r/a.mkv"]);
         Assert.Equal(["discarded"], fs.Phases());
     }
@@ -225,13 +225,13 @@ public class ExecutorTests
         var fs = new Fs();
         string[] log =
         [
-            Line("intent", "/drop/r/a.mkv", "/lib/A.mkv", "/lib/.ingest-3.partial", 1),
-            Line("done", "/drop/r/a.mkv", "/lib/A.mkv", "/lib/.ingest-3.partial", 1),
+            Line("intent", "/drop/r/a.mkv", "/lib/A.mkv", "/lib/.ingest-33333333333333333333333333333333.partial", 1),
+            Line("done", "/drop/r/a.mkv", "/lib/A.mkv", "/lib/.ingest-33333333333333333333333333333333.partial", 1),
             "{\"kind\":\"Video\",\"source\":\"/x\",\"destination\":\"/y\",\"bytes\":1}",
-            Line("intent", "/drop/r/b.mkv", "/lib/B.mkv", "/lib/.ingest-4.partial", 1),
+            Line("intent", "/drop/r/b.mkv", "/lib/B.mkv", "/lib/.ingest-44444444444444444444444444444444.partial", 1),
         ];
 
-        Assert.Empty(new PlanExecutor(fs, TimeProvider.System).Recover(log, "/log"));
+        Assert.Empty(new PlanExecutor(fs, TimeProvider.System).Recover(log, "/log", Roots));
         Assert.Empty(fs.Log);
     }
 
@@ -252,5 +252,55 @@ public class ExecutorTests
         Assert.False(fs.Exists("/lib/Films/A (2019)/A (2019).en.srt"));
         Assert.Equal(2, report.RolledBack.Count);
         Assert.Empty(report.RollbackProblems);
+    }
+
+    private static readonly string[] Roots = ["/lib"];
+
+    [Theory]
+    [InlineData("/lib/Films/A/not-ours.partial", "/lib/Films/A/A.mkv")]
+    [InlineData("/lib/Films/B/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.partial", "/lib/Films/A/A.mkv")]
+    [InlineData("/etc/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.partial", "/etc/passwd")]
+    [InlineData("relative/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.partial", "relative/A.mkv")]
+    public void Recovery_never_acts_on_a_file_that_is_not_ingests_own_temporary_file(string temp, string destination)
+    {
+        var fs = new Fs();
+        fs.Files[temp] = 1000;
+
+        var results = new PlanExecutor(fs, TimeProvider.System).Recover([Line("intent", "/drop/r/a.mkv", destination, temp, 1000)], "/log", Roots);
+
+        Assert.StartsWith("Needs attention", Assert.Single(results), StringComparison.Ordinal);
+        Assert.True(fs.Exists(temp));
+        Assert.False(fs.Exists(destination));
+        Assert.Empty(fs.Log);
+    }
+
+    // ING-22: a whole release quarantined from the review screen uses the same executor: logged, all-or-nothing
+    [Fact]
+    public void A_whole_release_quarantine_is_logged_and_rolled_back_on_failure()
+    {
+        var plan = new IngestPlan
+        {
+            ReleaseName = "r",
+            Operations =
+            [
+                new PlannedOperation(OperationKind.Quarantine, "/drop/r/a.mkv", "/drop/q/2026-09-26/r/a.mkv"),
+                new PlannedOperation(OperationKind.Quarantine, "/drop/r/info.nfo", "/drop/q/2026-09-26/r/info.nfo"),
+            ],
+            AllowedRoots = ["/drop/q/2026-09-26"],
+            WholeReleaseQuarantine = true,
+        };
+        Assert.False((plan with { WholeReleaseQuarantine = false }).IsReady);
+
+        var ok = Seeded();
+        Assert.True(new PlanExecutor(ok, TimeProvider.System).Execute(plan, "/drop/r", "/log", dryRun: false).Succeeded);
+        Assert.Equal(1000, ok.Files["/drop/q/2026-09-26/r/a.mkv"]);
+        Assert.Equal(["intent", "done", "intent", "done"], ok.Phases());
+
+        var failing = Seeded();
+        failing.FailMove = (s, _) => s == "/drop/r/info.nfo";
+        var report = new PlanExecutor(failing, TimeProvider.System).Execute(plan, "/drop/r", "/log", dryRun: false);
+        Assert.False(report.Succeeded);
+        Assert.Equal(1000, failing.Files["/drop/r/a.mkv"]);
+        Assert.False(failing.Exists("/drop/q/2026-09-26/r/a.mkv"));
     }
 }

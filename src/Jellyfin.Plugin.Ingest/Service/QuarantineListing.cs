@@ -44,12 +44,12 @@ public static class QuarantineListing
         var folders = new List<QuarantineFolder>();
         var dated = Directory.EnumerateDirectories(quarantineRoot)
             .Select(p => (Path: p, Name: Path.GetFileName(p)))
-            .Where(d => DateOnly.TryParseExact(d.Name, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+            .Where(d => QuarantineMarkers.DateOf(d.Name) is not null)
             .Where(d => new DirectoryInfo(d.Path).LinkTarget is null)
             .OrderByDescending(d => d.Name, StringComparer.Ordinal);
         foreach (var (path, name) in dated)
         {
-            var date = DateOnly.ParseExact(name, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var date = QuarantineMarkers.DateOf(name)!.Value;
             var managed = QuarantineMarkers.IsMarked(path);
             var releases = new Dictionary<string, List<QuarantinedFile>>(StringComparer.Ordinal);
             var counts = new Dictionary<string, (int Files, long Bytes)>(StringComparer.Ordinal);
@@ -92,7 +92,8 @@ public static class QuarantineListing
             folders.Add(new QuarantineFolder
             {
                 Root = quarantineRoot,
-                Date = name,
+                Date = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                Folder = name,
                 Managed = managed,
                 DeletesOn = managed ? date.AddDays(retentionDays + 1) : null,
                 Releases = [.. counts.OrderBy(r => r.Key, StringComparer.OrdinalIgnoreCase).Select(r => new QuarantinedRelease
@@ -117,8 +118,11 @@ public sealed record QuarantineFolder
     /// <summary>Gets the quarantine folder it is in.</summary>
     public required string Root { get; init; }
 
-    /// <summary>Gets the date the files were quarantined (<c>yyyy-MM-dd</c>, the folder's name).</summary>
+    /// <summary>Gets the date the files were quarantined (<c>yyyy-MM-dd</c>).</summary>
     public required string Date { get; init; }
+
+    /// <summary>Gets the folder's name (the date, or the date with Ingest's suffix).</summary>
+    public string Folder { get; init; } = string.Empty;
 
     /// <summary>Gets a value indicating whether Ingest created it (only those are ever deleted).</summary>
     public bool Managed { get; init; }
