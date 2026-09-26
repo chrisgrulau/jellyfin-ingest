@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0-alpha] - 2026-09-26
+
 ### Added
 
 - **ING-28: Copy or hard link, per watch folder**, so torrents keep seeding. Before, files were always moved, which
