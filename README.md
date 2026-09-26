@@ -12,8 +12,8 @@ A [Jellyfin](https://jellyfin.org) plugin that watches one or more **drop folder
 libraries automatically — identified, renamed to Jellyfin's naming standard, with its subtitles, and with the release
 clutter set aside.
 
-> **Status: early development.** The repository is being scaffolded; nothing here is ready to install yet.
-> See the [roadmap](#roadmap).
+> **Status: alpha.** It works and is used daily, but settings and behaviour may still change between versions. Dry
+> run is on until you turn it off. See the [roadmap](#roadmap).
 
 ## What it does
 
@@ -62,7 +62,7 @@ plugin page, where you pick the right title (and library) with one click or sear
 | Subtitles | Matched by name, by folder (`Subs/`), or by being the only video in the release; renamed `<video>[.Title].<lang>[.default][.sdh][.forced].srt`. When a language has several tracks, the main one is marked default. |
 | Extras | Trailers, featurettes, deleted scenes … filed into Jellyfin's extras folders. |
 | Clutter | Moved to a dated quarantine folder (default or user-chosen), purged after N days (default 30). *Quarantine* on the plugin page shows what is there and when each day's folder is deleted. |
-| AI tie-breaker | Optional, with the Shoal AI plugin: a close call between candidates Ingest already found is settled by the AI choosing one of them (or none). Only file names, titles and years are sent; every choice is shown in *Recent activity*. |
+| AI tie-breaker | Optional, with the Shoal AI plugin: a close call between candidates Ingest already found is settled by the AI choosing one of them (or none). Only file names, titles and years are sent for this (see [What Ingest sends](#what-ingest-sends)); every choice is shown in *Recent activity*. |
 | Episodes from a transcript | Optional, with the Shoal Subtitles and AI plugins: when a name doesn't say which episode it is, two minutes of it are transcribed (built-in speech-to-text by default, on this server) and the AI picks the listed episode whose synopsis fits, or none. |
 | Episodes named by title | A file that gives the episode title but no number (typically a special) is matched against that season's episode list from your providers; if no title clearly matches, the AI plugin (when installed) may choose one of the listed episodes. |
 | Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. |
@@ -78,6 +78,17 @@ or have it add an in-progress suffix (`.part`, `.!qb`, `.crdownload` …) until 
 files at their full size before downloading them (pre-allocation), so file size alone proves nothing; Ingest also watches
 write times, but a download that stalls for longer than the settle time can still look finished.
 
+### Living with other tools
+
+- **Sonarr and Radarr** import finished downloads themselves: don't point Ingest at the folders they import from, or
+  both will fight over the same files. Ingest is for downloads nothing else files.
+- **Seeding torrents:** Ingest moves files, so a client that seeds from the watch folder loses them. Let the client
+  move finished downloads into the watch folder (a copy stays where it seeds) or seed from elsewhere.
+- **Docker:** mount the downloads and the media under one parent folder (for example `/data/downloads` and
+  `/data/media`), so moves are instant renames rather than copies across file systems.
+- **Windows service:** use network paths (`\\nas\share\incoming`) rather than mapped drive letters, which services
+  can't see.
+
 ## Requirements
 
 - Jellyfin **12.1** or newer (the plugin targets .NET 10).
@@ -87,9 +98,18 @@ write times, but a download that stalls for longer than the settle time can stil
 
 ## Installation
 
-Pre-releases are published on the [Releases](../../releases) page. Download the `.zip`, extract it into
-`<jellyfin data>/plugins/Ingest_<version>/`, and restart Jellyfin. A plugin repository manifest (for installing and
-updating from **Dashboard → Plugins → Repositories**) is planned.
+**From the Shoal plugin repository (recommended):** in **Dashboard → Plugins → Repositories**, add
+
+```
+https://raw.githubusercontent.com/chrisgrulau/jellyfin-shoal/main/manifest.json
+```
+
+then install **Shoal Ingest** from the catalogue and restart Jellyfin. Jellyfin installs updates from a repository
+automatically (daily, and at start-up) unless you switch that off for the plugin on its page under **My Plugins**.
+
+**By hand:** download the `.zip` from the [Releases](../../releases) page, check it against `SHA256SUMS` (and, if you
+like, `gh attestation verify <zip> --repo chrisgrulau/jellyfin-ingest`), extract it into
+`<jellyfin data>/plugins/Ingest_<version>/`, and restart Jellyfin.
 
 After installing, open **Dashboard → Plugins → Ingest** and add at least one watch folder with a destination library;
 nothing is watched until you do. Dry run is on until you turn it off.
@@ -122,6 +142,26 @@ Everything stays on your server, in Jellyfin's plugin data folder (`<jellyfin da
 Jellyfin's log gets one line per release at Information level. Per-file moves and review reasons, which include full
 paths, are logged only at Debug. Paths and release names can reveal account names, share names and where media came
 from, so check a log before posting it publicly.
+
+## What Ingest sends
+
+Nothing leaves the server unless you install and allow the other Shoal plugins, and then only for releases it can't
+settle on its own:
+
+| To | When | What |
+|---|---|---|
+| Your metadata providers (through Jellyfin) | Every release | The title and year read from the name (as Jellyfin's own identify does) |
+| Shoal AI → your AI provider | A close match | The file name; candidate titles, years and kinds |
+| Shoal AI → your AI provider | An episode named by title, or with no usable name | Also the season's episode titles, years and the start of each synopsis; for no usable name, up to 4,000 characters of transcribed dialogue |
+| Shoal Subtitles → speech-to-text | An episode with no usable name, if Subtitles allows it | Two minutes of audio: it stays on the server with the built-in or a local service, and goes to a cloud service only if you chose one there |
+
+No paths, user names or library names are sent.
+
+## Upgrading and uninstalling
+
+Upgrades keep your settings and state. When uninstalling, remove releases waiting for review first. Left behind in the
+data folder: `state.json`, `actions.jsonl` and `search-cache.json`; and in each watch folder, the hidden
+`.ingest-quarantine` folder, which is no longer purged once the plugin is gone (delete it by hand).
 
 ## Building
 
