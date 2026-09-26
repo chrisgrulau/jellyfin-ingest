@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0-alpha] - 2026-09-26
+
+### Added
+
+- **ING-30: Replace existing copies** in review. A release held back only because its episodes or films are already
+  on the server, such as a better-quality copy of a season, can now replace them.
+  - The old copies move to Ingest's quarantine together with their subtitle files, so they can be restored until the
+    quarantine is purged. The new files are then filed in their place, under the same names where the name is the
+    same.
+  - It is all-or-nothing and crash-safe like any filing: a failure puts the old copies back.
+  - It needs two clicks, and is refused if what's on the server changed since the page was drawn.
+  - Only copies inside a library are replaced.
+  - Subtitles for the new files come from the Shoal Subtitles finder, which checks them against the new audio.
+
 ### Fixed
 
 - **FAM-02:** questions to the AI plugin carry text in every script as it is, not escaped. They are fitted to its
@@ -19,18 +33,6 @@ All notable changes to this project are documented here. The format follows
 - **ING-35:** release and folder names with full-width or other non-ASCII digits no longer throw. Only ASCII digits
   count as numbers.
 - **FAM-04:** the shared source is updated, and Dependabot now watches it.
-
-### Added
-
-- **ING-30: Replace existing copies** in review. A release held back only because its episodes or films are already
-  on the server, such as a better-quality copy of a season, can now replace them.
-  - The old copies move to Ingest's quarantine together with their subtitle files, so they can be restored until the
-    quarantine is purged. The new files are then filed in their place, under the same names where the name is the
-    same.
-  - It is all-or-nothing and crash-safe like any filing: a failure puts the old copies back.
-  - It needs two clicks, and is refused if what's on the server changed since the page was drawn.
-  - Only copies inside a library are replaced.
-  - Subtitles for the new files come from the Shoal Subtitles finder, which checks them against the new audio.
 
 ## [0.3.0-alpha] - 2026-09-26
 
