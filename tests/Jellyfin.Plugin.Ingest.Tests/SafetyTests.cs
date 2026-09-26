@@ -72,6 +72,21 @@ public class SafetyTests
         Assert.Equal(["Imdb"], [.. b!.ProviderIds.Keys]);
     }
 
+    // ING-25: a choice names what the page showed, so a list replaced by another search is noticed
+    [Fact]
+    public void A_choice_is_checked_against_what_the_page_showed()
+    {
+        var review = Review();
+        var shown = ReviewChoice.KeyAt(review, ReviewChoice.Search, 0);
+        Assert.StartsWith("B|", shown, StringComparison.Ordinal);
+
+        var replaced = review with { SearchResults = [new ScoredCandidate(new MetadataCandidate { Name = "Other", Year = 2001 }, 0.5)] };
+        Assert.NotEqual(shown, ReviewChoice.KeyAt(replaced, ReviewChoice.Search, 0));
+        Assert.Null(ReviewChoice.KeyAt(replaced, ReviewChoice.Search, 3));
+        Assert.Equal("Other|2001|", ReviewChoice.KeyOf(replaced.SearchResults[0].Candidate));
+        Assert.Equal("X||Imdb=tt1,Tmdb=2", ReviewChoice.KeyOf(new MetadataCandidate { Name = "X", ProviderIds = new Dictionary<string, string> { ["Tmdb"] = "2", ["Imdb"] = "tt1" } }));
+    }
+
     [Theory]
     [InlineData("suggested", 1)]
     [InlineData("suggested", -1)]

@@ -464,6 +464,12 @@
           return ApiClient.ajax(req).then(loadStatus, failed);
         }
 
+        // Same as ReviewChoice.KeyOf on the server: name|year|provider ids sorted by name
+        function candidateKey(c) {
+          var ids = c.ProviderIds || {};
+          return c.Name + '|' + (c.Year == null ? '' : c.Year) + '|' + Object.keys(ids).sort().map(function (k) { return k + '=' + ids[k]; }).join(',');
+        }
+
         function reviewById(id) { return reviews.filter(function (r) { return r.Id === id; })[0]; }
 
         page.querySelector('#Reviews').addEventListener('click', function (e) {
@@ -481,9 +487,11 @@
             var lib = btn.closest('.ingest-pick').querySelector('.ingest-lib').value;
             if (!r || isNaN(index)) { return; }
             if (!lib) { Dashboard.alert('There is no library of the right kind to file this into.'); return; }
+            var shown = (list === 'search' ? r.SearchResults : r.Candidates) || [];
+            if (!shown[index]) { return; }
             delete searchResults[id];
-            // The server resolves the choice from its own list; the browser only says which one
-            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose', { List: list === 'search' ? 'search' : 'suggested', Index: index, LibraryId: lib });
+            // The server resolves the choice from its own list; the browser says which one and what it showed there
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose', { List: list === 'search' ? 'search' : 'suggested', Index: index, LibraryId: lib, Key: candidateKey(shown[index].Candidate) });
           } else if (btn.classList.contains('ingest-retry')) {
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Retry');
           } else if (btn.classList.contains('ingest-quarantine')) {

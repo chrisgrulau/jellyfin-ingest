@@ -158,6 +158,7 @@ public class IngestController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public ActionResult Choose([FromRoute] string id, [FromBody] ChooseRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -172,6 +173,12 @@ public class IngestController : ControllerBase
         if (candidate is null)
         {
             return BadRequest("That candidate is no longer available; refresh and choose again.");
+        }
+
+        // The list may have changed since the page showed it (another tab or administrator searched this review)
+        if (!string.Equals(ReviewChoice.KeyAt(review, request.List, request.Index), request.Key, StringComparison.Ordinal))
+        {
+            return Conflict("The list changed since this page showed it (another search was made for this release). Refresh and choose again.");
         }
 
         // A library the watch folder already files into keeps its configured folder; any other uses its first folder.
@@ -260,6 +267,9 @@ public sealed record ChooseRequest
 
     /// <summary>Gets the id of the library to file into.</summary>
     public required string LibraryId { get; init; }
+
+    /// <summary>Gets the chosen candidate's key as the page showed it (<see cref="ReviewChoice.KeyOf"/>).</summary>
+    public required string Key { get; init; }
 }
 
 /// <summary>

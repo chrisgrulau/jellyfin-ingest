@@ -229,8 +229,10 @@ public sealed class PlanExecutor
                     throw new IOException($"Move could not be verified: {temp} -> {op.Destination}");
                 }
 
-                Log(actionLogPath, plan.ReleaseName, op, size, "done", temp);
+                // Counted as done before the "done" line is written: if writing it fails (a full disk), the rollback also
+                // moves this file back instead of leaving it filed while the rest of the release returns
                 done.Add((op, size, temp));
+                Log(actionLogPath, plan.ReleaseName, op, size, "done", temp);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -519,10 +521,13 @@ public sealed class PhysicalFileOperations : IFileOperations
     // The mounted file system a path is on (the longest mount point that contains it)
     private static DriveInfo? MountOf(string path)
     {
+        // The mount is chosen by path alone, and only that one is queried: asking every mount whether it is ready would
+        // wait on any network share that has stopped answering, even one Ingest never uses
         var full = PathGuard.Normalise(path);
-        return DriveInfo.GetDrives()
-            .Where(d => d.IsReady && PathGuard.IsSameOrUnder(full, d.RootDirectory.FullName))
-            .OrderByDescending(d => d.RootDirectory.FullName.Length)
+        var mount = DriveInfo.GetDrives()
+            .Where(d => PathGuard.IsSameOrUnder(full, d.Name))
+            .OrderByDescending(d => d.Name.Length)
             .FirstOrDefault();
+        return mount is { IsReady: true } ? mount : null;
     }
 }
