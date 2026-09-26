@@ -160,3 +160,17 @@ Samples (`sample` in the name and under ~300 MB) are clutter too.
 - Never overwrite; on collision, leave the release in place and report.
 - Never delete except the retention purge of the quarantine folder.
 - Every operation is logged with source and destination so it can be reversed.
+
+## Stored files
+
+`state.json` and `search-cache.json` are read and written through common's `JsonFile` (a temporary file in the same
+folder, flushed, then renamed over the old one). Each has its own policy for what a read finds:
+
+| Found | `state.json` (dashboard) | `search-cache.json` |
+|---|---|---|
+| Missing | Start empty. | Start empty. |
+| Damaged | Set aside as `state.json.corrupt-<time>` and logged; start empty. If it can't be moved, run from memory. | Start empty; the next save replaces it. |
+| Unreadable | Logged; run from memory until restart, never replacing the file. | Start empty. |
+
+A failed save keeps the dashboard in memory (logged once until the error changes); a failed cache save only loses the
+cache. `actions.jsonl` is JSON Lines, appended one line per move, and trimmed in place at start-up.

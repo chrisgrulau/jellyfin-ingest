@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **FAM-06: Shared JSON file store.** The state file and the search cache are read and written through common's
+  `JsonFile`, and each states its policy for a missing, damaged or unreadable file (see DESIGN); the policies are
+  unchanged. Saves are now flushed to disk before the old file is replaced.
+
 ## [0.8.0-alpha] - 2026-09-26
 
 ### Added

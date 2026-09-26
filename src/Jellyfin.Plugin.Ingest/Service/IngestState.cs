@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
+using Jellyfin.Plugin.Common.Storage;
 using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Planning;
 using Microsoft.Extensions.Logging;
@@ -673,36 +674,38 @@ public sealed partial class IngestStateStore
             return _state;
         }
 
+        // Policy: missing starts empty; damaged is set aside (never silently overwritten) and the dashboard starts
+        // empty; unreadable (permissions, an offline disk) runs from memory and never replaces what's there
         StateFile? loaded = null;
-        try
+        var read = JsonFile.Read<StateFile>(_path, JsonOptions);
+        switch (read.State)
         {
-            if (File.Exists(_path))
-            {
+            case JsonFileState.Loaded:
+                loaded = read.Value;
+                break;
+            case JsonFileState.Damaged:
+                // A damaged state file only loses dashboard history; the releases themselves are untouched. It is
+                // kept to one side (not silently overwritten) so it can be inspected.
+                var aside = _path + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
                 try
                 {
-                    loaded = JsonSerializer.Deserialize<StateFile>(File.ReadAllText(_path), JsonOptions);
-                }
-                catch (JsonException ex)
-                {
-                    // A damaged state file only loses dashboard history; the releases themselves are untouched. It is
-                    // kept to one side (not silently overwritten) so it can be inspected.
-                    var aside = _path + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
                     File.Move(_path, aside, overwrite: true);
                     if (_logger is not null)
                     {
-                        LogCorrupt(_logger, aside, ex);
+                        LogCorrupt(_logger, aside, read.Error!);
                     }
                 }
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Can't read it (permissions, offline disk): carry on in memory and never overwrite what's there
-            _memoryOnly = true;
-            if (_logger is not null)
-            {
-                LogUnreadable(_logger, _path, ex);
-            }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Couldn't move it: carry on in memory rather than overwrite it
+                    MemoryOnly(ex);
+                }
+
+                break;
+            case JsonFileState.Unreadable:
+                // Can't read it (permissions, offline disk): carry on in memory and never overwrite what's there
+                MemoryOnly(read.Error!);
+                break;
         }
 
         _state = loaded ?? new StateFile();
@@ -748,10 +751,7 @@ public sealed partial class IngestStateStore
 
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            var temp = _path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(state, JsonOptions));
-            File.Move(temp, _path, overwrite: true);
+            JsonFile.WriteAtomic(_path, state, JsonOptions);
             _lastSaveError = null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -765,6 +765,15 @@ public sealed partial class IngestStateStore
                     LogUnwritable(_logger, _path, ex);
                 }
             }
+        }
+    }
+
+    private void MemoryOnly(Exception ex)
+    {
+        _memoryOnly = true;
+        if (_logger is not null)
+        {
+            LogUnreadable(_logger, _path, ex);
         }
     }
 
