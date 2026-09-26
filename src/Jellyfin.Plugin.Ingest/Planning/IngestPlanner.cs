@@ -57,6 +57,17 @@ public sealed class IngestPlanner
     private readonly TimeProvider _clock;
     private readonly IExistingMedia? _existing;
     private readonly Func<string, bool> _isInsideLibrary;
+    private readonly Func<string, IEnumerable<string>> _filesIn;
+
+    /// <summary>The subtitle extensions moved with a replaced video (its sidecars).</summary>
+    public static readonly IReadOnlySet<string> SidecarExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx", ".sup", ".smi" };
+
+    /// <summary>
+    /// Gets a value indicating whether copies already on the server replace nothing (the default: such files wait for
+    /// review) or are replaced: when set (asked for in review), each existing copy inside a library, and its subtitle
+    /// files, move to quarantine first and the new file is filed in its place.
+    /// </summary>
+    public bool ReplaceExisting { get; init; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IngestPlanner"/> class.
@@ -67,9 +78,11 @@ public sealed class IngestPlanner
     /// <param name="clock">Clock for dating quarantine folders.</param>
     /// <param name="existing">What's already on the server, so new episodes join their show and nothing is filed twice (optional).</param>
     /// <param name="isInsideLibrary">Whether a folder is inside one of the server's library folders; an existing show's
+    /// <param name="filesIn">Lists the files in a folder (for the subtitle files of a copy being replaced).</param>
     /// folder must be, before anything is filed into it (optional; without it, existing shows are not joined).</param>
-    public IngestPlanner(MediaIdentifier identifier, Func<string, bool> exists, Func<string, string?> readText, TimeProvider clock, IExistingMedia? existing = null, Func<string, bool>? isInsideLibrary = null)
+    public IngestPlanner(MediaIdentifier identifier, Func<string, bool> exists, Func<string, string?> readText, TimeProvider clock, IExistingMedia? existing = null, Func<string, bool>? isInsideLibrary = null, Func<string, IEnumerable<string>>? filesIn = null)
     {
+        _filesIn = filesIn ?? (_ => []);
         _isInsideLibrary = isInsideLibrary ?? (_ => false);
         _existing = existing;
         _identifier = identifier ?? throw new ArgumentNullException(nameof(identifier));
@@ -108,7 +121,34 @@ public sealed class IngestPlanner
         var review = new List<ReviewItem>();
         var ops = new List<PlannedOperation>();
         var planned = new HashSet<string>(StringComparer.Ordinal);
-        bool Taken(string path) => _exists(path) || planned.Contains(path);
+        var replacing = new List<string>();
+        var replacingSet = new HashSet<string>(StringComparer.Ordinal);
+
+        // A path being replaced is free for the new files (its old file moves to quarantine first)
+        bool Taken(string path) => (_exists(path) && !replacingSet.Contains(path)) || planned.Contains(path);
+
+        // With "replace existing", a copy inside a library (and its subtitle files) is replaced; otherwise it holds the file back
+        bool Replace(IReadOnlyList<string> existing)
+        {
+            if (!ReplaceExisting || existing.Count == 0 || !existing.All(_isInsideLibrary))
+            {
+                return false;
+            }
+
+            foreach (var old in existing)
+            {
+                var stem = Path.GetFileNameWithoutExtension(old) + ".";
+                var sidecars = Path.GetDirectoryName(old) is { } dir
+                    ? _filesIn(dir).Where(f => Path.GetFileName(f).StartsWith(stem, StringComparison.Ordinal) && SidecarExtensions.Contains(Path.GetExtension(f)) && !string.Equals(f, old, StringComparison.Ordinal))
+                    : [];
+                foreach (var file in sidecars.Prepend(old).Where(replacingSet.Add))
+                {
+                    replacing.Add(file);
+                }
+            }
+
+            return true;
+        }
 
         var roles = files.ToDictionary(f => f.RelativePath, ReleaseClassifier.Classify, StringComparer.Ordinal);
         var videos = roles.Where(r => r.Value == FileRole.Video).Select(r => r.Key).ToList();
@@ -170,13 +210,17 @@ public sealed class IngestPlanner
 
                 // The same episode already on the server (any library, any name or container) or twice in this release
                 var keys = Enumerable.Range(ep.Episode, (ep.EndingEpisode ?? ep.Episode) - ep.Episode + 1).Select(n => (owner, ep.Season, n)).ToList();
-                var duplicate = keys.Select(k => _existing?.FindEpisode(ProviderIds(ep.Series), owner, ep.Season, k.n)).FirstOrDefault(d => d is not null);
-                if (duplicate is not null || keys.Any(plannedEpisodes.Contains))
+                var duplicates = keys.Select(k => _existing?.FindEpisode(ProviderIds(ep.Series), owner, ep.Season, k.n)).OfType<string>().Distinct(StringComparer.Ordinal).ToList();
+                var code = MediaNamer.EpisodeCode(ep.Season, ep.Episode, ep.EndingEpisode);
+                if (keys.Any(plannedEpisodes.Contains))
                 {
-                    var code = MediaNamer.EpisodeCode(ep.Season, ep.Episode, ep.EndingEpisode);
-                    review.Add(new ReviewItem(Abs(video), duplicate is not null
-                        ? $"{ep.Series.Title} {code} is already on the server: {duplicate}"
-                        : $"{ep.Series.Title} {code} appears more than once in this release.") { Candidates = result.Candidates });
+                    review.Add(new ReviewItem(Abs(video), $"{ep.Series.Title} {code} appears more than once in this release.") { Candidates = result.Candidates });
+                    continue;
+                }
+
+                if (duplicates.Count > 0 && !Replace(duplicates))
+                {
+                    review.Add(new ReviewItem(Abs(video), $"{ep.Series.Title} {code} is already on the server: {string.Join(", ", duplicates)}") { Candidates = result.Candidates, Existing = string.Join('\n', duplicates) });
                     continue;
                 }
 
@@ -196,9 +240,9 @@ public sealed class IngestPlanner
                 libraryRoot = target.Root;
                 destination = Path.Combine(target.Root, MediaNamer.MovieRelativePath(movie, ext));
                 var duplicate = _existing?.FindMovie(MovieIds(movie), movie.Edition, destination);
-                if (duplicate is not null)
+                if (duplicate is not null && !Replace([duplicate]))
                 {
-                    review.Add(new ReviewItem(Abs(video), $"{movie.Title}{(movie.Edition is null ? string.Empty : " (" + movie.Edition + ")")} is already on the server: {duplicate}") { Candidates = result.Candidates });
+                    review.Add(new ReviewItem(Abs(video), $"{movie.Title}{(movie.Edition is null ? string.Empty : " (" + movie.Edition + ")")} is already on the server: {duplicate}") { Candidates = result.Candidates, Existing = duplicate });
                     continue;
                 }
             }
@@ -310,7 +354,23 @@ public sealed class IngestPlanner
             ops.Add(new PlannedOperation(OperationKind.Quarantine, Abs(rel), destination));
         }
 
-        return new IngestPlan { ReleaseName = releaseName, Operations = ops, AllowedRoots = [.. owners, quarantine], RequiredFolders = [.. requiredFolders], Notes = notes };
+        // 5. copies being replaced go to quarantine first, so their names are free when the new files arrive
+        var replacements = new List<PlannedOperation>();
+        foreach (var old in replacing)
+        {
+            var name = Path.GetFileName(old);
+            var destination = Path.Combine(quarantine, "Replaced", name);
+            for (var n = 2; Taken(destination); n++)
+            {
+                destination = Path.Combine(quarantine, "Replaced", string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileNameWithoutExtension(name)} ({n}){Path.GetExtension(name)}"));
+            }
+
+            planned.Add(destination);
+            replacements.Add(new PlannedOperation(OperationKind.Quarantine, old, destination));
+        }
+
+        ops.InsertRange(0, replacements);
+        return new IngestPlan { ReleaseName = releaseName, Operations = ops, AllowedRoots = [.. owners, quarantine], RequiredFolders = [.. requiredFolders], Notes = notes, Replacing = replacing };
     }
 
     private static Dictionary<string, string> MovieIds(MovieIdentity movie)

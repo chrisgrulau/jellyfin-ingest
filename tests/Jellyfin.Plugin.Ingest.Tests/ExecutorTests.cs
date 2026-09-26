@@ -303,4 +303,57 @@ public class ExecutorTests
         Assert.Equal(1000, failing.Files["/drop/r/a.mkv"]);
         Assert.False(failing.Exists("/drop/q/2026-09-26/r/a.mkv"));
     }
+
+    // ING-30: only the exact files a plan replaces may be moved from outside the release, and only into quarantine
+    [Fact]
+    public void A_replaced_copy_moves_to_quarantine_before_the_new_file_and_comes_back_on_failure()
+    {
+        var fs = Seeded();
+        fs.Files["/lib/Films/A (2019)/A (2019).avi"] = 700;
+        fs.Dirs.Add("/lib/Films/A (2019)");
+        fs.Dirs.Add("/drop/q");
+        var plan = new IngestPlan
+        {
+            ReleaseName = "r",
+            Operations =
+            [
+                new(OperationKind.Quarantine, "/lib/Films/A (2019)/A (2019).avi", "/drop/q/Replaced/A (2019).avi"),
+                new(OperationKind.Video, "/drop/r/a.mkv", "/lib/Films/A (2019)/A (2019).mkv"),
+            ],
+            AllowedRoots = ["/lib/Films/A (2019)", "/drop/q"],
+            Replacing = ["/lib/Films/A (2019)/A (2019).avi"],
+        };
+
+        Assert.True(new PlanExecutor(fs, TimeProvider.System).Execute(plan, "/drop/r", "/log", dryRun: false, CancellationToken.None).Succeeded);
+        Assert.Equal(700, fs.Files["/drop/q/Replaced/A (2019).avi"]);
+        Assert.True(fs.Exists("/lib/Films/A (2019)/A (2019).mkv"));
+
+        var again = Seeded();
+        again.Files["/lib/Films/A (2019)/A (2019).avi"] = 700;
+        again.Dirs.Add("/lib/Films/A (2019)");
+        again.Dirs.Add("/drop/q");
+        again.FailMove = (s, _) => s == "/drop/r/a.mkv";
+        Assert.False(new PlanExecutor(again, TimeProvider.System).Execute(plan, "/drop/r", "/log", dryRun: false, CancellationToken.None).Succeeded);
+        Assert.Equal(700, again.Files["/lib/Films/A (2019)/A (2019).avi"]);
+    }
+
+    [Fact]
+    public void Nothing_else_outside_the_release_may_be_moved()
+    {
+        var fs = Seeded();
+        fs.Files["/lib/Films/B.avi"] = 700;
+        var plan = new IngestPlan
+        {
+            ReleaseName = "r",
+            Operations = [new(OperationKind.Quarantine, "/lib/Films/B.avi", "/drop/q/B.avi"), new(OperationKind.Video, "/drop/r/a.mkv", "/lib/Films/A.mkv")],
+            AllowedRoots = ["/lib/Films", "/drop/q"],
+            Replacing = ["/lib/Films/Other.avi"],
+        };
+
+        var report = new PlanExecutor(fs, TimeProvider.System).Execute(plan, "/drop/r", "/log", dryRun: false, CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("outside the release", report.Error, StringComparison.Ordinal);
+        Assert.Equal(700, fs.Files["/lib/Films/B.avi"]);
+    }
 }

@@ -659,14 +659,18 @@ public sealed partial class IngestService : IHostedService, IDisposable
             ReadSmallText,
             _clock,
             new JellyfinExistingMedia(_libraryManager),
-            p => PathGuard.IsUnderAny(p, sweep.LibraryFolders));
+            p => PathGuard.IsUnderAny(p, sweep.LibraryFolders),
+            FilesIn)
+        {
+            ReplaceExisting = previous?.Request == ReviewRequest.Replace,
+        };
         var plan = await planner.PlanAsync(watch.Path, release, files, targets, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
 
         Directory.CreateDirectory(dataFolder);
         if (!plan.IsReady)
         {
             var retryAt = ScheduleRetry(id, watch, release, plan.Retry);
-            var items = plan.Review.Select(r => new PendingReviewItem(Path.GetRelativePath(watch.Path, r.Source), r.Reason)).ToList();
+            var items = plan.Review.Select(r => new PendingReviewItem(Path.GetRelativePath(watch.Path, r.Source), r.Reason) { Existing = r.Existing }).ToList();
             LogNeedsReview(_logger, release, items.Count);
             foreach (var item in items)
             {
@@ -755,8 +759,10 @@ public sealed partial class IngestService : IHostedService, IDisposable
             Status = config.DryRun ? ActivityStatus.DryRun : ActivityStatus.Filed,
             Release = release,
             WatchFolder = watch.Path,
-            Summary = summaryLine + (plan.Notes.Count > 0 ? " The AI plugin decided part of this (see the details)." : string.Empty),
-            Details = [.. plan.Notes, .. Describe(watch.Path, report.Completed)],
+            Summary = summaryLine
+                + (plan.Replacing.Count > 0 ? string.Create(CultureInfo.InvariantCulture, $" Replaced the copies already on the server ({plan.Replacing.Count} file(s), now in quarantine).") : string.Empty)
+                + (plan.Notes.Count > 0 ? " The AI plugin decided part of this (see the details)." : string.Empty),
+            Details = [.. plan.Notes, .. plan.Replacing.Select(p => "Replaced (moved to quarantine): " + p), .. Describe(watch.Path, report.Completed)],
         });
 
         if (config.DryRun && previous?.Chosen is { } chosen)
@@ -777,6 +783,19 @@ public sealed partial class IngestService : IHostedService, IDisposable
             {
                 _libraryMonitor.ReportFileSystemChanged(folder);
             }
+        }
+    }
+
+    // The files in a folder (for the subtitle files of a copy being replaced); an unreadable folder has none
+    private static List<string> FilesIn(string folder)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(folder).ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
         }
     }
 

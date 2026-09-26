@@ -162,7 +162,8 @@ public sealed class PlanExecutor
         // Defence in depth: check every operation before touching anything, so a bad plan moves nothing at all
         foreach (var op in plan.Operations)
         {
-            if (!PathGuard.IsSameOrUnder(op.Source, releaseRoot))
+            var replaced = op.Kind == OperationKind.Quarantine && plan.Replacing.Contains(op.Source, StringComparer.Ordinal);
+            if (!replaced && !PathGuard.IsSameOrUnder(op.Source, releaseRoot))
             {
                 return new ExecutionReport { Failed = op, Error = $"Refused: {op.Source} is outside the release being filed." };
             }

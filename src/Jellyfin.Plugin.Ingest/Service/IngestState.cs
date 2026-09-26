@@ -55,6 +55,9 @@ public enum ReviewRequest
 
     /// <summary>Move the whole release to quarantine on the next sweep.</summary>
     Quarantine,
+
+    /// <summary>Plan the release again, replacing the copies already on the server (they go to quarantine).</summary>
+    Replace,
 }
 
 /// <summary>
@@ -131,7 +134,11 @@ public sealed record PendingReview
 /// </summary>
 /// <param name="Source">The file (path relative to the watch folder).</param>
 /// <param name="Reason">Why it can't be filed automatically.</param>
-public sealed record PendingReviewItem(string Source, string Reason);
+public sealed record PendingReviewItem(string Source, string Reason)
+{
+    /// <summary>Gets the copies already on the server that hold this file back (one per line), or empty.</summary>
+    public string Existing { get; init; } = string.Empty;
+}
 
 /// <summary>
 /// Everything the dashboard shows, persisted as JSON in the plugin's data folder so it survives restarts.
@@ -330,6 +337,15 @@ public sealed partial class IngestStateStore
     /// <returns><c>false</c> if there is no such review.</returns>
     public bool RequestQuarantine(string id)
         => Update(id, r => r with { Request = ReviewRequest.Quarantine, RequestVersion = r.RequestVersion + 1 });
+
+    /// <summary>
+    /// Asks for a release to be filed on the next sweep, replacing the copies already on the server (they go to
+    /// quarantine, so they can be restored until it is purged).
+    /// </summary>
+    /// <param name="id">Review id.</param>
+    /// <returns>Whether the review exists.</returns>
+    public bool RequestReplace(string id)
+        => Update(id, r => r with { Request = ReviewRequest.Replace, RequestVersion = r.RequestVersion + 1 });
 
     /// <summary>
     /// Clears a review's pending request, keeping everything else, unless a newer request has been made since.
