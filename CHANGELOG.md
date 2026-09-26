@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.8-alpha] - 2026-09-26
+
 ### Fixed
 
 - **ING-19:** a library whose folder is a whole drive or file-system root (`E:\`, `/`) can be filed into, and a watch
