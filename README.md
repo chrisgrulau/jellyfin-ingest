@@ -113,7 +113,7 @@ like, `gh attestation verify <zip> --repo chrisgrulau/jellyfin-ingest`), extract
 `<jellyfin data>/plugins/Ingest_<version>/`, and restart Jellyfin.
 
 After installing, open **Dashboard → Plugins → Ingest** and add at least one watch folder with a destination library;
-nothing is watched until you do. Dry run is on until you turn it off.
+nothing is watched until you do. A new watch folder starts in dry run until you turn it off for that folder.
 
 ## Configuration
 
@@ -125,7 +125,7 @@ nothing is watched until you do. Dry run is on until you turn it off.
 | Files are (per watch folder) | moved | **moved**, **hard-linked** (the release stays for seeding; no extra space; copied instead if the library is on another drive) or **copied** (the release stays; uses the space twice). With hard link or copy, clutter stays in the release too. |
 | Quarantine folder | `<watch folder>/.ingest-quarantine` | Keep it on the same filesystem as the watch folder so moves are instant. |
 | Quarantine retention | 30 days | Enforced by the *Purge Ingest quarantine* scheduled task. |
-| Dry run | On | Records what would happen (see *Recent activity*) without moving anything. Turn off once you are happy with the results. |
+| Dry run (per watch folder) | On for a new folder | Records what would happen (see *Recent activity*) without moving anything. Turn it off for a folder once you are happy with its results. Folders saved before 0.8 keep the old global setting. |
 | Settle time | 300 s | How long nothing in a release (files, sizes, write times) may change before it is processed. |
 | Refresh filed folders after ingest | On | Only the film or show folders filed into are refreshed, never whole libraries. |
 | Let the AI plugin settle close matches | On | Does nothing unless the Shoal AI plugin is installed and allows Ingest. |

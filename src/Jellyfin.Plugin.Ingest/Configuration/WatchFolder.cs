@@ -1,5 +1,8 @@
+using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 
 namespace Jellyfin.Plugin.Ingest.Configuration;
 
@@ -41,6 +44,39 @@ public class WatchFolder
     /// drive only; no extra space). Copy and hard link leave the release where it is, so a torrent client keeps seeding.
     /// </summary>
     public TransferMode Transfer { get; set; } = TransferMode.Move;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this folder only records what it would do, moving nothing (ING-32). The
+    /// settings page turns it on for a new folder. <c>null</c> in a configuration saved before dry run was per folder:
+    /// such a folder takes the old global setting (<see cref="PluginConfiguration.DryRun"/>) when the plugin loads.
+    /// </summary>
+    public bool? DryRun { get; set; }
+
+    /// <summary>
+    /// Whether this folder is in dry run: its own setting, or <paramref name="fallback"/> when it has none.
+    /// </summary>
+    /// <param name="fallback">The global setting (<see cref="PluginConfiguration.DryRun"/>).</param>
+    /// <returns><c>true</c> to move nothing.</returns>
+    public bool IsDryRun(bool fallback) => DryRun ?? fallback;
+
+    /// <summary>
+    /// Gives every folder saved without its own dry-run setting the old global one, so upgrading changes nothing.
+    /// </summary>
+    /// <param name="folders">The watch folders.</param>
+    /// <param name="globalDryRun">The global setting they had until now.</param>
+    /// <returns>Whether any folder changed (the configuration should be saved).</returns>
+    public static bool MigrateDryRun(IEnumerable<WatchFolder> folders, bool globalDryRun)
+    {
+        ArgumentNullException.ThrowIfNull(folders);
+        var changed = false;
+        foreach (var folder in folders.Where(f => f is not null && f.DryRun is null))
+        {
+            folder.DryRun = globalDryRun;
+            changed = true;
+        }
+
+        return changed;
+    }
 }
 
 /// <summary>

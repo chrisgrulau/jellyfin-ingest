@@ -155,7 +155,8 @@ Samples (`sample` in the name and under ~300 MB) are clutter too.
 
 ## Safety principles
 
-- Dry run is the default for a new watch folder.
+- Dry run is set per watch folder, and is on for a new one. A folder saved before it was per folder takes the old
+  global setting when the plugin loads, so upgrading changes nothing.
 - Never overwrite; on collision, leave the release in place and report.
 - Never delete except the retention purge of the quarantine folder.
 - Every operation is logged with source and destination so it can be reversed.

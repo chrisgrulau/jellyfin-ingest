@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **ING-32: Dry run per watch folder.** Each watch folder has its own **Dry run** tick box, next to how its files are
+  filed, and a new folder starts in dry run. Before, dry run was one setting for everything, so a folder added after
+  it was turned off went live straight away.
+  - Upgrading changes nothing: each saved folder takes the old global setting when the plugin loads.
+  - The banner says how many watch folders are in dry run.
+
 ## [0.7.0-alpha] - 2026-09-26
 
 ### Added

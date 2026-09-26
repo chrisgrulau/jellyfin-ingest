@@ -26,7 +26,9 @@ public class PluginConfiguration : BasePluginConfiguration
     public int QuarantineRetentionDays { get; set; } = 30;
 
     /// <summary>
-    /// Gets or sets a value indicating whether to only log planned actions without touching any files.
+    /// Gets or sets the dry-run setting for watch folders that have none of their own. Dry run is set per watch folder
+    /// (<see cref="WatchFolder.DryRun"/>, ING-32); this was the global setting before, and is only read to give folders
+    /// saved then their old value (when the plugin loads), or a folder an API client sent without one. Not on the page.
     /// </summary>
     public bool DryRun { get; set; } = true;
 

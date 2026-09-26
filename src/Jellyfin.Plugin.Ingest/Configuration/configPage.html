@@ -41,7 +41,7 @@
       #IngestConfigPage .ingest-more { background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; padding: .4em .5em; font: inherit; opacity: .8; }
       #IngestConfigPage .ingest-actions { display: flex; flex-wrap: wrap; gap: .5em; margin-top: .75em; }
       #IngestConfigPage .ingest-files { margin-top: .75em; }
-      #IngestConfigPage .wf-transfer { margin: .5em 0; }
+      #IngestConfigPage .wf-transfer { margin: .5em 0; display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1.5em; }
       #IngestConfigPage .wf-transfer select { padding: .3em .45em; background: rgba(128,128,128,.15); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; max-width: 100%; }
       #IngestConfigPage .ingest-files > summary { cursor: pointer; }
       #IngestConfigPage .ingest-files table { width: 100%; border-collapse: collapse; margin: .5em 0; }
@@ -96,8 +96,8 @@
           <strong>Ingest isn't set up yet.</strong> Add a watch folder and at least one destination library under <a href="#" id="GoToSetup" style="color:inherit">Watch folders</a>, then save. Nothing is watched until then.
         </div>
 
-        <div class="ingest-banner" id="DryRunBanner">
-          <strong>Dry run is on.</strong> Ingest records what it would do and moves nothing. Check <em>Recent activity</em>, then turn dry run off.
+        <div class="ingest-banner" id="DryRunBanner" hidden>
+          <strong id="DryRunBannerTitle">Dry run is on.</strong> Ingest records what it would do in these watch folders and moves nothing. Check <em>Recent activity</em>, then turn dry run off for the folder under <em>Watch folders</em> and save.
         </div>
 
         <div class="ingest-head">
@@ -116,7 +116,7 @@
 
         <form id="IngestConfigForm">
           <h3 class="sectionTitle" style="margin-top:2em" id="WatchFoldersHead">Watch folders</h3>
-          <p class="ingest-muted">Each release is filed by type into the watch folder's destination for that kind: shows into a Shows library, films into a Movies library, or both into a Mixed Movies and Shows library. A watch folder can have one destination per kind, so a mixed library must be its only destination. Media with no destination of its kind is left for review. To split films between two Movies libraries, use a watch folder for each.</p>
+          <p class="ingest-muted">A new watch folder starts in <strong>dry run</strong>: Ingest records what it would do (see <em>Recent activity</em>) and moves nothing until you untick it for that folder. Each release is filed by type into the watch folder's destination for that kind: shows into a Shows library, films into a Movies library, or both into a Mixed Movies and Shows library. A watch folder can have one destination per kind, so a mixed library must be its only destination. Media with no destination of its kind is left for review. To split films between two Movies libraries, use a watch folder for each.</p>
           <div id="WatchFolders"></div>
           <button is="emby-button" type="button" class="raised button-alt" id="AddWatchFolder"><span>Add watch folder</span></button>
 
@@ -135,12 +135,6 @@
             <label class="inputLabel inputLabelUnfocused" for="SettleSeconds">Wait until a release has stopped changing for (seconds)</label>
             <input id="SettleSeconds" name="SettleSeconds" type="number" min="5" is="emby-input" />
             <div class="fieldDescription">A release is processed once no file in it has been added, resized or written for this long. <strong>Download clients must not write straight into a watch folder:</strong> use their "incomplete" or temporary folder outside it (or an in-progress suffix such as <code>.part</code> or <code>.!qb</code>) and let them move finished downloads in. A download that stalls for longer than this can otherwise look finished.</div>
-          </div>
-          <div class="checkboxContainer checkboxContainer-withDescription">
-            <label class="emby-checkbox-label">
-              <input id="DryRun" name="DryRun" type="checkbox" is="emby-checkbox" />
-              <span>Dry run (record only, move nothing)</span>
-            </label>
           </div>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
@@ -257,7 +251,9 @@
         }
 
         function addRow(w) {
-          w = w || { Path: '', Destinations: [], Enabled: true };
+          // A new folder starts in dry run (ING-32); one saved before dry run was per folder shows the old global setting
+          w = w || { Path: '', Destinations: [], Enabled: true, DryRun: true };
+          var dry = w.DryRun == null ? config.DryRun !== false : !!w.DryRun;
           var n = rowCount++;
           var row = document.createElement('div');
           row.className = 'ingest-row';
@@ -270,11 +266,14 @@
             '<option value="Move"' + (!w.Transfer || w.Transfer === 'Move' ? ' selected' : '') + '>moved (Usenet, or downloads nothing else needs)</option>' +
             '<option value="HardLink"' + (w.Transfer === 'HardLink' ? ' selected' : '') + '>hard-linked (torrents keep seeding; no extra space, same drive)</option>' +
             '<option value="Copy"' + (w.Transfer === 'Copy' ? ' selected' : '') + '>copied (torrents keep seeding; uses the space twice)</option>' +
-            '</select></label></div>' +
+            '</select></label>' +
+            '<label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" id="wf-dry-' + n + '" class="wf-dry"' + (dry ? ' checked' : '') + ' /><span>Dry run (record only, move nothing)</span></label></div>' +
             '<div class="wf-dests"></div>' +
             '<button is="emby-button" type="button" class="raised button-alt wf-add-dest"><span>Add destination</span></button>' +
             '<p class="ingest-muted wf-hint"></p><p class="wf-error"></p>';
-          row.querySelector('.wf-remove').addEventListener('click', function () { row.remove(); });
+          row.querySelector('.wf-remove').addEventListener('click', function () { row.remove(); syncBanner(); });
+          row.querySelector('.wf-dry').addEventListener('change', syncBanner);
+          row.querySelector('.wf-on').addEventListener('change', syncBanner);
           row.querySelector('.wf-add-dest').addEventListener('click', function () { addDestination(row); });
           page.querySelector('#WatchFolders').appendChild(row);
           var dests = destinationsOf(w);
@@ -287,7 +286,11 @@
         }
 
         function syncBanner() {
-          page.querySelector('#DryRunBanner').hidden = !page.querySelector('#DryRun').checked;
+          var dry = Array.prototype.filter.call(page.querySelectorAll('.ingest-row'), function (row) {
+            return row.querySelector('.wf-dry').checked && row.querySelector('.wf-on').checked;
+          }).length;
+          page.querySelector('#DryRunBanner').hidden = !dry;
+          page.querySelector('#DryRunBannerTitle').textContent = dry === 1 ? 'Dry run is on for a watch folder.' : 'Dry run is on for ' + dry + ' watch folders.';
           page.querySelector('#SetupBanner').hidden = isSetUp(config);
         }
 
@@ -358,6 +361,12 @@
           return any ? any.ItemId : '';
         }
 
+        // Whether a watch folder is in dry run, as saved
+        function isDryRun(watchPath) {
+          var w = (config.WatchFolders || []).filter(function (x) { return x.Path === watchPath; })[0];
+          return !!w && (w.DryRun == null ? config.DryRun !== false : !!w.DryRun);
+        }
+
         function libraryFor(root) {
           var l = libraries.filter(function (x) { return (x.Locations || []).indexOf(root) >= 0; })[0];
           return l ? l.Name : root;
@@ -406,7 +415,7 @@
             }
             if (r.Chosen) {
               html += '<div class="ingest-chosen">Chosen: <strong>' + title(r.Chosen.Candidate) + '</strong> into <strong>' + esc(libraryFor(r.Chosen.Target.Root)) + '</strong> &nbsp;' + links(r.Chosen.Candidate.ProviderIds, r.Chosen.Candidate.IsSeries) +
-                (config.DryRun ? '<div class="ingest-muted">Dry run is on, so it has only been planned (see Recent activity). It will be filed once dry run is off.</div>' : '') + '</div>';
+                (isDryRun(r.WatchFolder) ? '<div class="ingest-muted">Dry run is on, so it has only been planned (see Recent activity). It will be filed once dry run is off.</div>' : '') + '</div>';
             }
             if (pending) {
               return html + '<p class="ingest-muted">' + (r.Request === 'Quarantine' ? 'Quarantining' : r.Request === 'Replace' ? 'Replacing what\'s on the server' : 'Planning again') + ' on the next sweep (within 30 seconds)…</p></div>';
@@ -627,7 +636,6 @@
             page.querySelector('#QuarantinePath').value = config.QuarantinePath || '';
             page.querySelector('#QuarantineRetentionDays').value = config.QuarantineRetentionDays;
             page.querySelector('#SettleSeconds').value = config.SettleSeconds;
-            page.querySelector('#DryRun').checked = config.DryRun;
             page.querySelector('#ScanLibraryAfterIngest').checked = config.ScanLibraryAfterIngest;
             page.querySelector('#UseAiTiebreak').checked = config.UseAiTiebreak !== false;
             page.querySelector('#UseTranscripts').checked = config.UseTranscripts !== false;
@@ -640,8 +648,7 @@
           });
         });
 
-        page.querySelector('#DryRun').addEventListener('change', syncBanner);
-        page.querySelector('#AddWatchFolder').addEventListener('click', function () { addRow(); });
+        page.querySelector('#AddWatchFolder').addEventListener('click', function () { addRow(); syncBanner(); });
 
         page.querySelector('#GoToSetup').addEventListener('click', function (e) {
           e.preventDefault();
@@ -667,7 +674,7 @@
             row.querySelector('.wf-error').textContent = error;
             row.classList.toggle('invalid', !!error);
             if (error) { ok = false; }
-            return { Path: path, Destinations: dests, TargetLibraryId: '', TargetPath: '', Enabled: row.querySelector('.wf-on').checked, Transfer: row.querySelector('.wf-mode').value };
+            return { Path: path, Destinations: dests, TargetLibraryId: '', TargetPath: '', Enabled: row.querySelector('.wf-on').checked, Transfer: row.querySelector('.wf-mode').value, DryRun: row.querySelector('.wf-dry').checked };
           }).filter(Boolean);
           if (!ok) { return null; }
           if (!folders.length) { addRow(); return null; }
@@ -730,7 +737,6 @@
             current.QuarantinePath = quarantinePath;
             current.QuarantineRetentionDays = Math.max(1, parseInt(page.querySelector('#QuarantineRetentionDays').value, 10) || 30);
             current.SettleSeconds = Math.max(5, parseInt(page.querySelector('#SettleSeconds').value, 10) || 300);
-            current.DryRun = page.querySelector('#DryRun').checked;
             current.ScanLibraryAfterIngest = page.querySelector('#ScanLibraryAfterIngest').checked;
             current.UseAiTiebreak = page.querySelector('#UseAiTiebreak').checked;
             current.UseTranscripts = page.querySelector('#UseTranscripts').checked;
