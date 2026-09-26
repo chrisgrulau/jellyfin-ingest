@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Ingest"
 guid: "88d6ced9-052e-45f6-b21d-fc4eefa7998d"
-version: "0.9.0.0"
+version: "0.10.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -15,5 +15,5 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Ingest.dll"
 changelog: >
-  0.9.0-alpha: state and search cache saved through the shared JSON store (flushed before replacing); the service is
-  split into folder policy, start-up maintenance, quarantine and activity reporting, with no change in behaviour.
+  0.10.0-alpha: Replace existing copies files the new copy where the replaced copy lives (same library and folder)
+  unless another library is chosen in review; the review card says where; an empty folder left behind is removed.

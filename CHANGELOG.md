@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0-alpha] - 2026-09-27
+
 ### Fixed
 
 - **Replace files the new copy where the replaced copy lives.** Replacing a copy kept in a second Movies (or Shows)
