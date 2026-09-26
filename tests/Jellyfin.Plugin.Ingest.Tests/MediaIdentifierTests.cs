@@ -34,7 +34,7 @@ public class MediaIdentifierTests
         public List<string> Queries { get; } = [];
 
         private static bool Matches(MetadataCandidate c, string name, int? year)
-            => TitleMatcher.Similarity(name, c.Name) >= 0.6 && (year is null || c.Year == year);
+            => c.AlternativeNames.Prepend(c.Name).Any(n => TitleMatcher.Similarity(name, n) >= 0.6) && (year is null || c.Year == year);
 
         public Task<IReadOnlyList<MetadataCandidate>> SearchSeriesAsync(string name, int? year, CancellationToken cancellationToken)
         {
@@ -296,5 +296,32 @@ public class MediaIdentifierTests
         await Settle(weak, "Harbour.Lights.2024.1080p.mkv", tiebreaker);
 
         Assert.Equal(0, tiebreaker.Calls);
+    }
+
+    // ING-26: on a server whose metadata isn't English, English release names match the English name
+    [Fact]
+    public async Task An_english_release_name_finds_a_title_listed_in_the_servers_language()
+    {
+        var lookup = new FakeLookup();
+        lookup.Series.Add(C("Haus aus Glas", 2017, "71446", "327417") with { AlternativeNames = ["Harbour of Glass"] });
+        lookup.Episodes[(1, 1)] = "Folge 1";
+
+        var r = await Identify(lookup, "Harbour.of.Glass.S01E01.1080p.mkv");
+
+        Assert.Equal(IdentificationStatus.Identified, r.Status);
+        Assert.Equal("Haus aus Glas", r.Episode!.Series.Title);
+    }
+
+    [Fact]
+    public void English_names_join_the_matching_hits_and_english_only_hits_follow()
+    {
+        IReadOnlyList<MetadataCandidate> local = [C("Haus aus Glas", 2017, "1"), C("Anderes", 2001, "2")];
+        IReadOnlyList<MetadataCandidate> english = [C("Harbour of Glass", 2017, "1"), C("Only In English", 2019, "3")];
+
+        var merged = JellyfinMetadataLookup.Merge(local, english);
+
+        Assert.Equal(["Haus aus Glas", "Anderes", "Only In English"], merged.Select(m => m.Name));
+        Assert.Equal(["Harbour of Glass"], merged[0].AlternativeNames);
+        Assert.Empty(merged[1].AlternativeNames);
     }
 }

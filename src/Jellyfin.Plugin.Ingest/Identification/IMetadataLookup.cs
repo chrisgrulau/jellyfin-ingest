@@ -26,6 +26,12 @@ public sealed record MetadataCandidate
 
     /// <summary>Gets the position in the provider's own result list (0 = its best match), if known.</summary>
     public int? ProviderRank { get; init; }
+
+    /// <summary>
+    /// Gets other names for the same title, such as the English one when the server's metadata language isn't English.
+    /// Release names are scored against each; folders are named after <see cref="Name"/>.
+    /// </summary>
+    public IReadOnlyList<string> AlternativeNames { get; init; } = [];
 }
 
 /// <summary>

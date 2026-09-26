@@ -283,7 +283,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var libraries = Libraries(_libraryManager.GetVirtualFolders());
 
         // One search cache for the service's life (kept on disk), and one library index per sweep
-        _lookup ??= new CachingMetadataLookup(new JellyfinMetadataLookup(_providerManager), _clock, Path.Combine(plugin.DataFolderPath, "search-cache.json"));
+        _lookup ??= new CachingMetadataLookup(new JellyfinMetadataLookup(_providerManager, () => (_configuration as MediaBrowser.Controller.Configuration.IServerConfigurationManager)?.Configuration.PreferredMetadataLanguage), _clock, Path.Combine(plugin.DataFolderPath, "search-cache.json"));
         _lookup.BeginSweep();
         var sweep = new Sweep(
             new MediaIdentifier(_lookup, new JellyfinLibraryIndex(_libraryManager, []), config.UseAiTiebreak ? new AiTiebreaker() : null, config.UseTranscripts ? _transcriber : null),

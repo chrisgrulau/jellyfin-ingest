@@ -132,7 +132,7 @@ public class IngestController : ControllerBase
             return BadRequest("A title is required.");
         }
 
-        var lookup = new JellyfinMetadataLookup(_providerManager);
+        var lookup = new JellyfinMetadataLookup(_providerManager, () => (_configuration as MediaBrowser.Controller.Configuration.IServerConfigurationManager)?.Configuration.PreferredMetadataLanguage);
         var hits = series
             ? await lookup.SearchSeriesAsync(name.Trim(), year, cancellationToken).ConfigureAwait(false)
             : await lookup.SearchMoviesAsync(name.Trim(), year, cancellationToken).ConfigureAwait(false);
