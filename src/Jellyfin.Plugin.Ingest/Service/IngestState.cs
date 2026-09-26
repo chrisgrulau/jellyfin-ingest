@@ -123,10 +123,32 @@ public sealed record PendingReview
     public ReviewRequest Request { get; init; }
 
     /// <summary>
+    /// Gets the decisions made file by file (by file, relative to the watch folder), kept when the release is planned
+    /// again; files without one wait as before.
+    /// </summary>
+    public IReadOnlyDictionary<string, FileDecision> FileDecisions { get; init; } = new Dictionary<string, FileDecision>(StringComparer.Ordinal);
+
+    /// <summary>
     /// Gets a counter that goes up with every request, so planning (which takes a while) only clears the request it
     /// started from and never one made while it was running.
     /// </summary>
     public int RequestVersion { get; init; }
+}
+
+/// <summary>
+/// What a person decided for one file of a release waiting for review.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<FileDecision>))]
+public enum FileDecision
+{
+    /// <summary>No decision (decide later).</summary>
+    None = 0,
+
+    /// <summary>Replace the copies already on the server (they go to quarantine) with this file.</summary>
+    Replace,
+
+    /// <summary>Don't file this file: move it (and its subtitles) to quarantine, and file the rest.</summary>
+    Quarantine,
 }
 
 /// <summary>
@@ -282,6 +304,7 @@ public sealed partial class IngestStateStore
             {
                 Candidates = candidates,
                 Chosen = existing?.Chosen,
+                FileDecisions = existing?.FileDecisions ?? new Dictionary<string, FileDecision>(StringComparer.Ordinal),
                 SearchResults = existing?.SearchResults ?? [],
                 Request = newer ? existing!.Request : ReviewRequest.None,
                 RequestVersion = existing?.RequestVersion ?? 0,
@@ -319,7 +342,44 @@ public sealed partial class IngestStateStore
     /// <param name="chosen">The chosen title and library, or <c>null</c> to keep searching (clears an earlier choice).</param>
     /// <returns><c>false</c> if there is no such review.</returns>
     public bool RequestRetry(string id, ChosenMatch? chosen)
-        => Update(id, r => r with { Chosen = chosen, Request = ReviewRequest.Retry, RequestVersion = r.RequestVersion + 1 });
+        => Update(id, r => r with
+        {
+            Chosen = chosen,
+
+            // "Clear choice and retry" starts over, file decisions included; choosing a title keeps them
+            FileDecisions = chosen is null ? new Dictionary<string, FileDecision>(StringComparer.Ordinal) : r.FileDecisions,
+            Request = ReviewRequest.Retry,
+            RequestVersion = r.RequestVersion + 1,
+        });
+
+    /// <summary>
+    /// Records decisions made file by file and plans the release again on the next sweep. A file given no decision
+    /// ("decide later") loses any earlier one.
+    /// </summary>
+    /// <param name="id">Review id.</param>
+    /// <param name="decisions">Decisions by file (relative to the watch folder); <c>null</c> clears that file's.</param>
+    /// <returns>Whether the review exists.</returns>
+    public bool RequestFiles(string id, IReadOnlyDictionary<string, FileDecision?> decisions)
+    {
+        ArgumentNullException.ThrowIfNull(decisions);
+        return Update(id, r =>
+        {
+            var merged = new Dictionary<string, FileDecision>(r.FileDecisions, StringComparer.Ordinal);
+            foreach (var (source, decision) in decisions)
+            {
+                if (decision is { } d)
+                {
+                    merged[source] = d;
+                }
+                else
+                {
+                    merged.Remove(source);
+                }
+            }
+
+            return r with { FileDecisions = merged, Request = ReviewRequest.Retry, RequestVersion = r.RequestVersion + 1 };
+        });
+    }
 
     /// <summary>
     /// Stores the results of a title search made for a review, replacing any earlier ones.

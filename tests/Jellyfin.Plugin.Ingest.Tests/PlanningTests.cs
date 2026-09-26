@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Planning;
+using Jellyfin.Plugin.Ingest.Service;
 using Xunit;
 
 namespace Jellyfin.Plugin.Ingest.Tests;
@@ -633,5 +634,70 @@ public class PlanningTests
         Assert.False(plan.IsReady);
         Assert.Empty(plan.Replacing);
         Assert.Contains("already on the server", Assert.Single(plan.Review).Reason, StringComparison.Ordinal);
+    }
+
+    // Decisions made file by file in review
+    private static IngestPlanner Deciding(IExistingMedia existing, Dictionary<string, FileDecision> decisions, Func<string, bool>? exists = null) =>
+        new IngestPlanner(
+            new MediaIdentifier(new Lookup()),
+            p => !Path.HasExtension(p) || (exists?.Invoke(p) ?? false),
+            _ => null,
+            new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)),
+            existing,
+            p => PathGuard.IsUnder(p, "/lib"))
+        {
+            FileDecisions = decisions,
+        };
+
+    [Fact]
+    public async Task A_file_chosen_for_quarantine_goes_there_with_its_subtitles_and_the_rest_is_filed()
+    {
+        var existing = new Existing("/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]");
+        existing.Episodes[(1, 4)] = OldSeason + "/Lantern S01E04 - Glass Harbour.avi";
+        var decisions = new Dictionary<string, FileDecision> { ["a/Lantern.S01E04.1080p.mkv"] = FileDecision.Quarantine };
+
+        var plan = await Deciding(existing, decisions).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.1080p.mkv"), F("a/Lantern.S01E04.1080p.en.srt", 40_000), F("a/Lantern.S01E05.1080p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.IsReady, string.Join("; ", plan.Review.Select(r => r.Reason)));
+        Assert.False(plan.WholeReleaseQuarantine);
+        Assert.Equal([Path.Combine(Watch, "a/Lantern.S01E04.1080p.mkv")], plan.Skipped);
+        Assert.Contains(plan.Operations, o => o.Kind == OperationKind.Quarantine && o.Source.EndsWith("S01E04.1080p.mkv", StringComparison.Ordinal));
+        Assert.Contains(plan.Operations, o => o.Kind == OperationKind.Quarantine && o.Source.EndsWith(".en.srt", StringComparison.Ordinal));
+        Assert.Contains(plan.Operations, o => o.Kind == OperationKind.Video && o.Source.EndsWith("S01E05.1080p.mkv", StringComparison.Ordinal));
+        Assert.Empty(plan.Replacing);
+    }
+
+    [Fact]
+    public async Task Replace_can_be_chosen_for_one_file_while_another_still_waits()
+    {
+        var existing = new Existing("/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]");
+        existing.Episodes[(1, 4)] = OldSeason + "/Lantern S01E04.avi";
+        existing.Episodes[(1, 5)] = OldSeason + "/Lantern S01E05.avi";
+        var decisions = new Dictionary<string, FileDecision> { ["a/Lantern.S01E04.1080p.mkv"] = FileDecision.Replace };
+
+        var planner = Deciding(existing, decisions);
+        var waiting = await planner.PlanAsync(Watch, "a", [F("a/Lantern.S01E04.1080p.mkv"), F("a/Lantern.S01E05.1080p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.False(waiting.IsReady);
+        Assert.EndsWith("Lantern.S01E05.1080p.mkv", Assert.Single(waiting.Review).Source, StringComparison.Ordinal);
+
+        decisions["a/Lantern.S01E05.1080p.mkv"] = FileDecision.Quarantine;
+        var ready = await planner.PlanAsync(Watch, "a", [F("a/Lantern.S01E04.1080p.mkv"), F("a/Lantern.S01E05.1080p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.True(ready.IsReady);
+        Assert.Equal([OldSeason + "/Lantern S01E04.avi"], ready.Replacing);
+        Assert.Single(ready.Skipped);
+    }
+
+    [Fact]
+    public async Task Choosing_quarantine_for_every_video_quarantines_the_release()
+    {
+        var decisions = new Dictionary<string, FileDecision> { ["a/Lantern.S01E04.mkv"] = FileDecision.Quarantine, ["a/Lantern.S01E05.mkv"] = FileDecision.Quarantine };
+
+        var plan = await Deciding(new Existing(), decisions).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.mkv"), F("a/Lantern.S01E05.mkv"), F("a/readme.txt", 100)], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.WholeReleaseQuarantine);
+        Assert.True(plan.IsReady);
+        Assert.All(plan.Operations, o => Assert.Equal(OperationKind.Quarantine, o.Kind));
     }
 }

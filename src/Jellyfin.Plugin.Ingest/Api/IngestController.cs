@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -282,6 +283,75 @@ public class IngestController : ControllerBase
     }
 
     /// <summary>
+    /// Records decisions made file by file and plans the release again on the next sweep: replace a file's copies on
+    /// the server, quarantine a file (and its subtitles) instead of filing it, or decide later. The rest of the release
+    /// is filed as usual once nothing is left undecided.
+    /// </summary>
+    /// <param name="id">Review id.</param>
+    /// <param name="request">The decisions, for files of this review (a replace repeats the copies the page showed).</param>
+    /// <returns>No content.</returns>
+    [HttpPost("Reviews/{id}/Files")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult Files([FromRoute] string id, [FromBody, Required] FilesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var review = _state.GetReview(id);
+        if (review is null)
+        {
+            return NotFound();
+        }
+
+        var decisions = new Dictionary<string, FileDecision?>(StringComparer.Ordinal);
+        foreach (var choice in request.Decisions ?? [])
+        {
+            var item = review.Items.FirstOrDefault(i => string.Equals(i.Source, choice.Source, StringComparison.Ordinal));
+            if (item is null)
+            {
+                return BadRequest("That file isn't waiting in this review.");
+            }
+
+            switch (choice.Action)
+            {
+                case "replace":
+                    if (item.Existing.Length == 0)
+                    {
+                        return BadRequest("Only a file that is already on the server can replace what's there.");
+                    }
+
+                    if (!string.Equals(item.Existing, choice.Existing, StringComparison.Ordinal))
+                    {
+                        return Conflict("What's on the server changed since the page was drawn; look again before replacing.");
+                    }
+
+                    decisions[item.Source] = FileDecision.Replace;
+                    break;
+                case "quarantine":
+                    decisions[item.Source] = FileDecision.Quarantine;
+                    break;
+                case "later":
+                    decisions[item.Source] = null;
+                    break;
+                default:
+                    return BadRequest("Unknown choice.");
+            }
+        }
+
+        if (!_state.RequestFiles(id, decisions))
+        {
+            return NotFound();
+        }
+
+        var replace = decisions.Values.Count(d => d == FileDecision.Replace);
+        var quarantine = decisions.Values.Count(d => d == FileDecision.Quarantine);
+        RecordDecision(review, string.Create(CultureInfo.InvariantCulture, $"Chose file by file: {replace} to replace what's on the server, {quarantine} to quarantine."));
+        return NoContent();
+    }
+
+    /// <summary>
     /// The copies holding a review back, as the page sends them back: every item's, in order, one per line.
     /// </summary>
     /// <param name="review">The review.</param>
@@ -343,5 +413,29 @@ public sealed record FolderCheckRequest
 public sealed record ReplaceRequest
 {
     /// <summary>Gets the copies the page showed, one per line (every review item's, in order).</summary>
+    public string? Existing { get; init; }
+}
+
+/// <summary>
+/// Body of <see cref="IngestController.Files"/>.
+/// </summary>
+public sealed record FilesRequest
+{
+    /// <summary>Gets the decisions.</summary>
+    public IReadOnlyList<FileChoice>? Decisions { get; init; }
+}
+
+/// <summary>
+/// One file's decision.
+/// </summary>
+public sealed record FileChoice
+{
+    /// <summary>Gets the file, as the review lists it.</summary>
+    public string? Source { get; init; }
+
+    /// <summary>Gets the choice: <c>replace</c>, <c>quarantine</c> or <c>later</c>.</summary>
+    public string? Action { get; init; }
+
+    /// <summary>Gets the copies on the server the page showed for this file (for <c>replace</c>).</summary>
     public string? Existing { get; init; }
 }

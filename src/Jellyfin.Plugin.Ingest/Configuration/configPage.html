@@ -40,6 +40,11 @@
       #IngestConfigPage .ingest-tag.top { background: rgba(82,181,75,.28); }
       #IngestConfigPage .ingest-more { background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; padding: .4em .5em; font: inherit; opacity: .8; }
       #IngestConfigPage .ingest-actions { display: flex; flex-wrap: wrap; gap: .5em; margin-top: .75em; }
+      #IngestConfigPage .ingest-files { margin-top: .75em; }
+      #IngestConfigPage .ingest-files > summary { cursor: pointer; }
+      #IngestConfigPage .ingest-files table { width: 100%; border-collapse: collapse; margin: .5em 0; }
+      #IngestConfigPage .ingest-files td { padding: .3em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; word-break: break-word; }
+      #IngestConfigPage .ingest-files select { padding: .3em .4em; background: rgba(128,128,128,.15); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
       #IngestConfigPage .ingest-actions .emby-button { margin: 0; }
       #IngestConfigPage .ingest-chosen { padding: .5em .75em; border-radius: 4px; background: rgba(0,164,220,.15); border-left: 3px solid rgba(0,164,220,.7); margin: .5em 0; }
       #IngestConfigPage .ingest-search summary { cursor: pointer; margin-top: .75em; opacity: .85; }
@@ -279,6 +284,24 @@
         var filter = 'All';
         var confirmQuarantine = {};
         var confirmReplace = {};
+        // File-by-file choices for a release with several files waiting: kept here until applied, so a refresh doesn't lose them
+        var fileChoices = {}, filesOpen = {};
+        var decisionNames = { Replace: 'replace', Quarantine: 'quarantine' };
+        function fileChoice(r, i) {
+          var mine = fileChoices[r.Id] && fileChoices[r.Id][i.Source];
+          return mine || decisionNames[(r.FileDecisions || {})[i.Source]] || 'later';
+        }
+        function perFile(r) {
+          var items = r.Items || [];
+          if (items.length < 2) { return ''; }
+          return '<details class="ingest-files"' + (filesOpen[r.Id] ? ' open' : '') + '><summary>Choose file by file</summary><table>' + items.map(function (i) {
+            var c = fileChoice(r, i);
+            var opt = function (v, t) { return '<option value="' + v + '"' + (c === v ? ' selected' : '') + '>' + t + '</option>'; };
+            return '<tr><td>' + esc(i.Source.split(/[\\/]/).pop()) + '<div class="ingest-muted">' + esc(i.Reason) + '</div></td><td><select class="ingest-file-choice" data-source="' + esc(i.Source) + '">' +
+              opt('later', 'Decide later') + (i.Existing ? opt('replace', 'Replace existing') : '') + opt('quarantine', 'Quarantine this file') + '</select></td></tr>';
+          }).join('') + '</table><button is="emby-button" type="button" class="raised button-alt ingest-apply-files"><span>Apply these choices</span></button>' +
+            '<div class="ingest-muted">Files left as "Decide later" keep the release waiting; the others are handled and the rest of the release is filed.</div></details>';
+        }
 
         // A release held back only by copies already on the server can replace them (they go to quarantine)
         function canReplace(r) { return (r.Items || []).length > 0 && r.Items.every(function (i) { return i.Existing; }); }
@@ -385,7 +408,7 @@
               '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>' + (r.Chosen ? 'Clear choice and retry' : 'Retry') + '</span></button>' +
               (canReplace(r) ? '<button is="emby-button" type="button" class="raised button-submit ingest-replace"><span>' + (confirmReplace[r.Id] ? 'Confirm: replace ' + existingCount(r) + ' file' + (existingCount(r) === 1 ? '' : 's') + ' on the server' : 'Replace existing copies') + '</span></button>' : '') +
               '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>' +
-              '</div>';
+              '</div>' + perFile(r);
             return html + '</div>';
           }).join('');
         }
@@ -514,6 +537,12 @@
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose', { List: list === 'search' ? 'search' : 'suggested', Index: index, LibraryId: lib, Key: candidateKey(shown[index].Candidate) });
           } else if (btn.classList.contains('ingest-retry')) {
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Retry');
+          } else if (btn.classList.contains('ingest-apply-files')) {
+            var rf = reviewById(id);
+            if (!rf) { return; }
+            var decisions = rf.Items.map(function (i) { return { Source: i.Source, Action: fileChoice(rf, i), Existing: i.Existing }; });
+            delete fileChoices[id];
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Files', { Decisions: decisions });
           } else if (btn.classList.contains('ingest-replace')) {
             var rr = reviewById(id);
             if (!rr) { return; }
@@ -526,6 +555,20 @@
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Quarantine');
           }
         });
+
+        page.querySelector('#Reviews').addEventListener('change', function (e) {
+          var sel = e.target.closest('.ingest-file-choice');
+          var card = e.target.closest('.ingest-card');
+          if (!sel || !card) { return; }
+          var id = card.getAttribute('data-id');
+          fileChoices[id] = fileChoices[id] || {};
+          fileChoices[id][sel.getAttribute('data-source')] = sel.value;
+        });
+
+        page.querySelector('#Reviews').addEventListener('toggle', function (e) {
+          var card = e.target.closest && e.target.closest('.ingest-card');
+          if (card && e.target.classList.contains('ingest-files')) { filesOpen[card.getAttribute('data-id')] = e.target.open; }
+        }, true);
 
         page.querySelector('#Reviews').addEventListener('submit', function (e) {
           e.preventDefault();

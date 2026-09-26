@@ -663,6 +663,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
             FilesIn)
         {
             ReplaceExisting = previous?.Request == ReviewRequest.Replace,
+            FileDecisions = previous?.FileDecisions ?? new Dictionary<string, FileDecision>(StringComparer.Ordinal),
         };
         var plan = await planner.PlanAsync(watch.Path, release, files, targets, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
 
@@ -761,8 +762,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
             WatchFolder = watch.Path,
             Summary = summaryLine
                 + (plan.Replacing.Count > 0 ? string.Create(CultureInfo.InvariantCulture, $" Replaced the copies already on the server ({plan.Replacing.Count} file(s), now in quarantine).") : string.Empty)
+                + (plan.Skipped.Count > 0 ? string.Create(CultureInfo.InvariantCulture, $" {plan.Skipped.Count} file(s) quarantined as chosen, not filed.") : string.Empty)
                 + (plan.Notes.Count > 0 ? " The AI plugin decided part of this (see the details)." : string.Empty),
-            Details = [.. plan.Notes, .. plan.Replacing.Select(p => "Replaced (moved to quarantine): " + p), .. Describe(watch.Path, report.Completed)],
+            Details = [.. plan.Notes, .. plan.Replacing.Select(p => "Replaced (moved to quarantine): " + p), .. plan.Skipped.Select(p => "Quarantined as chosen: " + Path.GetRelativePath(watch.Path, p)), .. Describe(watch.Path, report.Completed)],
         });
 
         if (config.DryRun && previous?.Chosen is { } chosen)
