@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0-alpha] - 2026-09-26
+
 ### Added
 
 - **ING-36: Waiting**, on the plugin page and in the Status API. Before, nothing showed while a release settled (five
