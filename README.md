@@ -82,8 +82,9 @@ write times, but a download that stalls for longer than the settle time can stil
 
 - **Sonarr and Radarr** import finished downloads themselves: don't point Ingest at the folders they import from, or
   both will fight over the same files. Ingest is for downloads nothing else files.
-- **Seeding torrents:** Ingest moves files, so a client that seeds from the watch folder loses them. Let the client
-  move finished downloads into the watch folder (a copy stays where it seeds) or seed from elsewhere.
+- **Seeding torrents:** set the watch folder to **hard-linked** (same drive; no extra space) or **copied**. The release
+  then stays where the client seeds it, and Ingest remembers what it filed so it isn't filed again. **Moved** (the
+  default) suits Usenet and anything nothing else needs afterwards.
 - **Docker:** mount the downloads and the media under one parent folder (for example `/data/downloads` and
   `/data/media`), so moves are instant renames rather than copies across file systems.
 - **Windows service:** use network paths (`\\nas\share\incoming`) rather than mapped drive letters, which services
@@ -121,6 +122,7 @@ nothing is watched until you do. Dry run is on until you turn it off.
 | Setting | Default | Notes |
 |---|---|---|
 | Watch folders | — | Required. One or more folders, each with one or more destination libraries (one per kind). Use the path as the Jellyfin server sees it: the container path in Docker, and on a Windows service a network path (`\\nas\share\incoming`) rather than a mapped drive letter, which services can't see. |
+| Files are (per watch folder) | moved | **moved**, **hard-linked** (the release stays for seeding; no extra space; copied instead if the library is on another drive) or **copied** (the release stays; uses the space twice). With hard link or copy, clutter stays in the release too. |
 | Quarantine folder | `<watch folder>/.ingest-quarantine` | Keep it on the same filesystem as the watch folder so moves are instant. |
 | Quarantine retention | 30 days | Enforced by the *Purge Ingest quarantine* scheduled task. |
 | Dry run | On | Records what would happen (see *Recent activity*) without moving anything. Turn off once you are happy with the results. |

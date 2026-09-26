@@ -163,6 +163,14 @@ public sealed record PendingReviewItem(string Source, string Reason)
 }
 
 /// <summary>
+/// A release filed by copy or hard link, which stays in its watch folder.
+/// </summary>
+/// <param name="WatchFolder">The watch folder.</param>
+/// <param name="Release">The release (folder or file name in it).</param>
+/// <param name="Signature">Its files' names and sizes, so a changed release is filed again.</param>
+public sealed record CopiedRelease(string WatchFolder, string Release, string Signature);
+
+/// <summary>
 /// Everything the dashboard shows, persisted as JSON in the plugin's data folder so it survives restarts.
 /// </summary>
 public sealed record IngestState
@@ -448,6 +456,67 @@ public sealed partial class IngestStateStore
     }
 
     /// <summary>
+    /// Whether a release was already filed by copy or hard link and hasn't changed since.
+    /// </summary>
+    /// <param name="watchFolder">The watch folder.</param>
+    /// <param name="release">The release.</param>
+    /// <param name="signature">Its files now (see <see cref="CopySignature"/>).</param>
+    /// <returns>Whether it was already filed.</returns>
+    public bool WasCopied(string watchFolder, string release, string signature)
+    {
+        lock (_lock)
+        {
+            return Load().Copied.Any(c => c.WatchFolder == watchFolder && c.Release == release && c.Signature == signature);
+        }
+    }
+
+    /// <summary>
+    /// Remembers a release filed by copy or hard link.
+    /// </summary>
+    /// <param name="copied">The release.</param>
+    public void MarkCopied(CopiedRelease copied)
+    {
+        ArgumentNullException.ThrowIfNull(copied);
+        lock (_lock)
+        {
+            var s = Load();
+            s.Copied.RemoveAll(c => c.WatchFolder == copied.WatchFolder && c.Release == copied.Release);
+            s.Copied.Add(copied);
+            Save(s);
+        }
+    }
+
+    /// <summary>
+    /// Forgets copied releases that have left their watch folder.
+    /// </summary>
+    /// <param name="watchFolder">The watch folder.</param>
+    /// <param name="present">The releases in it now.</param>
+    public void PruneCopied(string watchFolder, IReadOnlyCollection<string> present)
+    {
+        ArgumentNullException.ThrowIfNull(present);
+        lock (_lock)
+        {
+            var s = Load();
+            if (s.Copied.RemoveAll(c => c.WatchFolder == watchFolder && !present.Contains(c.Release)) > 0)
+            {
+                Save(s);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A release's signature: its files' names and sizes.
+    /// </summary>
+    /// <param name="files">The release's files.</param>
+    /// <returns>The signature.</returns>
+    public static string CopySignature(IEnumerable<Planning.ReleaseFile> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        var text = string.Join('\n', files.OrderBy(f => f.RelativePath, StringComparer.Ordinal).Select(f => f.RelativePath + "|" + f.Size.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
+    }
+
+    /// <summary>
     /// Drops reviews for releases of a watch folder that are no longer there.
     /// </summary>
     /// <param name="watchFolder">The watch folder.</param>
@@ -541,6 +610,8 @@ public sealed partial class IngestStateStore
         _state = loaded ?? new StateFile();
         _state.Reviews ??= [];
         _state.Activity ??= [];
+        _state.Copied ??= [];
+        _state.Copied.RemoveAll(c => c is null || c.WatchFolder is null || c.Release is null || c.Signature is null);
         _state.Activity.RemoveAll(a => a is null || a.Release is null);
         _state.Reviews.RemoveAll(r => r is null || r.Id is null || r.WatchFolder is null || r.Release is null);
 
@@ -609,5 +680,8 @@ public sealed partial class IngestStateStore
         public List<PendingReview> Reviews { get; set; } = [];
 
         public List<ActivityEntry> Activity { get; set; } = [];
+
+        // Releases filed by copy or hard link (still in their watch folder), so they aren't filed again
+        public List<CopiedRelease> Copied { get; set; } = [];
     }
 }

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
+using Jellyfin.Plugin.Ingest.Configuration;
 using Jellyfin.Plugin.Ingest.Planning;
 using Xunit;
 
@@ -58,6 +59,32 @@ public class ExecutorTests
         }
 
         public void Delete(string path) => Files.Remove(path);
+
+        public bool HardLinks { get; set; }
+
+        public List<string> Linked { get; } = [];
+
+        public void Copy(string source, string destination)
+        {
+            if (FailMove?.Invoke(source, destination) == true)
+            {
+                throw new IOException("copy failed");
+            }
+
+            Files[destination] = Files[source];
+        }
+
+        public bool TryHardLink(string source, string destination)
+        {
+            if (!HardLinks)
+            {
+                return false;
+            }
+
+            Files[destination] = Files[source];
+            Linked.Add(destination);
+            return true;
+        }
 
         public void DeleteEmptyDirectories(string path)
         {
@@ -355,5 +382,66 @@ public class ExecutorTests
         Assert.False(report.Succeeded);
         Assert.Contains("outside the release", report.Error, StringComparison.Ordinal);
         Assert.Equal(700, fs.Files["/lib/Films/B.avi"]);
+    }
+
+    // ING-28: copy and hard link leave the release where it is
+    private static IngestPlan Kept(TransferMode transfer) => Plan() with
+    {
+        Operations = [.. Plan().Operations.Where(o => o.Kind != OperationKind.Quarantine)],
+        Transfer = transfer,
+    };
+
+    [Theory]
+    [InlineData(TransferMode.Copy, false)]
+    [InlineData(TransferMode.HardLink, true)]
+    [InlineData(TransferMode.HardLink, false)]
+    public void Copy_and_hard_link_file_the_release_and_leave_it_in_place(TransferMode transfer, bool linksWork)
+    {
+        var fs = Seeded();
+        fs.HardLinks = linksWork;
+
+        var report = new PlanExecutor(fs, TimeProvider.System).Execute(Kept(transfer), "/drop/r", "/log", dryRun: false, CancellationToken.None);
+
+        Assert.True(report.Succeeded, report.Error);
+        Assert.Equal(1000, fs.Files["/drop/r/a.mkv"]);
+        Assert.Equal(1000, fs.Files["/lib/Films/A (2019)/A (2019).mkv"]);
+        Assert.Equal(linksWork ? 2 : 0, fs.Linked.Count);
+    }
+
+    [Fact]
+    public void A_failed_copy_removes_the_copies_already_made_and_keeps_the_release()
+    {
+        var fs = Seeded();
+        fs.FailMove = (s, _) => s == "/drop/r/a.srt";
+
+        var report = new PlanExecutor(fs, TimeProvider.System).Execute(Kept(TransferMode.Copy), "/drop/r", "/log", dryRun: false, CancellationToken.None);
+
+        Assert.False(report.Succeeded);
+        Assert.Empty(report.RollbackProblems);
+        Assert.False(fs.Exists("/lib/Films/A (2019)/A (2019).mkv"));
+        Assert.Equal(1000, fs.Files["/drop/r/a.mkv"]);
+        Assert.Equal(10, fs.Files["/drop/r/a.srt"]);
+    }
+
+    [Fact]
+    public void A_real_hard_link_is_a_second_name_for_the_same_file()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "ingest-link-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var a = Path.Combine(dir, "a.mkv");
+            File.WriteAllText(a, "video");
+            var ops = new PhysicalFileOperations();
+
+            Assert.True(ops.TryHardLink(a, Path.Combine(dir, "b.mkv")));
+            File.AppendAllText(a, " more");
+            Assert.Equal("video more", File.ReadAllText(Path.Combine(dir, "b.mkv")));
+            Assert.False(ops.TryHardLink(a, Path.Combine(dir, "b.mkv")));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 }

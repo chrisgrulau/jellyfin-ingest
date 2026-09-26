@@ -35,6 +35,27 @@ public class WatchFolder
     /// Gets or sets a value indicating whether this folder is being watched.
     /// </summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets how files reach the library: moved (the default, right for Usenet), copied, or hard-linked (same
+    /// drive only; no extra space). Copy and hard link leave the release where it is, so a torrent client keeps seeding.
+    /// </summary>
+    public TransferMode Transfer { get; set; } = TransferMode.Move;
+}
+
+/// <summary>
+/// How a watch folder's files reach the library.
+/// </summary>
+public enum TransferMode
+{
+    /// <summary>Moved: the watch folder is emptied.</summary>
+    Move = 0,
+
+    /// <summary>Copied: the release stays where it is (for seeding); uses the space twice.</summary>
+    Copy,
+
+    /// <summary>Hard-linked: the release stays where it is and no extra space is used; copied instead when on another drive.</summary>
+    HardLink,
 }
 
 /// <summary>

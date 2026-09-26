@@ -347,4 +347,19 @@ public sealed class IngestStateTests : IDisposable
         store.RequestRetry(id, null);
         Assert.Empty(store.GetReview(id)!.FileDecisions);
     }
+
+    [Fact]
+    public void A_copied_release_is_remembered_until_it_changes_or_leaves()
+    {
+        var store = new IngestStateStore(StatePath);
+        var files = new[] { new Planning.ReleaseFile("r/a.mkv", 1000) };
+        var signature = IngestStateStore.CopySignature(files);
+
+        store.MarkCopied(new CopiedRelease("/w", "r", signature));
+
+        Assert.True(new IngestStateStore(StatePath).WasCopied("/w", "r", signature));
+        Assert.False(store.WasCopied("/w", "r", IngestStateStore.CopySignature([new Planning.ReleaseFile("r/a.mkv", 1001)])));
+        store.PruneCopied("/w", ["other"]);
+        Assert.False(store.WasCopied("/w", "r", signature));
+    }
 }

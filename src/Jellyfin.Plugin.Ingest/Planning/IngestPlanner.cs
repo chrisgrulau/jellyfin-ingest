@@ -70,6 +70,12 @@ public sealed class IngestPlanner
     public bool ReplaceExisting { get; init; }
 
     /// <summary>
+    /// Gets how files reach the library. With copy or hard link the release stays where it is (for seeding), so its
+    /// clutter isn't quarantined either.
+    /// </summary>
+    public Configuration.TransferMode Transfer { get; init; }
+
+    /// <summary>
     /// Gets decisions made file by file in review (by file, relative to the watch folder): replace that file's copies on
     /// the server, or quarantine that file (with its subtitles) and file the rest.
     /// </summary>
@@ -349,7 +355,9 @@ public sealed class IngestPlanner
 
         // 4. everything else is quarantined, dated so the retention purge is a simple folder check
         var quarantine = Service.QuarantineMarkers.DatedFolderFor(quarantineRoot, DateOnly.FromDateTime(_clock.GetLocalNow().DateTime));
-        var leftovers = roles.Where(r => r.Value is FileRole.Clutter or FileRole.Sample).Select(r => r.Key).Concat(unpaired).Concat(skipped).Concat(skippedSubtitles);
+        var leftovers = Transfer != Configuration.TransferMode.Move
+            ? []
+            : roles.Where(r => r.Value is FileRole.Clutter or FileRole.Sample).Select(r => r.Key).Concat(unpaired).Concat(skipped).Concat(skippedSubtitles);
         foreach (var rel in leftovers)
         {
             var destination = Path.Combine(quarantine, rel);
@@ -392,6 +400,7 @@ public sealed class IngestPlanner
             Notes = notes,
             Replacing = replacing,
             Skipped = [.. skipped.Select(Abs)],
+            Transfer = Transfer,
 
             // Every video set aside by choice: the release is quarantined as a whole
             WholeReleaseQuarantine = skipped.Count == mains.Count,

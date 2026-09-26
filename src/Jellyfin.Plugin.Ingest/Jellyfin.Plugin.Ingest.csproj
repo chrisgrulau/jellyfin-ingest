@@ -7,6 +7,8 @@
     <!-- The shared source is compiled in whole but Ingest uses only part of it (the AI entry point client); its own
          .editorconfig stops per-folder rules, so the "internal class never instantiated" check is off for this project -->
     <NoWarn>$(NoWarn);CA1812</NoWarn>
+    <!-- Hard links (ING-28) are made through a LibraryImport, whose generated marshalling code is unsafe -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
