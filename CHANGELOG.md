@@ -5,8 +5,6 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.2.1-alpha] - 2026-09-26
-
 ### Added
 
 - **Episodes with no usable name identified from a short transcript** (optional; **Identify unnamed episodes from a
@@ -24,6 +22,8 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - Activity entries where the AI plugin decided something now say "The AI plugin decided part of this (see the details)".
+
+## [0.2.1-alpha] - 2026-09-26
 
 ### Added
 
