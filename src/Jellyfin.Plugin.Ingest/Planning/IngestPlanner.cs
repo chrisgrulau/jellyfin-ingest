@@ -70,6 +70,12 @@ public sealed class IngestPlanner
     public bool ReplaceExisting { get; init; }
 
     /// <summary>
+    /// Gets decisions made file by file in review (by file, relative to the watch folder): replace that file's copies on
+    /// the server, or quarantine that file (with its subtitles) and file the rest.
+    /// </summary>
+    public IReadOnlyDictionary<string, Service.FileDecision> FileDecisions { get; init; } = new Dictionary<string, Service.FileDecision>(StringComparer.Ordinal);
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="IngestPlanner"/> class.
     /// </summary>
     /// <param name="identifier">Identifies main videos.</param>
@@ -128,9 +134,10 @@ public sealed class IngestPlanner
         bool Taken(string path) => (_exists(path) && !replacingSet.Contains(path)) || planned.Contains(path);
 
         // With "replace existing", a copy inside a library (and its subtitle files) is replaced; otherwise it holds the file back
-        bool Replace(IReadOnlyList<string> existing)
+        bool Replace(IReadOnlyList<string> existing, string video)
         {
-            if (!ReplaceExisting || existing.Count == 0 || !existing.All(_isInsideLibrary))
+            var asked = ReplaceExisting || (FileDecisions.TryGetValue(video, out var d) && d == Service.FileDecision.Replace);
+            if (!asked || existing.Count == 0 || !existing.All(_isInsideLibrary))
             {
                 return false;
             }
@@ -167,7 +174,10 @@ public sealed class IngestPlanner
         var requiredFolders = new HashSet<string>(StringComparer.Ordinal);
         var plannedEpisodes = new HashSet<(string Series, int Season, int Episode)>();
         var notes = new List<string>();
-        foreach (var video in mains)
+
+        // Files a person chose not to file are quarantined with the leftovers (their subtitles too, as unpaired)
+        var skipped = mains.Where(v => FileDecisions.TryGetValue(v, out var d) && d == Service.FileDecision.Quarantine).ToList();
+        foreach (var video in mains.Except(skipped))
         {
             // Only a TV library to file into: a name without an episode code is most likely a show; otherwise a film
             var preferTv = targets.Tv is not null && targets.Films is null;
@@ -218,7 +228,7 @@ public sealed class IngestPlanner
                     continue;
                 }
 
-                if (duplicates.Count > 0 && !Replace(duplicates))
+                if (duplicates.Count > 0 && !Replace(duplicates, video))
                 {
                     review.Add(new ReviewItem(Abs(video), $"{ep.Series.Title} {code} is already on the server: {string.Join(", ", duplicates)}") { Candidates = result.Candidates, Existing = string.Join('\n', duplicates) });
                     continue;
@@ -240,7 +250,7 @@ public sealed class IngestPlanner
                 libraryRoot = target.Root;
                 destination = Path.Combine(target.Root, MediaNamer.MovieRelativePath(movie, ext));
                 var duplicate = _existing?.FindMovie(MovieIds(movie), movie.Edition, destination);
-                if (duplicate is not null && !Replace([duplicate]))
+                if (duplicate is not null && !Replace([duplicate], video))
                 {
                     review.Add(new ReviewItem(Abs(video), $"{movie.Title}{(movie.Edition is null ? string.Empty : " (" + movie.Edition + ")")} is already on the server: {duplicate}") { Candidates = result.Candidates, Existing = duplicate });
                     continue;
@@ -315,7 +325,10 @@ public sealed class IngestPlanner
 
         // 3. subtitles follow their video
         var subtitles = roles.Where(r => r.Value == FileRole.Subtitle).Select(r => r.Key).ToList();
+        // Paired against every video, so a set-aside video's subtitles go to quarantine with it (not to another episode)
         var paired = SubtitlePairer.Pair(mains, subtitles, rel => _readText(Abs(rel)) is { } text ? SubtitleLanguageSniffer.Guess(text) : null, out var unpaired);
+        var skippedSubtitles = paired.Where(p => skipped.Contains(p.Key)).SelectMany(p => p.Value.Select(t => t.RelativePath)).ToList();
+        paired = paired.Where(p => !skipped.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
         foreach (var (video, subs) in paired)
         {
             var dir = Path.GetDirectoryName(destinations[video])!;
@@ -336,7 +349,7 @@ public sealed class IngestPlanner
 
         // 4. everything else is quarantined, dated so the retention purge is a simple folder check
         var quarantine = Service.QuarantineMarkers.DatedFolderFor(quarantineRoot, DateOnly.FromDateTime(_clock.GetLocalNow().DateTime));
-        var leftovers = roles.Where(r => r.Value is FileRole.Clutter or FileRole.Sample).Select(r => r.Key).Concat(unpaired);
+        var leftovers = roles.Where(r => r.Value is FileRole.Clutter or FileRole.Sample).Select(r => r.Key).Concat(unpaired).Concat(skipped).Concat(skippedSubtitles);
         foreach (var rel in leftovers)
         {
             var destination = Path.Combine(quarantine, rel);
@@ -370,7 +383,19 @@ public sealed class IngestPlanner
         }
 
         ops.InsertRange(0, replacements);
-        return new IngestPlan { ReleaseName = releaseName, Operations = ops, AllowedRoots = [.. owners, quarantine], RequiredFolders = [.. requiredFolders], Notes = notes, Replacing = replacing };
+        return new IngestPlan
+        {
+            ReleaseName = releaseName,
+            Operations = ops,
+            AllowedRoots = [.. owners, quarantine],
+            RequiredFolders = [.. requiredFolders],
+            Notes = notes,
+            Replacing = replacing,
+            Skipped = [.. skipped.Select(Abs)],
+
+            // Every video set aside by choice: the release is quarantined as a whole
+            WholeReleaseQuarantine = skipped.Count == mains.Count,
+        };
     }
 
     private static Dictionary<string, string> MovieIds(MovieIdentity movie)

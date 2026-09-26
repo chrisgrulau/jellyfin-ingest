@@ -124,4 +124,7 @@ public sealed record IngestPlan
     /// release the executor accepts, and only for quarantine moves.
     /// </summary>
     public IReadOnlyList<string> Replacing { get; init; } = [];
+
+    /// <summary>Gets the release's videos quarantined by a person's choice instead of being filed (absolute paths).</summary>
+    public IReadOnlyList<string> Skipped { get; init; } = [];
 }

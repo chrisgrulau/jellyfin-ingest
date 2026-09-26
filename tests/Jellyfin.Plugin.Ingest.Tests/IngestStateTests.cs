@@ -329,4 +329,22 @@ public sealed class IngestStateTests : IDisposable
         store.PruneWatchFolders(["/other"]);
         Assert.Empty(store.Snapshot().Reviews);
     }
+
+    [Fact]
+    public void File_decisions_are_merged_kept_when_planned_again_and_cleared_by_retry()
+    {
+        var store = new IngestStateStore(StatePath);
+        var id = IngestStateStore.ReviewId("/w", "r");
+        store.PutReview(new PendingReview { Id = id, WatchFolder = "/w", Release = "r", Time = DateTimeOffset.UtcNow, Items = [new("r/a.mkv", "x"), new("r/b.mkv", "y")] });
+
+        store.RequestFiles(id, new Dictionary<string, FileDecision?> { ["r/a.mkv"] = FileDecision.Quarantine, ["r/b.mkv"] = FileDecision.Replace });
+        store.RequestFiles(id, new Dictionary<string, FileDecision?> { ["r/b.mkv"] = null });
+        store.PutReview(new PendingReview { Id = id, WatchFolder = "/w", Release = "r", Time = DateTimeOffset.UtcNow, Items = [new("r/b.mkv", "y")] });
+
+        var review = store.GetReview(id)!;
+        Assert.Equal(FileDecision.Quarantine, Assert.Single(review.FileDecisions).Value);
+
+        store.RequestRetry(id, null);
+        Assert.Empty(store.GetReview(id)!.FileDecisions);
+    }
 }

@@ -70,6 +70,18 @@ repeat the copies the page showed (otherwise 409). The next sweep then plans wit
 - the executor accepts a source outside the release only if it is in `Replacing` and the move is a quarantine move.
   The moves are logged as quarantine, so the purge and a rollback treat them like any other.
 
+### Decisions file by file
+
+`PendingReview.FileDecisions` (by file, relative to the watch folder) holds `Replace` or `Quarantine` for single files
+(`POST Reviews/{id}/Files`: files must be in the review; a replace repeats the copies the page showed, else 409;
+"later" removes a decision). The decisions survive planning again (`PutReview`), and "Clear choice and retry" clears
+them. The planner:
+
+- sets aside videos marked `Quarantine` before identifying them; their subtitles (paired against every video, so they
+  don't drift to another episode) and the videos go to the dated quarantine with the leftovers;
+- replaces a duplicate marked `Replace` as if "Replace existing copies" had been asked for that file only;
+- makes the plan a whole-release quarantine when every video is set aside.
+
 ### AI tie-breaker
 
 When the result would be *needs review* but the best score is **≥ 0.60** and there are at least two candidates (for

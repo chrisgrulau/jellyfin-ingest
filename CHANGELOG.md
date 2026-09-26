@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **ING-30: Choose file by file** in review, for a release with several files waiting. **Replace existing copies**
+  and **Quarantine release** still act on the whole release. Each waiting file can also be given its own decision:
+  - **Replace existing:** only for a file that's already on the server; its old copy goes to quarantine.
+  - **Quarantine this file:** for any problem. The file and its subtitles are set aside, not filed.
+  - **Decide later.**
+
+  **Apply these choices** plans the release again. The decided files are handled and the rest of the release is filed
+  as usual; anything left undecided keeps the release waiting. Quarantining every video quarantines the whole release.
+  Choices survive the page's refresh, and **Clear choice and retry** clears them.
+
 ## [0.4.0-alpha] - 2026-09-26
 
 ### Added
