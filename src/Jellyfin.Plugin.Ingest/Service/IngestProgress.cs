@@ -58,6 +58,41 @@ public sealed record WorkInProgress
 }
 
 /// <summary>
+/// What an administrator asked to be put back.
+/// </summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<QueuedActionKind>))]
+public enum QueuedActionKind
+{
+    /// <summary>Undo a filing (<see cref="QueuedAction.Run"/>).</summary>
+    Undo = 0,
+
+    /// <summary>Restore a quarantined release (<see cref="QueuedAction.Root"/>, <see cref="QueuedAction.Folder"/>, <see cref="QueuedAction.Name"/>).</summary>
+    Restore,
+}
+
+/// <summary>
+/// An undo or restore asked for on the page, carried out by the sweep (between releases, so it never races a filing
+/// or the watch-folder scan).
+/// </summary>
+public sealed record QueuedAction
+{
+    /// <summary>Gets what is asked for.</summary>
+    public required QueuedActionKind Kind { get; init; }
+
+    /// <summary>Gets the filing to undo (its <see cref="ActivityEntry.Run"/>).</summary>
+    public string? Run { get; init; }
+
+    /// <summary>Gets the quarantine folder, for a restore.</summary>
+    public string? Root { get; init; }
+
+    /// <summary>Gets the dated folder's name, for a restore.</summary>
+    public string? Folder { get; init; }
+
+    /// <summary>Gets the release's name in the dated folder, for a restore.</summary>
+    public string? Name { get; init; }
+}
+
+/// <summary>
 /// What the sweep is waiting for and working on, shared between the sweep service and the API, plus the "Process now"
 /// requests going the other way. Held in memory only (after a restart releases settle again). Thread-safe.
 /// </summary>
@@ -66,8 +101,15 @@ public sealed class IngestProgress
     private readonly Lock _lock = new();
     private readonly Dictionary<string, IReadOnlyList<WaitingRelease>> _waiting = new(StringComparer.Ordinal);
     private readonly HashSet<string> _processNow = new(StringComparer.Ordinal);
+    private readonly List<QueuedAction> _queued = [];
     private WorkInProgress? _working;
     private TaskCompletionSource _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Gets the lock held while files are moved or deleted (filing, quarantining, undo, restore, "delete now"), so a
+    /// deletion asked for on the page never runs while the sweep is moving files into the same folder.
+    /// </summary>
+    public Lock FileGate { get; } = new();
 
     /// <summary>
     /// Gets the release being worked on, if any.
@@ -161,6 +203,62 @@ public sealed class IngestProgress
             _processNow.Add(id);
             _wake.TrySetResult();
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Asks the sweep to carry out an undo or restore, and wakes it. Held in memory: after a restart it is asked for again.
+    /// </summary>
+    /// <param name="action">What to do.</param>
+    /// <returns><c>false</c> if the same was already asked for.</returns>
+    public bool Queue(QueuedAction action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        lock (_lock)
+        {
+            if (_queued.Contains(action))
+            {
+                return false;
+            }
+
+            _queued.Add(action);
+            _wake.TrySetResult();
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// The undos and restores asked for and not yet finished, oldest first.
+    /// </summary>
+    /// <returns>A copy.</returns>
+    public IReadOnlyList<QueuedAction> Queued()
+    {
+        lock (_lock)
+        {
+            return [.. _queued];
+        }
+    }
+
+    /// <summary>
+    /// Removes an undo or restore once it has been carried out (or refused).
+    /// </summary>
+    /// <param name="action">The action.</param>
+    public void Complete(QueuedAction action)
+    {
+        lock (_lock)
+        {
+            _queued.Remove(action);
+        }
+    }
+
+    /// <summary>
+    /// Wakes the sweep now (after Ingest is resumed).
+    /// </summary>
+    public void Wake()
+    {
+        lock (_lock)
+        {
+            _wake.TrySetResult();
         }
     }
 

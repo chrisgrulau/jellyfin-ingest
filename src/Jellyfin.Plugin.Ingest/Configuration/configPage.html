@@ -77,6 +77,14 @@
       #IngestConfigPage .badge.Decision { background: rgba(150,110,220,.28); }
       #IngestConfigPage .badge.Failed { background: rgba(220,53,69,.30); }
       #IngestConfigPage .badge.Quarantined, #IngestConfigPage .badge.Purged { background: rgba(128,128,128,.30); }
+      #IngestConfigPage .badge.Undone, #IngestConfigPage .badge.Restored { background: rgba(150,110,220,.28); }
+      #IngestConfigPage .ingest-banner.paused { background: rgba(220,53,69,.20); border-left: 4px solid rgba(220,53,69,.8); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5em 1em; }
+      #IngestConfigPage .ingest-banner.paused .emby-button { margin: 0; }
+      #IngestConfigPage .ingest-qr { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .25em 1em; }
+      #IngestConfigPage .ingest-qr > details { flex: 1 1 18em; min-width: 0; }
+      #IngestConfigPage .ingest-qactions { display: flex; flex-wrap: wrap; gap: .4em; }
+      #IngestConfigPage .ingest-qactions .emby-button, #IngestConfigPage .ingest-q h4 .emby-button { margin: 0; font-size: .85em; }
+      #IngestConfigPage .ingest-activity .ingest-undo { margin: .4em 0 0; }
       #IngestConfigPage .ingest-q { padding: .75em 1em; margin: .75em 0; border-radius: 6px; background: rgba(128,128,128,.10); }
       #IngestConfigPage .ingest-q h4 { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .25em 1em; }
       #IngestConfigPage .ingest-q details { margin: .4em 0 0; }
@@ -103,6 +111,11 @@
         <div id="IngestStatus" class="ingest-visually-hidden" role="status" aria-live="polite"></div>
         <p>New media dropped into a watch folder is identified, renamed to Jellyfin's naming standard and moved into the chosen library with its subtitles. Anything else in the release is quarantined and deleted after the retention period. Releases that can't be identified confidently are left where they are and listed under <em>Needs review</em>.</p>
 
+        <div class="ingest-banner paused" id="PausedBanner" role="status" hidden>
+          <span><strong>Ingest is paused.</strong> Nothing is filed or quarantined until you resume it; releases are still listed as waiting.</span>
+          <button is="emby-button" type="button" class="raised button-submit" id="ResumeIngest"><span>Resume Ingest</span></button>
+        </div>
+
         <div class="ingest-banner setup" id="SetupBanner" hidden>
           <strong>Ingest isn't set up yet.</strong> Add a watch folder and at least one destination library under <a href="#" id="GoToSetup" style="color:inherit">Watch folders</a>, then save. Nothing is watched until then.
         </div>
@@ -119,7 +132,10 @@
 
         <div class="ingest-head">
           <h3 class="sectionTitle">Needs review <span class="ingest-muted" id="ReviewCount"></span></h3>
-          <button is="emby-button" type="button" class="raised button-alt" id="RefreshStatus"><span>Refresh</span></button>
+          <span class="ingest-qactions">
+            <button is="emby-button" type="button" class="raised button-cancel" id="PauseIngest"><span>Pause Ingest</span></button>
+            <button is="emby-button" type="button" class="raised button-alt" id="RefreshStatus"><span>Refresh</span></button>
+          </span>
         </div>
         <div id="Reviews"></div>
 
@@ -223,7 +239,7 @@
         function locationOptions(libraryId, selected) {
           var lib = libById(libraryId);
           var locs = (lib && lib.Locations) || [];
-          return '<option value="">' + (locs.length ? 'First folder (' + esc(locs[0]) + ')' : '—') + '</option>' + locs.map(function (p) {
+          return '<option value="">' + (locs.length > 1 ? 'The folder with the most free space' : locs.length ? 'Its folder (' + esc(locs[0]) + ')' : '—') + '</option>' + locs.map(function (p) {
             return '<option value="' + esc(p) + '"' + (p === selected ? ' selected' : '') + '>' + esc(p) + '</option>';
           }).join('');
         }
@@ -328,6 +344,10 @@
         var reviews = [];
         var filter = 'All';
         var confirmQuarantine = {};
+        var confirmUndo = {};
+        var confirmDelete = {};
+        var paused = false;
+        var queued = [];
         var confirmReplace = {};
         // File-by-file choices for a release with several files waiting: kept here until applied, so a refresh doesn't lose them
         var fileChoices = {}, filesOpen = {};
@@ -398,7 +418,7 @@
 
         // The library picked in a card, kept across the automatic refresh (ING-27)
         var libChoice = {};
-        var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Decision', 'Decisions'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged']];
+        var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Decision', 'Decisions'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged'], ['Undone', 'Undone'], ['Restored', 'Restored']];
         var labels = {}; filters.forEach(function (f) { labels[f[0]] = f[1]; });
         var SHOWN = 5;
 
@@ -549,11 +569,18 @@
           list.innerHTML = shown.map(function (a, i) {
             var details = (a.Details || []);
             return '<li data-k="' + esc(a.Time + a.Release) + '"><span class="when">' + when(a.Time) + '</span><div class="what">' +
-              '<span class="badge ' + esc(a.Status) + '">' + esc(labels[a.Status] || a.Status) + '</span><strong>' + esc(a.Release) + '</strong>' +
-              '<div>' + esc(a.Summary) + '</div>' +
+              '<span class="badge ' + esc(a.Status) + '">' + esc(labels[a.Status] || a.Status) + '</span>' + (a.UndoneAt ? '<span class="badge Undone">Undone</span>' : '') + '<strong>' + esc(a.Release) + '</strong>' +
+              '<div>' + esc(a.Summary) + '</div>' + undoButton(a) +
               (details.length ? '<details><summary>' + details.length + ' detail' + (details.length === 1 ? '' : 's') + '</summary><ul>' + details.map(function (d) { return '<li>' + esc(d) + '</li>'; }).join('') + '</ul></details>' : '') +
               '</div></li>';
           }).join('');
+        }
+
+        // A filing can be undone while the action log still holds its moves (90 days)
+        function undoButton(a) {
+          if (a.Status !== 'Filed' || !a.Run || a.UndoneAt || new Date() - new Date(a.Time) > 90 * 86400000) { return ''; }
+          if (queued.some(function (q) { return q.Kind === 'Undo' && q.Run === a.Run; })) { return '<div class="ingest-muted">Undoing on the next sweep…</div>'; }
+          return '<button is="emby-button" type="button" class="raised button-cancel ingest-undo" data-run="' + esc(a.Run) + '"><span>' + (confirmUndo[a.Run] ? 'Confirm: undo this filing' : 'Undo') + '</span></button>';
         }
 
         function loadStatus() {
@@ -566,6 +593,10 @@
             reviews = s.Reviews || [];
             waiting = s.Waiting || [];
             working = s.Working || null;
+            queued = s.Queued || [];
+            paused = !!s.Paused;
+            page.querySelector('#PausedBanner').hidden = !paused;
+            page.querySelector('#PauseIngest').style.display = paused ? 'none' : '';
             renderWaiting();
             renderReviews();
             renderActivity();
@@ -601,21 +632,30 @@
           if (!folders.length) { box.innerHTML = '<p class="ingest-muted">Nothing in quarantine.</p>'; return; }
           box.innerHTML = folders.map(function (f) {
             var fate = f.Managed ? 'deleted on ' + day(f.DeletesOn) : 'not created by Ingest, so never deleted';
-            return '<div class="ingest-q"><h4><span>' + esc(day(f.Date)) + (f.Folder && f.Folder !== f.Date ? ' <span class="ingest-muted">' + esc(f.Folder) + '</span>' : '') + '</span><span class="ingest-muted">' + plural(f.FileCount, 'file') + ', ' + size(f.Bytes) + ', ' + esc(fate) + '</span></h4>' +
+            var fk = f.Root + '|' + (f.Folder || f.Date) + '|';
+            var attrs = ' data-root="' + esc(f.Root) + '" data-folder="' + esc(f.Folder || f.Date) + '"';
+            return '<div class="ingest-q"><h4><span>' + esc(day(f.Date)) + (f.Folder && f.Folder !== f.Date ? ' <span class="ingest-muted">' + esc(f.Folder) + '</span>' : '') + '</span><span class="ingest-muted">' + plural(f.FileCount, 'file') + ', ' + size(f.Bytes) + ', ' + esc(fate) + '</span>' +
+              (f.Managed ? '<button is="emby-button" type="button" class="raised button-cancel ingest-qdelete"' + attrs + ' data-name=""><span>' + (confirmDelete[fk] ? 'Confirm: delete this day now' : 'Delete now') + '</span></button>' : '') + '</h4>' +
               (roots.length > 1 ? '<div class="ingest-muted">' + esc(f.Root) + '</div>' : '') +
               f.Releases.map(function (r) {
                 var k = f.Root + '|' + (f.Folder || f.Date) + '|' + r.Name;
                 var more = r.FileCount - r.Files.length;
-                return '<details data-k="' + esc(k) + '"><summary>' + esc(r.Name) + ' <span class="ingest-muted">' + plural(r.FileCount, 'file') + ', ' + size(r.Bytes) + '</span></summary><ul>' +
+                var ra = attrs + ' data-name="' + esc(r.Name) + '"';
+                var restoring = queued.some(function (q) { return q.Kind === 'Restore' && q.Root === f.Root && q.Folder === (f.Folder || f.Date) && q.Name === r.Name; });
+                var actions = !f.Managed ? '' : restoring ? '<span class="ingest-muted">Restoring on the next sweep…</span>'
+                  : '<button is="emby-button" type="button" class="raised button-alt ingest-qrestore"' + ra + '><span>Restore</span></button>' +
+                    '<button is="emby-button" type="button" class="raised button-cancel ingest-qdelete"' + ra + '><span>' + (confirmDelete[k] ? 'Confirm: delete now' : 'Delete now') + '</span></button>';
+                return '<div class="ingest-qr"><details data-k="' + esc(k) + '"><summary>' + esc(r.Name) + ' <span class="ingest-muted">' + plural(r.FileCount, 'file') + ', ' + size(r.Bytes) + '</span></summary><ul>' +
                   r.Files.map(function (x) { return '<li><span>' + esc(x.Path) + '</span><span class="size">' + size(x.Bytes) + '</span></li>'; }).join('') +
-                  (more > 0 ? '<li class="ingest-muted"><span>and ' + plural(more, 'more file') + '</span></li>' : '') + '</ul></details>';
+                  (more > 0 ? '<li class="ingest-muted"><span>and ' + plural(more, 'more file') + '</span></li>' : '') + '</ul></details><div class="ingest-qactions">' + actions + '</div></div>';
               }).join('') + '</div>';
           }).join('');
           Array.prototype.forEach.call(box.querySelectorAll('details'), function (d) { if (open.indexOf(d.getAttribute('data-k')) >= 0) { d.open = true; } });
         }
 
+        var lastQuarantine = [];
         function loadQuarantine() {
-          return ApiClient.getJSON(ApiClient.getUrl('Ingest/Quarantine')).then(renderQuarantine, function () {
+          return ApiClient.getJSON(ApiClient.getUrl('Ingest/Quarantine')).then(function (f) { lastQuarantine = f || []; renderQuarantine(lastQuarantine); }, function () {
             page.querySelector('#Quarantine').innerHTML = '<p class="ingest-muted">The quarantine couldn\'t be read.</p>';
           });
         }
@@ -746,6 +786,38 @@
           // Starts a sweep now; refresh again once it has had a moment to pick the release up
           post('Ingest/Waiting/' + encodeURIComponent(b.getAttribute('data-id')) + '/ProcessNow').then(function () { setTimeout(loadStatus, 5000); });
         });
+
+        page.querySelector('#Activity').addEventListener('click', function (e) {
+          var b = e.target.closest('.ingest-undo');
+          if (!b) { return; }
+          var run = b.getAttribute('data-run');
+          // Two clicks: the files go back to the watch folder (or the library copies are deleted, for a copied release)
+          if (!confirmUndo[run]) { confirmUndo[run] = true; b.querySelector('span').textContent = 'Confirm: undo this filing'; return; }
+          delete confirmUndo[run];
+          b.disabled = true;
+          post('Ingest/Activity/' + encodeURIComponent(run) + '/Undo').then(function () { setTimeout(loadStatus, 5000); });
+        });
+
+        page.querySelector('#Quarantine').addEventListener('click', function (e) {
+          var b = e.target.closest('.ingest-qrestore, .ingest-qdelete');
+          if (!b) { return; }
+          var body = { Root: b.getAttribute('data-root'), Folder: b.getAttribute('data-folder'), Name: b.getAttribute('data-name') };
+          if (b.classList.contains('ingest-qrestore')) {
+            b.disabled = true;
+            post('Ingest/Quarantine/Restore', body).then(function () { setTimeout(function () { loadStatus().then(loadQuarantine); }, 5000); });
+            return;
+          }
+          // Delete now takes two clicks, and can't be undone
+          var k = body.Root + '|' + body.Folder + '|' + body.Name;
+          if (!confirmDelete[k]) { confirmDelete[k] = true; b.querySelector('span').textContent = body.Name ? 'Confirm: delete now' : 'Confirm: delete this day now'; return; }
+          delete confirmDelete[k];
+          b.disabled = true;
+          if (!body.Name) { delete body.Name; }
+          post('Ingest/Quarantine/Delete', body).then(loadQuarantine);
+        });
+
+        page.querySelector('#PauseIngest').addEventListener('click', function () { post('Ingest/Pause'); });
+        page.querySelector('#ResumeIngest').addEventListener('click', function () { post('Ingest/Resume'); });
 
         page.querySelector('#ActivityFilters').addEventListener('click', function (e) {
           var b = e.target.closest('button');

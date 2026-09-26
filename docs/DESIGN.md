@@ -142,6 +142,73 @@ Subtitles plugin's `SpeechBridge`) and a tie-breaker that is also an `IEpisodePi
 
 Anything else leaves the release in review, with the reason.
 
+## Undo
+
+Every real execution gets a run id, written on each of its action-log lines together with the destination's modified
+time after the move (`modified`) and whether the source stayed (`kept`, copy and hard-link folders). A filing's
+activity entry carries its run (`ActivityEntry.Run`), and **Undo** (`POST Ingest/Activity/{run}/Undo`) works from
+exactly those lines (`ActionLogLine.CompletedMoves`: done or recovered, not rolled back).
+
+`ReleaseUndo.Plan` checks everything before anything moves, and refuses the whole undo with a plain reason if:
+
+- the entry isn't a filing with a run, was already undone, or is older than the action log keeps (90 days);
+- the watch folder it came from is no longer configured (or fails the folder rules), or isn't there;
+- a source is outside that watch folder, other than a replaced copy inside one of the server's library folders;
+- a filed file (or quarantined clutter or replaced copy) is missing, or its size or modified time differ from the log,
+  except a subtitle filed as one (`OperationKind.Subtitle`): the Subtitles plugin routinely syncs and cleans sidecars
+  after filing, so a changed subtitle goes back as it is now (the executor verifies against its current size) and the
+  undo's entry says "N subtitles had changed since filing and were moved back as they are";
+- a place a file goes back to is taken, unless an earlier step of the same undo frees it (a replaced copy goes back
+  where its replacement was, after the replacement has left);
+- for a kept source (copy or hard link), the original in the watch folder has gone or changed size (for a changed
+  subtitle only its presence is checked: a hard-linked one corrected in place changed the original too).
+
+The undo is a plan for the ordinary executor: its moves are the filing's in reverse order, destination back to source,
+and `IngestPlan.Returning` lists the exact files it may take (so the "source must be inside the release" guard becomes
+"source must be one of these"). A kept source's library copy is instead moved to a hidden `.ingest-<id>.undone` name
+beside it, and deleted (logged `deleted`) only once every move has succeeded, so a failure still rolls everything back.
+A set-aside copy left by a crash is deleted at the next start (`PlanExecutor.FinishDeletes`, after `Recover`).
+Afterwards the folders the filing's files were in are removed if truly empty, up to but never including a library,
+quarantine or watch folder (a marked dated quarantine folder is never empty).
+
+The page asks; the sweep does it (`IngestProgress.Queue`, carried out at the start of the next sweep, which is woken),
+so an undo never races a filing or the watch-folder scan. Moves take `IngestProgress.FileGate`, as filing does. Before
+the first move the release is put into review, **held** (`PendingReview.Held`, "Undone by an administrator — choose
+what to do"), and a copy folder's `CopiedRelease` record is cleared; if the undo then fails and is rolled back, both
+are put back. A held review with no request is never planned by the sweep, even after a restart; any decision (choose,
+retry, file by file, quarantine) plans it as usual, and planning replaces the review without the hold. On success the
+filing's entry gets `UndoneAt` (the page shows **Undone**), and an `Undone` entry is recorded (and copied to Jellyfin's
+Activity log). A crash part-way leaves each file whole (the executor's recovery finishes or discards the interrupted
+move) and the release held for review, possibly partly returned; nothing is filed again by itself.
+
+## Restore, delete now, pause
+
+**Restore** (`POST Ingest/Quarantine/Restore`, `{Root, Folder, Name}`) works on one entry of a dated quarantine folder
+(a release folder, `Replaced`, or a single file). The entry is found on disk by name (`QuarantineRestore.Locate`: a
+quarantine folder in use, a dated folder Ingest marked, never a path built from what the page sent). Each file's origin
+is the source of the latest completed quarantine move to it in the action log. It is refused as a whole if any file
+isn't in the log (older than 90 days, or not put there by Ingest) or has changed size, came from outside the current
+watch folders and library folders (or from inside a quarantine), or its place is taken. The moves go through the
+executor as an undo's do (`IngestPlan.Returning`), and emptied folders inside the dated folder are removed. Releases
+put back into a watch folder are held for review first, exactly as after an undo. Like undo, the page asks and the next
+sweep does it.
+
+**Delete now** (`POST Ingest/Quarantine/Delete`; without `Name`, the whole dated folder) uses the purge's deletion
+(`QuarantinePurger.DeleteNow`): only in a marked dated folder of a quarantine in use, entries found on disk by name,
+read-only files made writable, links removed rather than followed, and the marker last. It runs at once, holding
+`IngestProgress.FileGate` so it never overlaps the sweep moving files (409 "busy" after 10 s).
+
+**Pause** (`POST Ingest/Pause` / `Resume`) is kept in `state.json` rather than the plugin settings, which the settings
+page saves as a whole. While paused the sweep still scans, tracks and shows waiting releases, and carries out undos and
+restores, but plans and files nothing and doesn't act on quarantine requests.
+
+**Libraries with several folders.** Jellyfin libraries can have several folders (`MediaLibrary.Locations`). A
+destination names one, or none; with none, `LibraryRouting.TargetsOf` now takes the folder with the most free space
+(`PhysicalFileOperations.FreeBytes`, the mount's available space; first folder on a tie or when unknown), for each
+sweep and for a library chosen in review. The planner still reuses existing titles wherever they are: shows the server
+knows (any library), a replaced copy's folder, and now a film or show folder of the same name in another folder of
+the same library (`IngestPlanner.RootHolding`), so a title is never split across folders.
+
 ## Subtitle pairing
 
 For each video in a release, in order:
@@ -165,7 +232,8 @@ Samples (`sample` in the name and under ~300 MB) are clutter too.
 - Dry run is set per watch folder, and is on for a new one. A folder saved before it was per folder takes the old
   global setting when the plugin loads, so upgrading changes nothing.
 - Never overwrite; on collision, leave the release in place and report.
-- Never delete except the retention purge of the quarantine folder.
+- Never delete except the retention purge of the quarantine folder, and a library copy whose original is still in a
+  copy or hard-link watch folder when a filing is undone.
 - Every operation is logged with source and destination so it can be reversed.
 
 ## Stored files

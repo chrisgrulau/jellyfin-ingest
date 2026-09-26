@@ -64,6 +64,13 @@ public interface IFileOperations
     /// <returns>Whether it was removed.</returns>
     bool DeleteIfEmpty(string path) => false;
 
+    /// <summary>
+    /// Gets a file's last-write time (UTC), recorded in the action log so an undo can tell whether it has changed since.
+    /// </summary>
+    /// <param name="path">Absolute path.</param>
+    /// <returns>The time, or <c>null</c> if it can't be read.</returns>
+    DateTime? LastWriteUtc(string path) => null;
+
     /// <summary>Appends a line to a text file (the action log).</summary>
     /// <param name="path">Absolute path.</param>
     /// <param name="line">The line.</param>
@@ -112,6 +119,12 @@ public sealed record ExecutionReport
     /// <summary>Gets a value indicating whether nothing was moved because a required library folder is missing (offline share).</summary>
     public bool FolderUnavailable { get; init; }
 
+    /// <summary>
+    /// Gets the id this execution's moves carry in the action log (so an undo finds exactly them); <c>null</c> in a
+    /// dry run or when nothing was attempted.
+    /// </summary>
+    public string? Run { get; init; }
+
     /// <summary>Gets a value indicating whether every operation completed.</summary>
     public bool Succeeded => Failed is null && !Cancelled && Error is null;
 }
@@ -132,6 +145,7 @@ public sealed class PlanExecutor
 {
     private const string TempPrefix = ".ingest-";
     private const string TempSuffix = ".partial";
+    private const string TrashSuffix = ".undone";
 
     private static readonly System.Buffers.SearchValues<char> HexDigits = System.Buffers.SearchValues.Create("0123456789abcdef");
 
@@ -193,7 +207,8 @@ public sealed class PlanExecutor
         foreach (var op in plan.Operations)
         {
             var replaced = op.Kind == OperationKind.Quarantine && plan.Replacing.Contains(op.Source, StringComparer.Ordinal);
-            if (!replaced && !PathGuard.IsSameOrUnder(op.Source, releaseRoot))
+            var returning = plan.Returning.Contains(op.Source, PathGuard.Comparer);
+            if (plan.Returning.Count > 0 ? !returning : !replaced && !PathGuard.IsSameOrUnder(op.Source, releaseRoot))
             {
                 return new ExecutionReport { Failed = op, Error = $"Refused: {op.Source} is outside the release being filed." };
             }
@@ -204,6 +219,7 @@ public sealed class PlanExecutor
             }
         }
 
+        var run = Guid.NewGuid().ToString("N");
         var done = new List<(PlannedOperation Op, long Bytes, string Temp)>();
         var created = new List<string>();
         foreach (var op in plan.Operations)
@@ -212,6 +228,7 @@ public sealed class PlanExecutor
             {
                 return new ExecutionReport
                 {
+                    Run = run,
                     Completed = [.. done.Select(d => d.Op)],
                     Cancelled = true,
                     Error = string.Create(CultureInfo.InvariantCulture, $"Stopped because the server is shutting down: {done.Count} of {plan.Operations.Count} files moved; the rest are still in the watch folder."),
@@ -243,11 +260,11 @@ public sealed class PlanExecutor
                     throw new IOException($"Not enough free space for {op.Source} in {folder}.");
                 }
 
-                Log(actionLogPath, plan.ReleaseName, op, size, "intent", temp);
+                var keeps = KeepsSource(plan, op);
+                Log(actionLogPath, run, plan.ReleaseName, op, size, "intent", temp, kept: keeps);
 
                 // 1. into a hidden name (a rename, or a copy across file systems; or, when the release stays for seeding, a
                 //    copy or hard link); 2. verify; 3. rename into place
-                var keeps = KeepsSource(plan, op);
                 if (!keeps)
                 {
                     _fs.Move(op.Source, temp);
@@ -276,18 +293,19 @@ public sealed class PlanExecutor
                 // Counted as done before the "done" line is written: if writing it fails (a full disk), the rollback also
                 // moves this file back instead of leaving it filed while the rest of the release returns
                 done.Add((op, size, temp));
-                Log(actionLogPath, plan.ReleaseName, op, size, "done", temp);
+                Log(actionLogPath, run, plan.ReleaseName, op, size, "done", temp, _fs.LastWriteUtc(op.Destination), keeps);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                var (rolledBack, problems) = RollBack(actionLogPath, plan, op, size, temp, done, created);
-                return new ExecutionReport { Failed = op, Error = ex.Message, RolledBack = rolledBack, RollbackProblems = problems };
+                var (rolledBack, problems) = RollBack(actionLogPath, run, plan, op, size, temp, done, created);
+                return new ExecutionReport { Run = run, Failed = op, Error = ex.Message, RolledBack = rolledBack, RollbackProblems = problems };
             }
         }
 
-        // Tidying up is best-effort: every move has succeeded, so a failure here is a warning, not a failed ingest
+        // Tidying up is best-effort: every move has succeeded, so a failure here is a warning, not a failed ingest. An
+        // undo or restore leaves the folder it returns files to exactly as it finds it
         string? warning = null;
-        if (_fs.Exists(releaseRoot) && !done.Any(d => string.Equals(d.Op.Source, releaseRoot, StringComparison.Ordinal)))
+        if (plan.Returning.Count == 0 && _fs.Exists(releaseRoot) && !done.Any(d => string.Equals(d.Op.Source, releaseRoot, StringComparison.Ordinal)))
         {
             try
             {
@@ -312,7 +330,7 @@ public sealed class PlanExecutor
             }
         }
 
-        return new ExecutionReport { Completed = [.. done.Select(d => d.Op)], Warning = warning };
+        return new ExecutionReport { Run = run, Completed = [.. done.Select(d => d.Op)], Warning = warning };
     }
 
     /// <summary>
@@ -330,10 +348,10 @@ public sealed class PlanExecutor
         ArgumentNullException.ThrowIfNull(actionLogLines);
         ArgumentNullException.ThrowIfNull(allowedRoots);
 
-        var open = new Dictionary<string, LogEntry>(StringComparer.Ordinal);
+        var open = new Dictionary<string, ActionLogLine>(StringComparer.Ordinal);
         foreach (var line in actionLogLines)
         {
-            if (LogEntry.TryParse(line) is not { Temp: { Length: > 0 } temp } entry)
+            if (ActionLogLine.TryParse(line) is not { Temp: { Length: > 0 } temp } entry)
             {
                 continue;
             }
@@ -351,7 +369,7 @@ public sealed class PlanExecutor
         var results = new List<string>();
         foreach (var e in open.Values)
         {
-            var op = new PlannedOperation(Enum.TryParse<OperationKind>(e.Kind, out var k) ? k : OperationKind.Video, e.Source, e.Destination);
+            var op = new PlannedOperation(e.OperationKind, e.Source, e.Destination);
 
             // Defence in depth: the log's contents alone never decide what is deleted or renamed
             if (!IsOwnTemp(e.Temp!, e.Destination, allowedRoots))
@@ -372,13 +390,13 @@ public sealed class PlanExecutor
                 {
                     // The copy was cut short: the original is intact, so the partial copy goes
                     _fs.Delete(e.Temp!);
-                    Log(actionLogPath, e.Release, op, e.Bytes, "discarded", e.Temp!);
+                    Log(actionLogPath, e.Run, e.Release, op, e.Bytes, "discarded", e.Temp!);
                     results.Add($"Discarded an interrupted copy of {e.Source}; the original is still in place.");
                 }
                 else if (_fs.Length(e.Temp!) == e.Bytes && !_fs.Exists(e.Destination))
                 {
                     _fs.Move(e.Temp!, e.Destination);
-                    Log(actionLogPath, e.Release, op, e.Bytes, "recovered", e.Temp!);
+                    Log(actionLogPath, e.Run, e.Release, op, e.Bytes, "recovered", e.Temp!, _fs.LastWriteUtc(e.Destination), e.Kept);
                     results.Add($"Finished an interrupted move of {e.Source} to {e.Destination}.");
                 }
                 else
@@ -419,12 +437,122 @@ public sealed class PlanExecutor
             && PathGuard.IsUnderAny(destination, allowedRoots);
     }
 
+    /// <summary>
+    /// A hidden name beside a file, for a library copy an undo removes: the copy is first moved there (so the undo can
+    /// still be rolled back), and deleted once the whole undo has succeeded (<see cref="DeleteSetAside"/>).
+    /// </summary>
+    /// <param name="file">The library copy.</param>
+    /// <returns>The hidden name, in the same folder.</returns>
+    public static string SetAsidePathFor(string file)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(file);
+        return Path.Combine(Path.GetDirectoryName(file)!, TempPrefix + Guid.NewGuid().ToString("N") + TrashSuffix);
+    }
+
+    /// <summary>
+    /// Whether a path is a copy set aside by an undo (<see cref="SetAsidePathFor"/>) inside one of the given folders.
+    /// </summary>
+    /// <param name="path">The path.</param>
+    /// <param name="allowedRoots">Current library folders.</param>
+    /// <returns><c>true</c> if it may be deleted.</returns>
+    public static bool IsSetAside(string path, IReadOnlyCollection<string> allowedRoots)
+    {
+        ArgumentNullException.ThrowIfNull(allowedRoots);
+        if (string.IsNullOrEmpty(path) || !Path.IsPathFullyQualified(path))
+        {
+            return false;
+        }
+
+        var name = Path.GetFileName(path);
+        return name.Length == TempPrefix.Length + 32 + TrashSuffix.Length
+            && name.StartsWith(TempPrefix, StringComparison.Ordinal) && name.EndsWith(TrashSuffix, StringComparison.Ordinal)
+            && !name.AsSpan(TempPrefix.Length, 32).ContainsAnyExcept(HexDigits)
+            && PathGuard.IsUnderAny(path, allowedRoots);
+    }
+
+    /// <summary>
+    /// Deletes the library copies an undo set aside, once every move of the undo has succeeded; each deletion is logged.
+    /// </summary>
+    /// <param name="setAside">The moves that set a copy aside (their destinations are deleted).</param>
+    /// <param name="release">The release, for the log.</param>
+    /// <param name="run">The undo's id, for the log.</param>
+    /// <param name="actionLogPath">The action log.</param>
+    /// <param name="allowedRoots">Current library folders; nothing else is deleted.</param>
+    /// <returns>Anything that couldn't be deleted (hidden, so Jellyfin ignores it; it is tried again at the next start).</returns>
+    public IReadOnlyList<string> DeleteSetAside(IEnumerable<PlannedOperation> setAside, string release, string run, string actionLogPath, IReadOnlyCollection<string> allowedRoots)
+    {
+        ArgumentNullException.ThrowIfNull(setAside);
+        var problems = new List<string>();
+        foreach (var op in setAside)
+        {
+            if (!IsSetAside(op.Destination, allowedRoots))
+            {
+                problems.Add($"{op.Destination}: not a copy set aside by Ingest; left alone.");
+                continue;
+            }
+
+            try
+            {
+                var bytes = _fs.Exists(op.Destination) ? _fs.Length(op.Destination) : 0;
+                _fs.Delete(op.Destination);
+                Log(actionLogPath, run, release, op, bytes, "deleted", op.Destination);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                problems.Add($"{op.Destination}: {ex.Message}");
+            }
+        }
+
+        return problems;
+    }
+
+    /// <summary>
+    /// Deletes library copies that an undo set aside but a crash or restart stopped it deleting (see
+    /// <see cref="DeleteSetAside"/>). Run after <see cref="Recover"/>, with the log read again.
+    /// </summary>
+    /// <param name="actionLogLines">Lines of the action log.</param>
+    /// <param name="actionLogPath">The action log, to record what was deleted.</param>
+    /// <param name="allowedRoots">The current library folders.</param>
+    /// <returns>A description of each thing done or needing attention.</returns>
+    public IReadOnlyList<string> FinishDeletes(IEnumerable<string> actionLogLines, string actionLogPath, IReadOnlyCollection<string> allowedRoots)
+    {
+        ArgumentNullException.ThrowIfNull(actionLogLines);
+        var pending = new Dictionary<string, ActionLogLine>(StringComparer.Ordinal);
+        foreach (var entry in actionLogLines.Select(ActionLogLine.TryParse).OfType<ActionLogLine>())
+        {
+            if (entry.IsCompleted && entry.Phase is not null && Path.GetFileName(entry.Destination).EndsWith(TrashSuffix, StringComparison.Ordinal))
+            {
+                pending[entry.Destination] = entry;
+            }
+            else if (entry.Phase is "deleted" or "rolled-back")
+            {
+                pending.Remove(entry.Destination);
+            }
+        }
+
+        var results = new List<string>();
+        foreach (var e in pending.Values.Where(e => _fs.Exists(e.Destination)))
+        {
+            if (!IsSetAside(e.Destination, allowedRoots))
+            {
+                results.Add($"Needs attention: the action log names a set-aside copy that doesn't look like Ingest's ({e.Destination}); nothing was changed.");
+                continue;
+            }
+
+            results.AddRange(DeleteSetAside([new PlannedOperation(e.OperationKind, e.Source, e.Destination)], e.Release, e.Run ?? string.Empty, actionLogPath, allowedRoots)
+                .Select(p => "Needs attention: " + p)
+                .DefaultIfEmpty($"Deleted the library copy {e.Source} that an interrupted undo had set aside."));
+        }
+
+        return results;
+    }
+
     // With copy or hard link the release's own files stay (only library copies being replaced are moved)
     private static bool KeepsSource(IngestPlan plan, PlannedOperation op)
         => plan.Transfer != TransferMode.Move && op.Kind != OperationKind.Quarantine;
 
     private (IReadOnlyList<PlannedOperation> RolledBack, IReadOnlyList<string> Problems) RollBack(
-        string logPath, IngestPlan plan, PlannedOperation failed, long size, string temp, List<(PlannedOperation Op, long Bytes, string Temp)> done, List<string> created)
+        string logPath, string run, IngestPlan plan, PlannedOperation failed, long size, string temp, List<(PlannedOperation Op, long Bytes, string Temp)> done, List<string> created)
     {
         var rolledBack = new List<PlannedOperation>();
         var problems = new List<string>();
@@ -443,7 +571,7 @@ public sealed class PlanExecutor
                     _fs.Move(temp, failed.Source);
                 }
 
-                Log(logPath, plan.ReleaseName, failed, size, "rolled-back", temp);
+                Log(logPath, run, plan.ReleaseName, failed, size, "rolled-back", temp);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -463,7 +591,7 @@ public sealed class PlanExecutor
                         _fs.Delete(op.Destination);
                     }
 
-                    Log(logPath, plan.ReleaseName, op, bytes, "rolled-back", opTemp);
+                    Log(logPath, run, plan.ReleaseName, op, bytes, "rolled-back", opTemp);
                     rolledBack.Add(op);
                     continue;
                 }
@@ -476,7 +604,7 @@ public sealed class PlanExecutor
 
                 _fs.CreateDirectory(Path.GetDirectoryName(op.Source)!);
                 _fs.Move(op.Destination, op.Source);
-                Log(logPath, plan.ReleaseName, op, bytes, "rolled-back", opTemp);
+                Log(logPath, run, plan.ReleaseName, op, bytes, "rolled-back", opTemp);
                 rolledBack.Add(op);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -501,8 +629,8 @@ public sealed class PlanExecutor
         return (rolledBack, problems);
     }
 
-    private void Log(string path, string release, PlannedOperation op, long bytes, string phase, string temp)
-        => _fs.AppendLine(path, JsonSerializer.Serialize(new LogEntry
+    private void Log(string path, string? run, string release, PlannedOperation op, long bytes, string phase, string temp, DateTime? modified = null, bool? kept = null)
+        => _fs.AppendLine(path, JsonSerializer.Serialize(new ActionLogLine
         {
             Time = _clock.GetUtcNow().ToString("O", CultureInfo.InvariantCulture),
             Release = release,
@@ -512,47 +640,10 @@ public sealed class PlanExecutor
             Bytes = bytes,
             Phase = phase,
             Temp = temp,
+            Run = run,
+            Modified = modified?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            Kept = kept == true ? true : null,
         }));
-
-    /// <summary>One action-log line. Lines written before phases existed have no <see cref="Phase"/> and count as done.</summary>
-    private sealed record LogEntry
-    {
-        [System.Text.Json.Serialization.JsonPropertyName("time")]
-        public string Time { get; init; } = string.Empty;
-
-        [System.Text.Json.Serialization.JsonPropertyName("release")]
-        public string Release { get; init; } = string.Empty;
-
-        [System.Text.Json.Serialization.JsonPropertyName("kind")]
-        public string Kind { get; init; } = string.Empty;
-
-        [System.Text.Json.Serialization.JsonPropertyName("source")]
-        public string Source { get; init; } = string.Empty;
-
-        [System.Text.Json.Serialization.JsonPropertyName("destination")]
-        public string Destination { get; init; } = string.Empty;
-
-        [System.Text.Json.Serialization.JsonPropertyName("bytes")]
-        public long Bytes { get; init; }
-
-        [System.Text.Json.Serialization.JsonPropertyName("phase")]
-        public string? Phase { get; init; }
-
-        [System.Text.Json.Serialization.JsonPropertyName("temp")]
-        public string? Temp { get; init; }
-
-        public static LogEntry? TryParse(string line)
-        {
-            try
-            {
-                return JsonSerializer.Deserialize<LogEntry>(line);
-            }
-            catch (JsonException)
-            {
-                return null;
-            }
-        }
-    }
 }
 
 /// <summary>
@@ -586,6 +677,36 @@ public sealed class PhysicalFileOperations : IFileOperations
 
     /// <inheritdoc />
     public void AppendLine(string path, string line) => File.AppendAllLines(path, [line]);
+
+    /// <inheritdoc />
+    public DateTime? LastWriteUtc(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? File.GetLastWriteTimeUtc(path) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The free space on the file system a folder is on, for choosing between a library's folders.
+    /// </summary>
+    /// <param name="folder">An existing folder.</param>
+    /// <returns>The bytes free, or <c>null</c> if the folder isn't there or the space can't be read.</returns>
+    public static long? FreeBytes(string folder)
+    {
+        try
+        {
+            return !string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder) && MountOf(folder) is { } mount ? mount.AvailableFreeSpace : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+    }
 
     /// <inheritdoc />
     public bool HasRoomFor(string source, string destinationFolder, long bytes)
