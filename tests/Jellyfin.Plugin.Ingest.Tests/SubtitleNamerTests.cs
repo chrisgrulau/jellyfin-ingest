@@ -12,7 +12,11 @@ public class SubtitleNamerTests
     [InlineData("English", "Stem.en.srt")]
     [InlineData("eng", "Stem.en.srt")]
     [InlineData("en", "Stem.en.srt")]
-    [InlineData("Klingon", "Stem.srt")]
+    [InlineData("swe", "Stem.sv.srt")]
+    [InlineData("Swedish", "Stem.sv.srt")]
+    [InlineData("ger", "Stem.de.srt")]
+    [InlineData("Klingon", "Stem.Klingon.srt")]
+    [InlineData("not a tag!", "Stem.srt")]
     public void Language_is_normalised_to_two_letters(string language, string expected)
     {
         Assert.Equal(expected, Name(new SubtitleTrack { Language = language }));

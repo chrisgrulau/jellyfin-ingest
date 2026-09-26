@@ -31,7 +31,7 @@ public sealed record SubtitleTrack
 /// Any token that is not a language or flag becomes the track title, so disambiguation uses a readable title
 /// (<c>Alternate 2</c>) rather than a bare number.
 /// </summary>
-public static class SubtitleNamer
+public static partial class SubtitleNamer
 {
     private static readonly Dictionary<string, string> LanguageAliases = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -53,7 +53,11 @@ public static class SubtitleNamer
     /// <param name="value">For example <c>English</c>, <c>eng</c> or <c>en</c>.</param>
     /// <returns>The ISO 639-1 code, or <c>null</c> if not recognised.</returns>
     public static string? NormaliseLanguage(string? value)
-        => value is not null && LanguageAliases.TryGetValue(value.Trim(), out var code) ? code : null;
+        => value is null ? null
+            : LanguageAliases.TryGetValue(value.Trim(), out var code) ? code
+
+            // Every other ISO 639 language, from the shared table (not the server's culture data) (FAM-01)
+            : Common.Languages.IsoLanguages.TwoLetter(value);
 
     /// <summary>
     /// Builds a sidecar subtitle file name that does not collide with existing names.
@@ -93,6 +97,11 @@ public static class SubtitleNamer
         {
             name.Append('.').Append(lang);
         }
+        else if (track.Language is { } kept && KeptTag().IsMatch(kept))
+        {
+            // A tag the table doesn't know is kept as written rather than dropped (Jellyfin shows it as the language)
+            name.Append('.').Append(kept);
+        }
 
         if (track.Default)
         {
@@ -111,4 +120,7 @@ public static class SubtitleNamer
 
         return name.Append(extension.StartsWith('.') ? extension : "." + extension).ToString();
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z]{2,12}$")]
+    private static partial System.Text.RegularExpressions.Regex KeptTag();
 }
