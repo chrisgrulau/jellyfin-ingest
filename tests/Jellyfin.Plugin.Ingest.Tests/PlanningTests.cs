@@ -42,6 +42,9 @@ public class PlanningTests
 
         public Task<string?> GetEpisodeTitleAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, int episode, CancellationToken cancellationToken)
             => Task.FromResult<string?>(season == 1 && episode == 4 ? "Glass Harbour" : null);
+
+        public Task<IReadOnlyList<EpisodeListing>> ListSeasonAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<EpisodeListing>>([]);
     }
 
     // Folders (no extension) exist unless the libraries are offline; files exist only when the test says so
@@ -461,6 +464,9 @@ public class PlanningTests
 
         public Task<string?> GetEpisodeTitleAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, int episode, CancellationToken cancellationToken)
             => Task.FromResult<string?>(null);
+
+        public Task<IReadOnlyList<EpisodeListing>> ListSeasonAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<EpisodeListing>>([]);
     }
 
     [Fact]

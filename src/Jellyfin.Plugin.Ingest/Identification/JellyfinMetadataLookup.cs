@@ -16,6 +16,9 @@ namespace Jellyfin.Plugin.Ingest.Identification;
 /// </summary>
 public sealed class JellyfinMetadataLookup : IMetadataLookup
 {
+    /// <summary>The most episodes <see cref="ListSeasonAsync"/> asks for in one season.</summary>
+    public const int MaxListed = 300;
+
     private readonly IProviderManager _providers;
 
     /// <summary>
@@ -57,6 +60,42 @@ public sealed class JellyfinMetadataLookup : IMetadataLookup
         var query = new RemoteSearchQuery<EpisodeInfo> { SearchInfo = info };
         var results = await _providers.GetRemoteSearchResults<Episode, EpisodeInfo>(query, cancellationToken).ConfigureAwait(false);
         return results.Select(r => r.Name).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The providers answer one episode at a time, so this asks for 1, 2, 3 … until three in a row are missing (at most
+    /// <see cref="MaxListed"/>). The providers keep whole seasons in their own caches, so after the first answer the
+    /// rest are cheap.
+    /// </remarks>
+    public async Task<IReadOnlyList<EpisodeListing>> ListSeasonAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(seriesProviderIds);
+
+        var list = new List<EpisodeListing>();
+        var missing = 0;
+        for (var episode = 1; episode <= MaxListed && missing < 3; episode++)
+        {
+            var info = new EpisodeInfo { ParentIndexNumber = season, IndexNumber = episode };
+            foreach (var (provider, id) in seriesProviderIds)
+            {
+                info.SeriesProviderIds[provider] = id;
+            }
+
+            var results = await _providers.GetRemoteSearchResults<Episode, EpisodeInfo>(new RemoteSearchQuery<EpisodeInfo> { SearchInfo = info }, cancellationToken).ConfigureAwait(false);
+            var hit = results.FirstOrDefault(r => !string.IsNullOrWhiteSpace(r.Name));
+            if (hit is null)
+            {
+                missing++;
+                continue;
+            }
+
+            missing = 0;
+            var overview = results.Select(r => r.Overview).FirstOrDefault(o => !string.IsNullOrWhiteSpace(o));
+            list.Add(new EpisodeListing(season, episode, hit.Name!, hit.ProductionYear ?? hit.PremiereDate?.Year, overview));
+        }
+
+        return list;
     }
 
     private static List<MetadataCandidate> ToCandidates(IEnumerable<RemoteSearchResult> results)

@@ -55,6 +55,9 @@ public sealed class SearchCacheTests : IDisposable
             EpisodeLookups++;
             return Task.FromResult<string?>(episode == 1 ? "Pilot" : null);
         }
+
+        public Task<IReadOnlyList<EpisodeListing>> ListSeasonAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<EpisodeListing>>([]);
     }
 
     [Fact]

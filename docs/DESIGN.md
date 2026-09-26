@@ -75,6 +75,22 @@ purpose `ingest.match`) with a JSON schema that allows only `{choice, reason}`.
   shows.
 - Answers are memoised per sweep, so a release that waits for several sweeps isn't asked again each time.
 
+### Episodes named by title
+
+A name like `Show S13SP2 A Special Title` gives season 0 and an episode title but no number. `MediaIdentifier` then asks
+`IMetadataLookup.ListSeasonAsync` for that season. Jellyfin's providers answer one episode at a time, so the lookup
+asks for 1, 2, 3 … until three in a row are missing (at most 300). The providers cache whole seasons themselves, so this
+is cheap after the first answer. `CachingMetadataLookup` keeps each list in memory for 24 hours (not on disk, because
+the lists carry synopses).
+
+- A title with similarity **≥ 0.85**, and at least 0.10 ahead of the next episode, is taken.
+- Otherwise, if the tie-breaker is also an `IEpisodePicker` (the AI plugin, purpose `ingest.episode`), it gets up to
+  40 episodes, likeliest first (title similarity, plus the year from the name). It sees each episode's code, title,
+  year and the first 200 characters of its synopsis, and must answer with one of their positions or -1.
+- Anything else leaves the release in review, with the reason.
+
+The same path runs when a person chooses the series in review.
+
 ## Subtitle pairing
 
 For each video in a release, in order:

@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Episodes named by title only** (typically specials, `Show S13SP2 A Special Title`): Ingest now lists that
+  season's episodes from your metadata providers and files the one whose title clearly matches. Before, these always
+  waited for review.
+  - If no title matches clearly and the Shoal AI plugin is installed and allows Ingest, the AI chooses one of the
+    listed episodes (or none), from the episode titles, years and the first 200 characters of each synopsis. Up to
+    40 episodes are offered.
+  - Works for a series chosen in review too.
+  - Season lists are kept in memory for 24 hours.
+
 ## [0.2.0-alpha] - 2026-09-26
 
 ### Added
