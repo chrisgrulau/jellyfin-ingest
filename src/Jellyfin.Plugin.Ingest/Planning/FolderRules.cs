@@ -93,6 +93,10 @@ public static class FolderRules
             : null;
     }
 
+    // Compared as written and after following folder links, so a path that reaches a library through a link is caught
     private static bool Overlap(string a, string b)
-        => !string.IsNullOrWhiteSpace(b) && Path.IsPathFullyQualified(b) && (PathGuard.IsSameOrUnder(a, b) || PathGuard.IsSameOrUnder(b, a));
+        => !string.IsNullOrWhiteSpace(b) && Path.IsPathFullyQualified(b)
+            && (Lexical(a, b) || Lexical(PathGuard.Resolve(a), PathGuard.Resolve(b)));
+
+    private static bool Lexical(string a, string b) => PathGuard.IsSameOrUnder(a, b) || PathGuard.IsSameOrUnder(b, a);
 }

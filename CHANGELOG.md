@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **ING-19:** a library whose folder is a whole drive or file-system root (`E:\`, `/`) can be filed into, and a watch
+  folder inside one is caught by the folder rules. Before, the containment check never matched a root.
+- **ING-24:**
+  - Jellyfin's metadata folder and transcode folder are protected like its other folders, even when they have been
+    moved out of the data folder.
+  - The folder rules also compare paths after following folder links, so a watch or quarantine folder that reaches a
+    library through a symbolic link is caught.
+  - A top-level release Jellyfin's account can't read now waits on the plugin page with the reason, instead of being
+    skipped without a word.
+
 ## [0.1.7-alpha] - 2026-09-25
 
 ### Added

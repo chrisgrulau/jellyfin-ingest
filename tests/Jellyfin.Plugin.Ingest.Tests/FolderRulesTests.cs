@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Jellyfin.Plugin.Ingest.Planning;
 using Xunit;
@@ -53,5 +54,76 @@ public class FolderRulesTests
     {
         Assert.Empty(Problems(["/in"], "/in/.q"));
         Assert.Empty(Problems(["/in"], "/srv/quarantine"));
+    }
+}
+
+// Review pass 2: ING-19 (roots) and ING-24 (links, unreadable releases)
+public sealed class RootsAndLinksTests : IDisposable
+{
+    private readonly string _root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ingest-roots-" + System.Guid.NewGuid().ToString("N"));
+
+    public RootsAndLinksTests() => System.IO.Directory.CreateDirectory(_root);
+
+    public void Dispose()
+    {
+        foreach (var d in System.IO.Directory.EnumerateDirectories(_root, "*", System.IO.SearchOption.AllDirectories))
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                System.IO.File.SetUnixFileMode(d, System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite | System.IO.UnixFileMode.UserExecute);
+            }
+        }
+
+        System.IO.Directory.Delete(_root, recursive: true);
+    }
+
+    [Fact]
+    public void A_file_system_root_contains_everything_on_it()
+    {
+        var root = System.IO.Path.GetPathRoot(_root)!;
+        Assert.True(Jellyfin.Plugin.Ingest.Planning.PathGuard.IsUnder(System.IO.Path.Combine(root, "Films", "X"), root));
+        Assert.True(Jellyfin.Plugin.Ingest.Planning.PathGuard.IsSameOrUnder(root, root));
+        Assert.False(Jellyfin.Plugin.Ingest.Planning.PathGuard.IsUnder(root, root));
+    }
+
+    [Fact]
+    public void A_watch_folder_inside_a_whole_drive_library_is_flagged()
+    {
+        var root = System.IO.Path.GetPathRoot(_root)!;
+        var problems = Jellyfin.Plugin.Ingest.Planning.FolderRules.Check([System.IO.Path.Combine(_root, "in")], null, [root], []);
+        Assert.Contains(problems, p => p.Problem.Contains("library folder", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_watch_folder_that_reaches_a_library_through_a_link_is_flagged()
+    {
+        var library = System.IO.Path.Combine(_root, "library");
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(library, "in"));
+        var link = System.IO.Path.Combine(_root, "shortcut");
+        System.IO.Directory.CreateSymbolicLink(link, library);
+
+        var problems = Jellyfin.Plugin.Ingest.Planning.FolderRules.Check([System.IO.Path.Combine(link, "in")], null, [library], []);
+
+        Assert.Contains(problems, p => p.Problem.Contains("library folder", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_release_the_account_cannot_read_is_reported_not_skipped()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return;
+        }
+
+        var watch = System.IO.Path.Combine(_root, "watch");
+        var locked = System.IO.Path.Combine(watch, "Locked.Release.2024");
+        System.IO.Directory.CreateDirectory(locked);
+        System.IO.File.WriteAllText(System.IO.Path.Combine(locked, "a.mkv"), "x");
+        System.IO.File.SetUnixFileMode(locked, System.IO.UnixFileMode.None);
+
+        var scan = Jellyfin.Plugin.Ingest.Service.ReleaseScanner.Scan(watch, System.IO.Path.Combine(watch, ".ingest-quarantine"));
+
+        Assert.Equal(["Locked.Release.2024"], scan.Unreadable);
+        Assert.False(scan.Releases.ContainsKey("Locked.Release.2024"));
     }
 }
