@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-alpha] - 2026-09-26
+
 ### Added
 
 - **ING-30: Choose file by file** in review, for a release with several files waiting. **Replace existing copies**

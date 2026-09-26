@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Ingest"
 guid: "88d6ced9-052e-45f6-b21d-fc4eefa7998d"
-version: "0.4.0.0"
+version: "0.5.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -15,8 +15,6 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Ingest.dll"
 changelog: >
-  0.4.0-alpha: Replace existing copies in review. A release held back because its episodes or films are already on
-  the server (a better-quality copy, say) can replace them: the old copies and their subtitle files move to
-  quarantine, restorable until it is purged, and the new files are filed in their place, all-or-nothing. Also: AI
-  questions in any script fit its limit, the quarantine purge carries on past a stuck file, and non-ASCII digits in
-  names no longer throw.
+  0.5.0-alpha: choose file by file in review. For a release with several files waiting, each file can replace its
+  copies on the server, be quarantined (with its subtitles) instead of filed, or wait; the rest of the release is
+  filed as usual. Replace existing copies and Quarantine release still act on the whole release.
