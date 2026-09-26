@@ -39,6 +39,14 @@ public sealed record LibraryTargets(LibraryTarget? Tv, LibraryTarget? Films)
 }
 
 /// <summary>
+/// Where a copy being replaced lives.
+/// </summary>
+/// <param name="Library">Its library.</param>
+/// <param name="Root">The library folder it is in.</param>
+/// <param name="TitleFolder">The film or show folder directly inside <paramref name="Root"/>, if it is in one.</param>
+internal sealed record ReplacedHome(MediaLibrary Library, string Root, string? TitleFolder);
+
+/// <summary>
 /// A decision made in review: file the release as this title, into this library.
 /// </summary>
 /// <param name="Candidate">The chosen title.</param>
@@ -86,6 +94,13 @@ public sealed class IngestPlanner
     /// the video's name says: the video is an episode with that number (ING-30).
     /// </summary>
     public IReadOnlyDictionary<string, Service.EpisodeNumber> EpisodeNumbers { get; init; } = new Dictionary<string, Service.EpisodeNumber>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Gets the server's libraries. A video that replaces a copy already on the server is filed where that copy lives
+    /// (its library folder, reusing its film or show folder) when that folder belongs to one of these libraries of the
+    /// right kind, unless a library was chosen in review; otherwise it is routed as usual and the plan says why.
+    /// </summary>
+    public IReadOnlyList<MediaLibrary> Libraries { get; init; } = [];
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IngestPlanner"/> class.
@@ -192,6 +207,36 @@ public sealed class IngestPlanner
         var requiredFolders = new HashSet<string>(StringComparer.Ordinal);
         var plannedEpisodes = new HashSet<(string Series, int Season, int Episode)>();
         var notes = new List<string>();
+        var replacementNotes = new List<string>();
+        var replacedIn = new List<string>();
+        var tidy = new List<EmptiedFolder>();
+
+        // Where a replacement went, in plain language; and the replaced copy's folders, if the new copy went elsewhere
+        // (they are removed after filing if nothing is left in them)
+        void Replaced(string video, string old, bool isTv, ReplacedHome? home, string owner, string? libraryRoot)
+        {
+            var library = home?.Library.Name ?? LibraryNameOf(owner, libraryRoot);
+            replacedIn.Add(library);
+            var line = $"{Path.GetFileName(video)}: replacing {Path.GetFileName(old)} in {library}";
+            if (home is null && !PathGuard.IsSameOrUnder(old, owner))
+            {
+                line += chosen is not null
+                    ? $" (the library chosen in review; the old copy was in {LibraryNameOf(old, null)})"
+                    : $" (the old copy's folder, {Path.GetDirectoryName(old)}, isn't in one of the server's {(isTv ? "Shows" : "Movies")} libraries, so the new copy is filed as usual)";
+                if (ContainingLocation(old) is { } oldRoot)
+                {
+                    for (var dir = Path.GetDirectoryName(old); dir is not null && PathGuard.IsUnder(dir, oldRoot) && _isInsideLibrary(dir); dir = Path.GetDirectoryName(dir))
+                    {
+                        if (!tidy.Any(t => PathGuard.SamePath(t.Folder, dir)))
+                        {
+                            tidy.Add(new EmptiedFolder(dir, oldRoot));
+                        }
+                    }
+                }
+            }
+
+            replacementNotes.Add(line + ".");
+        }
 
         // Files a person chose not to file are quarantined with the leftovers (their subtitles too, as unpaired)
         var skipped = mains.Where(v => FileDecisions.TryGetValue(v, out var d) && d == Service.FileDecision.Quarantine).ToList();
@@ -252,6 +297,23 @@ public sealed class IngestPlanner
                     continue;
                 }
 
+                if (duplicates.Count > 0)
+                {
+                    // Filed where the copy it replaces lives (a library chosen in review wins)
+                    var old = duplicates[0];
+                    var home = chosen is null ? HomeOf(old, isTv: true) : null;
+                    if (home is not null)
+                    {
+                        owner = home.TitleFolder ?? Path.Combine(home.Root, MediaNamer.SeriesFolderName(ep.Series));
+                        libraryRoot = home.Root;
+                        var oldFolder = Path.GetDirectoryName(old)!;
+                        var season = home.TitleFolder is not null && PathGuard.IsSameOrUnder(oldFolder, owner) ? oldFolder : Path.Combine(owner, MediaNamer.SeasonFolderName(ep.Season));
+                        destination = Path.Combine(season, MediaNamer.EpisodeFileName(ep, ext));
+                    }
+
+                    Replaced(video, old, isTv: true, home, owner, libraryRoot);
+                }
+
                 keys.ForEach(k => plannedEpisodes.Add(k));
             }
             else
@@ -272,6 +334,20 @@ public sealed class IngestPlanner
                 {
                     review.Add(new ReviewItem(Abs(video), $"{movie.Title}{(movie.Edition is null ? string.Empty : " (" + movie.Edition + ")")} is already on the server: {duplicate}") { Candidates = result.Candidates, Existing = duplicate });
                     continue;
+                }
+
+                if (duplicate is not null)
+                {
+                    // Filed where the copy it replaces lives, reusing its film folder (a library chosen in review wins)
+                    var home = chosen is null ? HomeOf(duplicate, isTv: false) : null;
+                    if (home is not null)
+                    {
+                        owner = home.TitleFolder ?? Path.Combine(home.Root, MediaNamer.MovieFolderName(movie));
+                        libraryRoot = home.Root;
+                        destination = Path.Combine(owner, MediaNamer.MovieFileName(movie, ext));
+                    }
+
+                    Replaced(video, duplicate, isTv: false, home, owner, libraryRoot);
                 }
             }
 
@@ -411,12 +487,48 @@ public sealed class IngestPlanner
             RequiredFolders = [.. requiredFolders],
             Notes = notes,
             Replacing = replacing,
+            ReplacementNotes = replacementNotes,
+            ReplacedIn = replacedIn,
+            TidyIfEmpty = tidy,
             Skipped = [.. skipped.Select(Abs)],
             Transfer = Transfer,
 
             // Every video set aside by choice: the release is quarantined as a whole
             WholeReleaseQuarantine = skipped.Count == mains.Count,
         };
+    }
+
+    // The library folder of the server's libraries (any kind) a path is inside, if any (the innermost, should they nest)
+    private string? ContainingLocation(string path)
+        => Libraries.SelectMany(l => l.Locations)
+            .Where(r => !string.IsNullOrWhiteSpace(r) && Path.IsPathFullyQualified(r) && PathGuard.IsUnder(path, r))
+            .OrderByDescending(r => PathGuard.Normalise(r).Length)
+            .FirstOrDefault();
+
+    // The name of the library a path is in; otherwise the given folder, or the path's own folder
+    private string LibraryNameOf(string path, string? otherwise)
+        => ContainingLocation(path) is { } root
+            ? Libraries.First(l => l.Locations.Any(r => PathGuard.SamePath(r, root))).Name
+            : otherwise ?? Path.GetDirectoryName(path) ?? path;
+
+    // Where a copy being replaced lives: a folder of one of the server's libraries that takes this kind of media, and
+    // the film or show folder directly inside it (none when the copy sits in the library folder itself)
+    private ReplacedHome? HomeOf(string old, bool isTv)
+    {
+        var match = Libraries
+            .Where(l => isTv ? l.Kind is LibraryKind.Shows or LibraryKind.Mixed : l.Kind is LibraryKind.Films or LibraryKind.Mixed)
+            .SelectMany(l => l.Locations.Select(r => (Library: l, Root: r)))
+            .Where(x => !string.IsNullOrWhiteSpace(x.Root) && Path.IsPathFullyQualified(x.Root) && PathGuard.IsUnder(old, x.Root) && _isInsideLibrary(old))
+            .OrderByDescending(x => PathGuard.Normalise(x.Root).Length)
+            .FirstOrDefault();
+        if (match.Library is null || !PathGuard.SamePath(ContainingLocation(old), match.Root))
+        {
+            return null;
+        }
+
+        var root = PathGuard.Normalise(match.Root);
+        var parts = Path.GetRelativePath(root, PathGuard.Normalise(old)).Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        return new ReplacedHome(match.Library, root, parts.Length > 1 ? Path.Combine(root, parts[0]) : null);
     }
 
     private static Dictionary<string, string> MovieIds(MovieIdentity movie)

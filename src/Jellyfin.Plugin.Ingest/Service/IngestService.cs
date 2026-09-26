@@ -177,7 +177,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
         _lookup.BeginSweep();
         var sweep = new Sweep(
             new MediaIdentifier(_lookup, new JellyfinLibraryIndex(_libraryManager, []), config.UseAiTiebreak ? new AiTiebreaker() : null, config.UseTranscripts ? _transcriber : null),
-            [.. libraries.SelectMany(l => l.Locations)]);
+            [.. libraries.SelectMany(l => l.Locations)],
+            libraries);
         var problems = FolderPolicy.FolderProblems(config, libraries, _paths, _configuration);
         _maintenance.RunDue(config, libraries, problems);
 
@@ -459,6 +460,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
             FileDecisions = previous?.FileDecisions ?? new Dictionary<string, FileDecision>(StringComparer.Ordinal),
             EpisodeNumbers = previous?.FileEpisodes ?? new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal),
             Transfer = watch.Transfer,
+
+            // A replacement is filed where the copy it replaces lives
+            Libraries = sweep.Libraries,
         };
         var plan = await planner.PlanAsync(watch.Path, release, files, targets, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
 
@@ -670,5 +674,5 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
     // What one sweep shares across its releases: the identifier (with its library index, loaded once) and the server's
     // library folders
-    private sealed record Sweep(MediaIdentifier Identifier, IReadOnlyList<string> LibraryFolders);
+    private sealed record Sweep(MediaIdentifier Identifier, IReadOnlyList<string> LibraryFolders, IReadOnlyList<MediaLibrary> Libraries);
 }

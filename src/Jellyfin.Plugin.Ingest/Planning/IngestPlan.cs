@@ -5,6 +5,13 @@ using Jellyfin.Plugin.Ingest.Identification;
 namespace Jellyfin.Plugin.Ingest.Planning;
 
 /// <summary>
+/// A folder that is removed after filing if it is left empty.
+/// </summary>
+/// <param name="Folder">The folder (absolute).</param>
+/// <param name="LibraryRoot">The library folder it is inside; it is never removed itself.</param>
+public sealed record EmptiedFolder(string Folder, string LibraryRoot);
+
+/// <summary>
 /// Why a planned operation exists.
 /// </summary>
 public enum OperationKind
@@ -131,6 +138,25 @@ public sealed record IngestPlan
     /// the library files being replaced are moved).
     /// </summary>
     public Configuration.TransferMode Transfer { get; init; }
+
+    /// <summary>
+    /// Gets, for each video that replaces a copy already on the server, where it is filed in plain language (e.g.
+    /// <c>Replacing … in Movies</c>), and why when that isn't the library the replaced copy was in.
+    /// </summary>
+    public IReadOnlyList<string> ReplacementNotes { get; init; } = [];
+
+    /// <summary>Gets the library each replacing video is filed into (by name; one entry per video).</summary>
+    public IReadOnlyList<string> ReplacedIn { get; init; } = [];
+
+    /// <summary>Gets a one-line summary of where replacements are filed, or empty when nothing is replaced.</summary>
+    public string ReplacementSummary => ReplacedIn.Count == 0 ? string.Empty
+        : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"Replacing {ReplacedIn.Count} {(ReplacedIn.Count == 1 ? "copy" : "copies")} in {string.Join(", ", ReplacedIn.Distinct(System.StringComparer.Ordinal))}.");
+
+    /// <summary>
+    /// Gets the folders a replaced copy leaves behind when its replacement is filed somewhere else: after filing, each
+    /// is removed if it is then truly empty (listed deepest first), and never unless it is inside its library folder.
+    /// </summary>
+    public IReadOnlyList<EmptiedFolder> TidyIfEmpty { get; init; } = [];
 
     /// <summary>Gets the release's videos quarantined by a person's choice instead of being filed (absolute paths).</summary>
     public IReadOnlyList<string> Skipped { get; init; } = [];

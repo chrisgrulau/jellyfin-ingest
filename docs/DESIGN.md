@@ -69,6 +69,13 @@ repeat the copies the page showed (otherwise 409). The next sweep then plans wit
 - they become quarantine moves into `<dated>/Replaced/`, placed first, so the new files can take their names;
 - the executor accepts a source outside the release only if it is in `Replacing` and the move is a quarantine move.
   The moves are logged as quarantine, so the purge and a rollback treat them like any other.
+- the new copy is filed where the copy it replaces lives: the same library folder, reusing the film or show folder
+  (and an episode's season folder), when that folder belongs to one of the server's libraries of the right kind
+  (`IngestPlanner.Libraries`). A library chosen in review (`ChosenMatch.Target`) wins. Each video follows its own
+  replaced copy; videos with none are routed as usual. When the copy's folder isn't in such a library, the video is
+  routed as usual and `IngestPlan.ReplacementNotes` says why. Whenever the new copy goes elsewhere, the replaced
+  copy's folders are listed in `IngestPlan.TidyIfEmpty` and removed after filing if truly empty (never the library
+  folder itself). `IngestPlan.ReplacementSummary` ("Replacing 1 copy in <library>.") is added to the activity entry.
 
 ### Decisions file by file
 
