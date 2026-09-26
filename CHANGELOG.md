@@ -14,6 +14,12 @@ All notable changes to this project are documented here. The format follows
 
   **Process now** skips the rest of a release's settle wait and starts a sweep straight away. The release is still
   only processed if nothing in it has changed since the last look. After a restart, releases settle again as before.
+- **ING-30: Season and episode in review.** Under **Choose file by file**, each video of a show can be given a season and
+  episode, for names Ingest can't read numbers from ("Show - 125", a date, no number at all). The video is then filed
+  as that episode of the chosen or suggested show, whatever its name says; season 0 is for specials. The numbers are
+  checked on the server (both or neither, in range, a video, not a file being quarantined, no episode given twice)
+  and kept when the release is planned again. **Clear choice and retry** clears them.
+  - A card with several waiting videos now says that **Use this** files all of them as that title.
 
 ### Changed
 

@@ -46,6 +46,9 @@
       #IngestConfigPage .ingest-files > summary { cursor: pointer; }
       #IngestConfigPage .ingest-files table { width: 100%; border-collapse: collapse; margin: .5em 0; }
       #IngestConfigPage .ingest-files td { padding: .3em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; word-break: break-word; }
+      #IngestConfigPage .ingest-files td.ingest-num { white-space: nowrap; }
+      #IngestConfigPage .ingest-files input[type=number] { width: 4.5em; padding: .3em .4em; background: transparent; color: inherit; border: 1px solid rgba(128,128,128,.5); border-radius: 4px; font: inherit; }
+      #IngestConfigPage .ingest-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
       #IngestConfigPage .ingest-files select { padding: .3em .4em; background: rgba(128,128,128,.15); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
       #IngestConfigPage .ingest-actions .emby-button { margin: 0; }
       #IngestConfigPage .ingest-chosen { padding: .5em .75em; border-radius: 4px; background: rgba(0,164,220,.15); border-left: 3px solid rgba(0,164,220,.7); margin: .5em 0; }
@@ -318,16 +321,38 @@
           var mine = fileChoices[r.Id] && fileChoices[r.Id][i.Source];
           return mine || decisionNames[(r.FileDecisions || {})[i.Source]] || 'later';
         }
-        function perFile(r) {
+        // Season and episode typed for a video (ING-30), kept until applied like the choices above
+        var fileNums = {};
+        function fileNum(r, i) {
+          var mine = fileNums[r.Id] && fileNums[r.Id][i.Source];
+          if (mine) { return mine; }
+          var saved = (r.FileEpisodes || {})[i.Source];
+          return saved ? { s: String(saved.Season), e: String(saved.Episode) } : { s: '', e: '' };
+        }
+        // A show was chosen or suggested, so its videos can be given a season and episode
+        function looksTv(r) {
+          return r.Chosen ? !!r.Chosen.Candidate.IsSeries : (r.Candidates || []).some(function (c) { return c.Candidate.IsSeries; });
+        }
+        function videoCount(r) { return (r.Items || []).filter(function (i) { return i.IsVideo; }).length; }
+        function perFile(r, n) {
           var items = r.Items || [];
-          if (items.length < 2) { return ''; }
-          return '<details class="ingest-files"' + (filesOpen[r.Id] ? ' open' : '') + '><summary>Choose file by file</summary><table>' + items.map(function (i) {
+          var numbers = looksTv(r) && videoCount(r) > 0;
+          if (items.length < 2 && !numbers) { return ''; }
+          return '<details class="ingest-files"' + (filesOpen[r.Id] ? ' open' : '') + '><summary>Choose file by file</summary><table>' + items.map(function (i, k) {
             var c = fileChoice(r, i);
+            var id = 'ingest-f-' + n + '-' + k;
             var opt = function (v, t) { return '<option value="' + v + '"' + (c === v ? ' selected' : '') + '>' + t + '</option>'; };
-            return '<tr><td>' + esc(i.Source.split(/[\\/]/).pop()) + '<div class="ingest-muted">' + esc(i.Reason) + '</div></td><td><select class="ingest-file-choice" data-source="' + esc(i.Source) + '">' +
-              opt('later', 'Decide later') + (i.Existing ? opt('replace', 'Replace existing') : '') + opt('quarantine', 'Quarantine this file') + '</select></td></tr>';
+            var num = numbers && i.IsVideo ? fileNum(r, i) : null;
+            return '<tr><td>' + esc(i.Source.split(/[\\/]/).pop()) + '<div class="ingest-muted">' + esc(i.Reason) + '</div></td>' +
+              '<td><label class="ingest-visually-hidden" for="' + id + '">What to do with ' + esc(i.Source.split(/[\\/]/).pop()) + '</label><select id="' + id + '" class="ingest-file-choice" data-source="' + esc(i.Source) + '">' +
+              opt('later', 'Decide later') + (i.Existing ? opt('replace', 'Replace existing') : '') + opt('quarantine', 'Quarantine this file') + '</select></td>' +
+              '<td class="ingest-num">' + (num
+                ? '<label for="' + id + '-s">Season</label> <input id="' + id + '-s" class="ingest-file-num" data-part="s" data-source="' + esc(i.Source) + '" type="number" min="0" max="2999" inputmode="numeric" value="' + esc(num.s) + '" />' +
+                  ' <label for="' + id + '-e">Episode</label> <input id="' + id + '-e" class="ingest-file-num" data-part="e" data-source="' + esc(i.Source) + '" type="number" min="1" max="9999" inputmode="numeric" value="' + esc(num.e) + '" />'
+                : '') + '</td></tr>';
           }).join('') + '</table><button is="emby-button" type="button" class="raised button-alt ingest-apply-files"><span>Apply these choices</span></button>' +
-            '<div class="ingest-muted">Files left as "Decide later" keep the release waiting; the others are handled and the rest of the release is filed.</div></details>';
+            '<div class="ingest-muted">Files left as "Decide later" keep the release waiting; the others are handled and the rest of the release is filed.' +
+            (numbers ? ' A season and episode files that video as that episode of the chosen show, whatever its name says (season 0 for specials); leave both empty to go by the name.' : '') + '</div></details>';
         }
 
         // A release held back only by copies already on the server can replace them (they go to quarantine)
@@ -402,17 +427,19 @@
           }).join('');
           var more = cands.length > SHOWN && !expanded[key]
             ? '<button type="button" class="ingest-more" data-key="' + esc(key) + '">Show ' + (cands.length - SHOWN) + ' more</button>' : '';
+          var videos = videoCount(r);
+          var warn = videos > 1 ? '<div class="ingest-muted">“Use this” files all ' + videos + ' waiting videos as this title. To set one aside, use <em>Choose file by file</em> below.</div>' : '';
           return '<div class="ingest-pick" data-list="' + list + '">' +
             '<div class="ingest-into"><strong>' + (list === 'suggested' ? 'Possible matches' : 'Search results') + '</strong>' +
             '<label>File into <select class="ingest-lib" data-key="' + esc(key) + '">' + (opts || '<option value="">No ' + (isTv ? 'TV' : 'film') + ' library</option>') + '</select></label></div>' +
-            '<table class="ingest-cands"><tbody>' + rows + '</tbody></table>' + more + '</div>';
+            warn + '<table class="ingest-cands"><tbody>' + rows + '</tbody></table>' + more + '</div>';
         }
 
         function renderReviews() {
           var box = page.querySelector('#Reviews');
           page.querySelector('#ReviewCount').textContent = reviews.length ? '(' + reviews.length + ')' : '';
           if (!reviews.length) { box.innerHTML = '<p class="ingest-muted">Nothing waiting. Releases Ingest can\'t file confidently will appear here.</p>'; return; }
-          box.innerHTML = reviews.map(function (r) {
+          box.innerHTML = reviews.map(function (r, n) {
             var pending = r.Request && r.Request !== 'None';
             var html = '<div class="ingest-card" data-id="' + esc(r.Id) + '">' +
               '<h4>' + esc(r.Release) + '</h4>' +
@@ -444,7 +471,7 @@
               '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>' + (r.Chosen ? 'Clear choice and retry' : 'Retry') + '</span></button>' +
               (canReplace(r) ? '<button is="emby-button" type="button" class="raised button-submit ingest-replace"><span>' + (confirmReplace[r.Id] ? 'Confirm: replace ' + existingCount(r) + ' file' + (existingCount(r) === 1 ? '' : 's') + ' on the server' : 'Replace existing copies') + '</span></button>' : '') +
               '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>' +
-              '</div>' + perFile(r);
+              '</div>' + perFile(r, n);
             return html + '</div>';
           }).join('');
         }
@@ -605,8 +632,16 @@
           } else if (btn.classList.contains('ingest-apply-files')) {
             var rf = reviewById(id);
             if (!rf) { return; }
-            var decisions = rf.Items.map(function (i) { return { Source: i.Source, Action: fileChoice(rf, i), Existing: i.Existing }; });
+            var decisions = rf.Items.map(function (i) {
+              var d = { Source: i.Source, Action: fileChoice(rf, i), Existing: i.Existing };
+              var s = card.querySelector('.ingest-file-num[data-part="s"][data-source="' + CSS.escape(i.Source) + '"]');
+              var ep = card.querySelector('.ingest-file-num[data-part="e"][data-source="' + CSS.escape(i.Source) + '"]');
+              // Both empty clears numbers given before; the server checks the rest
+              if (s && ep) { d.Season = s.value === '' ? null : parseInt(s.value, 10); d.Episode = ep.value === '' ? null : parseInt(ep.value, 10); }
+              return d;
+            });
             delete fileChoices[id];
+            delete fileNums[id];
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Files', { Decisions: decisions });
           } else if (btn.classList.contains('ingest-replace')) {
             var rr = reviewById(id);
@@ -624,6 +659,17 @@
         page.querySelector('#Reviews').addEventListener('change', function (e) {
           var lib = e.target.closest('.ingest-lib');
           if (lib) { libChoice[lib.getAttribute('data-key')] = lib.value; return; }
+          var num = e.target.closest('.ingest-file-num');
+          if (num) {
+            var nc = e.target.closest('.ingest-card').getAttribute('data-id');
+            var src = num.getAttribute('data-source');
+            fileNums[nc] = fileNums[nc] || {};
+            var cur = fileNums[nc][src] || fileNum(reviewById(nc), { Source: src });
+            cur = { s: cur.s, e: cur.e };
+            cur[num.getAttribute('data-part')] = num.value;
+            fileNums[nc][src] = cur;
+            return;
+          }
           var sel = e.target.closest('.ingest-file-choice');
           var card = e.target.closest('.ingest-card');
           if (!sel || !card) { return; }

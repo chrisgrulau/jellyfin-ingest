@@ -82,6 +82,12 @@ public sealed class IngestPlanner
     public IReadOnlyDictionary<string, Service.FileDecision> FileDecisions { get; init; } = new Dictionary<string, Service.FileDecision>(StringComparer.Ordinal);
 
     /// <summary>
+    /// Gets season and episode numbers given in review (by video, relative to the watch folder), used instead of what
+    /// the video's name says: the video is an episode with that number (ING-30).
+    /// </summary>
+    public IReadOnlyDictionary<string, Service.EpisodeNumber> EpisodeNumbers { get; init; } = new Dictionary<string, Service.EpisodeNumber>(StringComparer.Ordinal);
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="IngestPlanner"/> class.
     /// </summary>
     /// <param name="identifier">Identifies main videos.</param>
@@ -166,6 +172,12 @@ public sealed class IngestPlanner
         var roles = files.ToDictionary(f => f.RelativePath, ReleaseClassifier.Classify, StringComparer.Ordinal);
         var videos = roles.Where(r => r.Value == FileRole.Video).Select(r => r.Key).ToList();
         var parsed = videos.ToDictionary(v => v, ReleaseNameParser.Parse, StringComparer.Ordinal);
+
+        // Numbers given in review make the video that episode, whatever its name says
+        foreach (var (video, number) in EpisodeNumbers.Where(e => parsed.ContainsKey(e.Key) && e.Value.IsValid))
+        {
+            parsed[video] = parsed[video] with { Kind = MediaKind.Episode, Season = number.Season, Episode = number.Episode, EndingEpisode = null, Extra = ExtraType.None };
+        }
         var mains = videos.Where(v => parsed[v].Extra == ExtraType.None).ToList();
         var extras = videos.Where(v => parsed[v].Extra is not (ExtraType.None or ExtraType.Sample)).ToList();
 

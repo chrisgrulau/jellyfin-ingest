@@ -335,6 +335,7 @@ public class IngestController : ControllerBase
         }
 
         var decisions = new Dictionary<string, FileDecision?>(StringComparer.Ordinal);
+        var episodes = new Dictionary<string, EpisodeNumber?>(StringComparer.Ordinal);
         foreach (var choice in request.Decisions ?? [])
         {
             var item = review.Items.FirstOrDefault(i => string.Equals(i.Source, choice.Source, StringComparison.Ordinal));
@@ -342,6 +343,14 @@ public class IngestController : ControllerBase
             {
                 return BadRequest("That file isn't waiting in this review.");
             }
+
+            // A season and episode (ING-30): both or neither, for a video, in range
+            if (EpisodeNumber.Read(choice.Season, choice.Episode, item, choice.Action, out var number) is { } problem)
+            {
+                return BadRequest(problem);
+            }
+
+            episodes[item.Source] = number;
 
             switch (choice.Action)
             {
@@ -369,14 +378,22 @@ public class IngestController : ControllerBase
             }
         }
 
-        if (!_state.RequestFiles(id, decisions))
+        // Two videos given the same episode would only wait again
+        var repeated = episodes.Values.OfType<EpisodeNumber>().GroupBy(n => n).FirstOrDefault(g => g.Count() > 1)?.Key;
+        if (repeated is not null)
+        {
+            return BadRequest(string.Create(CultureInfo.InvariantCulture, $"Two files are given season {repeated.Season}, episode {repeated.Episode}; each file needs its own episode."));
+        }
+
+        if (!_state.RequestFiles(id, decisions, episodes))
         {
             return NotFound();
         }
 
         var replace = decisions.Values.Count(d => d == FileDecision.Replace);
         var quarantine = decisions.Values.Count(d => d == FileDecision.Quarantine);
-        RecordDecision(review, string.Create(CultureInfo.InvariantCulture, $"Chose file by file: {replace} to replace what's on the server, {quarantine} to quarantine."));
+        var numbered = episodes.Values.Count(n => n is not null);
+        RecordDecision(review, string.Create(CultureInfo.InvariantCulture, $"Chose file by file: {replace} to replace what's on the server, {quarantine} to quarantine, {numbered} given a season and episode."));
         return NoContent();
     }
 
@@ -467,4 +484,10 @@ public sealed record FileChoice
 
     /// <summary>Gets the copies on the server the page showed for this file (for <c>replace</c>).</summary>
     public string? Existing { get; init; }
+
+    /// <summary>Gets the season to file this video as (with <see cref="Episode"/>; both empty to use its name).</summary>
+    public int? Season { get; init; }
+
+    /// <summary>Gets the episode to file this video as (with <see cref="Season"/>).</summary>
+    public int? Episode { get; init; }
 }

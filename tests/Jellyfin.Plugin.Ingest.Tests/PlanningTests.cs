@@ -649,6 +649,45 @@ public class PlanningTests
             FileDecisions = decisions,
         };
 
+    // Season and episode given in review (ING-30)
+    private static IngestPlanner Numbered(Dictionary<string, EpisodeNumber> numbers) =>
+        new IngestPlanner(
+            new MediaIdentifier(new Lookup()),
+            p => !Path.HasExtension(p),
+            _ => null,
+            new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)))
+        {
+            EpisodeNumbers = numbers,
+        };
+
+    [Fact]
+    public async Task A_season_and_episode_given_in_review_files_a_video_whose_name_has_none()
+    {
+        ReleaseFile[] files = [F("a/Lantern.mkv"), F("a/Lantern.en.srt", 40_000)];
+        var without = await Numbered([]).PlanAsync(Watch, "a", files, LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+        Assert.False(without.IsReady);
+
+        var plan = await Numbered(new() { ["a/Lantern.mkv"] = new EpisodeNumber(1, 4) }).PlanAsync(Watch, "a", files, LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.IsReady, string.Join("; ", plan.Review.Select(r => r.Reason)));
+        var season = Path.Combine("/lib/Shows", "Lantern (2001) [tvdbid-7] [tmdbid-9]", "Season 01");
+        Assert.Contains(plan.Operations, o => o.Kind == OperationKind.Video && o.Destination == Path.Combine(season, "Lantern S01E04 - Glass Harbour.mkv"));
+        Assert.Contains(plan.Operations, o => o.Kind == OperationKind.Subtitle && o.Destination == Path.Combine(season, "Lantern S01E04 - Glass Harbour.en.srt"));
+    }
+
+    [Fact]
+    public async Task Numbers_given_in_review_win_over_the_name_and_work_with_a_chosen_show()
+    {
+        var chosen = new ChosenMatch(new MetadataCandidate { Name = "Lantern", Year = 2001, IsSeries = true, ProviderIds = new Dictionary<string, string> { ["Tvdb"] = "7" } }, Tv);
+        var numbers = new Dictionary<string, EpisodeNumber> { ["a/Lantern - 125.mkv"] = new(3, 12), ["a/Lantern.S01E01.mkv"] = new(0, 2) };
+
+        var plan = await Numbered(numbers).PlanAsync(Watch, "a", [F("a/Lantern - 125.mkv"), F("a/Lantern.S01E01.mkv")], LibraryTargets.Of(Tv), Quarantine, chosen, CancellationToken.None);
+
+        Assert.True(plan.IsReady, string.Join("; ", plan.Review.Select(r => r.Reason)));
+        Assert.Contains(plan.Operations, o => o.Destination.EndsWith(Path.Combine("Season 03", "Lantern S03E12.mkv"), StringComparison.Ordinal));
+        Assert.Contains(plan.Operations, o => o.Destination.EndsWith(Path.Combine("Season 00", "Lantern S00E02.mkv"), StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task A_file_chosen_for_quarantine_goes_there_with_its_subtitles_and_the_rest_is_filed()
     {

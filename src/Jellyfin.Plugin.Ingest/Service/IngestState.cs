@@ -129,6 +129,12 @@ public sealed record PendingReview
     public IReadOnlyDictionary<string, FileDecision> FileDecisions { get; init; } = new Dictionary<string, FileDecision>(StringComparer.Ordinal);
 
     /// <summary>
+    /// Gets the season and episode numbers given in review (by video, relative to the watch folder), for videos whose
+    /// numbering can't be read from their names (ING-30). Used instead of what the name says when planning again.
+    /// </summary>
+    public IReadOnlyDictionary<string, EpisodeNumber> FileEpisodes { get; init; } = new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal);
+
+    /// <summary>
     /// Gets a counter that goes up with every request, so planning (which takes a while) only clears the request it
     /// started from and never one made while it was running.
     /// </summary>
@@ -152,6 +158,69 @@ public enum FileDecision
 }
 
 /// <summary>
+/// A season and episode number given to a video in review.
+/// </summary>
+/// <param name="Season">The season (0 for specials).</param>
+/// <param name="Episode">The episode within the season.</param>
+public sealed record EpisodeNumber(int Season, int Episode)
+{
+    /// <summary>The highest season accepted (shows numbered by year have seasons such as 2024).</summary>
+    public const int MaxSeason = 2999;
+
+    /// <summary>The highest episode accepted.</summary>
+    public const int MaxEpisode = 9999;
+
+    /// <summary>
+    /// Gets a value indicating whether both numbers are in range.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsValid => Season is >= 0 and <= MaxSeason && Episode is >= 1 and <= MaxEpisode;
+
+    /// <summary>
+    /// Reads the season and episode sent for a file in review, checking them.
+    /// </summary>
+    /// <param name="season">The season sent, if any.</param>
+    /// <param name="episode">The episode sent, if any.</param>
+    /// <param name="item">The review item they are for.</param>
+    /// <param name="action">The file's decision as sent (a file being quarantined can't be numbered).</param>
+    /// <param name="number">The numbers, or <c>null</c> when none were given (which clears any given before).</param>
+    /// <returns>What's wrong with them, or <c>null</c> when they can be used.</returns>
+    public static string? Read(int? season, int? episode, PendingReviewItem item, string? action, out EpisodeNumber? number)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        number = null;
+        if (season is null && episode is null)
+        {
+            return null;
+        }
+
+        if (season is not { } s || episode is not { } e)
+        {
+            return "Give both a season and an episode number, or neither.";
+        }
+
+        if (!item.IsVideo)
+        {
+            return "Only a video can be given a season and episode.";
+        }
+
+        if (string.Equals(action, "quarantine", StringComparison.Ordinal))
+        {
+            return "A file being quarantined can't also be given a season and episode.";
+        }
+
+        var candidate = new EpisodeNumber(s, e);
+        if (!candidate.IsValid)
+        {
+            return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"The season must be 0 to {MaxSeason} (0 for specials) and the episode 1 to {MaxEpisode}.");
+        }
+
+        number = candidate;
+        return null;
+    }
+}
+
+/// <summary>
 /// One file's review reason.
 /// </summary>
 /// <param name="Source">The file (path relative to the watch folder).</param>
@@ -160,6 +229,11 @@ public sealed record PendingReviewItem(string Source, string Reason)
 {
     /// <summary>Gets the copies already on the server that hold this file back (one per line), or empty.</summary>
     public string Existing { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets a value indicating whether the file is a video, so it can be given a season and episode in review.
+    /// </summary>
+    public bool IsVideo => Planning.ReleaseClassifier.Classify(new Planning.ReleaseFile(Source ?? string.Empty, long.MaxValue)) == Planning.FileRole.Video;
 }
 
 /// <summary>
@@ -327,6 +401,7 @@ public sealed partial class IngestStateStore
                 Candidates = candidates,
                 Chosen = existing?.Chosen,
                 FileDecisions = existing?.FileDecisions ?? new Dictionary<string, FileDecision>(StringComparer.Ordinal),
+                FileEpisodes = existing?.FileEpisodes ?? new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal),
                 SearchResults = existing?.SearchResults ?? [],
                 Request = newer ? existing!.Request : ReviewRequest.None,
                 RequestVersion = existing?.RequestVersion ?? 0,
@@ -370,6 +445,7 @@ public sealed partial class IngestStateStore
 
             // "Clear choice and retry" starts over, file decisions included; choosing a title keeps them
             FileDecisions = chosen is null ? new Dictionary<string, FileDecision>(StringComparer.Ordinal) : r.FileDecisions,
+            FileEpisodes = chosen is null ? new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal) : r.FileEpisodes,
             Request = ReviewRequest.Retry,
             RequestVersion = r.RequestVersion + 1,
         });
@@ -380,12 +456,26 @@ public sealed partial class IngestStateStore
     /// </summary>
     /// <param name="id">Review id.</param>
     /// <param name="decisions">Decisions by file (relative to the watch folder); <c>null</c> clears that file's.</param>
+    /// <param name="episodes">Season and episode numbers by video; <c>null</c> clears that video's. Videos not listed keep theirs.</param>
     /// <returns>Whether the review exists.</returns>
-    public bool RequestFiles(string id, IReadOnlyDictionary<string, FileDecision?> decisions)
+    public bool RequestFiles(string id, IReadOnlyDictionary<string, FileDecision?> decisions, IReadOnlyDictionary<string, EpisodeNumber?>? episodes = null)
     {
         ArgumentNullException.ThrowIfNull(decisions);
         return Update(id, r =>
         {
+            var numbers = new Dictionary<string, EpisodeNumber>(r.FileEpisodes, StringComparer.Ordinal);
+            foreach (var (source, number) in episodes ?? new Dictionary<string, EpisodeNumber?>())
+            {
+                if (number is not null)
+                {
+                    numbers[source] = number;
+                }
+                else
+                {
+                    numbers.Remove(source);
+                }
+            }
+
             var merged = new Dictionary<string, FileDecision>(r.FileDecisions, StringComparer.Ordinal);
             foreach (var (source, decision) in decisions)
             {
@@ -399,7 +489,7 @@ public sealed partial class IngestStateStore
                 }
             }
 
-            return r with { FileDecisions = merged, Request = ReviewRequest.Retry, RequestVersion = r.RequestVersion + 1 };
+            return r with { FileDecisions = merged, FileEpisodes = numbers, Request = ReviewRequest.Retry, RequestVersion = r.RequestVersion + 1 };
         });
     }
 
@@ -633,6 +723,10 @@ public sealed partial class IngestStateStore
                 Items = r.Items ?? [],
                 Candidates = r.Candidates ?? [],
                 SearchResults = r.SearchResults ?? [],
+                FileDecisions = r.FileDecisions ?? new Dictionary<string, FileDecision>(StringComparer.Ordinal),
+                FileEpisodes = r.FileEpisodes is null
+                    ? new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal)
+                    : r.FileEpisodes.Where(e => e.Value is { IsValid: true }).ToDictionary(e => e.Key, e => e.Value, StringComparer.Ordinal),
                 Chosen = r.Chosen is { Candidate: not null, Target: not null } c ? c : null,
             };
         }

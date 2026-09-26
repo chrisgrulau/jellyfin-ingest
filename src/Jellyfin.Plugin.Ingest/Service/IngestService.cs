@@ -762,6 +762,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         {
             ReplaceExisting = previous?.Request == ReviewRequest.Replace,
             FileDecisions = previous?.FileDecisions ?? new Dictionary<string, FileDecision>(StringComparer.Ordinal),
+            EpisodeNumbers = previous?.FileEpisodes ?? new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal),
             Transfer = watch.Transfer,
         };
         var plan = await planner.PlanAsync(watch.Path, release, files, targets, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
