@@ -15,6 +15,12 @@ All notable changes to this project are documented here. The format follows
     the release is removed.
   - Filing stays crash-safe and all-or-nothing. A failure removes only the copies it made.
 
+### Fixed
+
+- **FAM-01:** subtitle language tags in every ISO 639 language are recognised, from a built-in table. Before, only 10
+  languages were known, and any other tag was dropped when filing: `Movie.swe.srt` became `Movie.srt`, so the language
+  was lost. A tag that still isn't recognised is now kept as written.
+
 ## [0.6.0-alpha] - 2026-09-26
 
 ### Added
