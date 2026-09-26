@@ -7,7 +7,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-<<<<<<< HEAD
+- **ING-19:** a library whose folder is a whole drive or file-system root (`E:\`, `/`) can be filed into, and a watch
+  folder inside one is caught by the folder rules. Before, the containment check never matched a root.
+- **ING-24:**
+  - Jellyfin's metadata folder and transcode folder are protected like its other folders, even when they have been
+    moved out of the data folder.
+  - The folder rules also compare paths after following folder links, so a watch or quarantine folder that reaches a
+    library through a symbolic link is caught.
+  - A top-level release Jellyfin's account can't read now waits on the plugin page with the reason, instead of being
+    skipped without a word.
 - **ING-18:** Ingest never quarantines into, marks or purges a date-named folder it didn't create.
   - If a custom quarantine already holds a folder named for today that isn't Ingest's (daily backups, camera imports),
     Ingest uses `yyyy-MM-dd (Ingest)` beside it.
@@ -19,17 +27,6 @@ All notable changes to this project are documented here. The format follows
   - a tidy-up problem after every file has moved is only a warning.
 - **ING-23:** recovery after a crash only acts on files that carry Ingest's own temporary name, sit beside their
   destination, and are inside a current library or quarantine folder. Anything else is reported as needing attention.
-=======
-- **ING-19:** a library whose folder is a whole drive or file-system root (`E:\`, `/`) can be filed into, and a watch
-  folder inside one is caught by the folder rules. Before, the containment check never matched a root.
-- **ING-24:**
-  - Jellyfin's metadata folder and transcode folder are protected like its other folders, even when they have been
-    moved out of the data folder.
-  - The folder rules also compare paths after following folder links, so a watch or quarantine folder that reaches a
-    library through a symbolic link is caught.
-  - A top-level release Jellyfin's account can't read now waits on the plugin page with the reason, instead of being
-    skipped without a word.
->>>>>>> origin/main
 
 ## [0.1.7-alpha] - 2026-09-25
 
