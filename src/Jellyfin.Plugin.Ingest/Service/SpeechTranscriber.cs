@@ -94,7 +94,7 @@ public sealed class SpeechTranscriber : ITranscriber
         if (!reply.Ok)
         {
             // Not installed or not allowed: say nothing; anything else: say why there's no transcript
-            return new HeardText(null, reply.Failure is "not-installed" or "not-allowed" ? string.Empty : "No transcript from the Subtitles plugin: " + reply.Error);
+            return new HeardText(null, reply.Failure is "not-installed" or "not-allowed" or "off" ? string.Empty : "No transcript from the Subtitles plugin: " + reply.Error);
         }
 
         var text = (reply.Text ?? string.Empty).Trim();
