@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Planning;
+using Jellyfin.Plugin.Ingest.Quarantine;
 using Jellyfin.Plugin.Ingest.Service;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Library;
@@ -103,10 +104,10 @@ public class IngestController : ControllerBase
             return new List<QuarantineFolder>();
         }
 
-        var problems = IngestService.FolderProblems(config, IngestService.Libraries(_libraryManager.GetVirtualFolders()), _paths, _configuration);
+        var problems = FolderPolicy.FolderProblems(config, FolderPolicy.Libraries(_libraryManager.GetVirtualFolders()), _paths, _configuration);
         var retention = Math.Max(1, config.QuarantineRetentionDays);
         var today = DateOnly.FromDateTime(DateTime.Now);
-        return IngestService.SafeQuarantineRoots(config, problems)
+        return FolderPolicy.SafeQuarantineRoots(config, problems)
             .SelectMany(root => QuarantineListing.List(root, today, retention))
             .OrderByDescending(f => f.Date, StringComparer.Ordinal)
             .ToList();
@@ -124,13 +125,13 @@ public class IngestController : ControllerBase
     public ActionResult<IReadOnlyList<FolderProblem>> ValidateFolders([FromBody] FolderCheckRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var libraries = IngestService.Libraries(_libraryManager.GetVirtualFolders());
+        var libraries = FolderPolicy.Libraries(_libraryManager.GetVirtualFolders());
         var watch = request.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w)).ToList();
         var problems = FolderRules.Check(
             [.. watch],
             request.QuarantinePath,
             [.. libraries.SelectMany(l => l.Locations)],
-            IngestService.ProtectedFolders(_paths, _configuration)).ToList();
+            FolderPolicy.ProtectedFolders(_paths, _configuration)).ToList();
 
         // A folder this server can't see yet isn't unsafe, but is worth saying (ING-29): a Docker host path instead of the
         // container's, a mapped drive a service can't see, a share that isn't mounted
@@ -214,8 +215,8 @@ public class IngestController : ControllerBase
         // A library the watch folder already files into keeps its configured folder; any other uses its first folder.
         var watch = IngestPlugin.Instance?.Configuration.WatchFolders.FirstOrDefault(w => PathGuard.SamePath(w.Path, review.WatchFolder));
         var path = watch is null ? null
-            : IngestService.DestinationsOf(watch).FirstOrDefault(d => string.Equals(d.LibraryId, request.LibraryId, StringComparison.OrdinalIgnoreCase))?.Path;
-        var library = IngestService.Libraries(_libraryManager.GetVirtualFolders())
+            : FolderPolicy.DestinationsOf(watch).FirstOrDefault(d => string.Equals(d.LibraryId, request.LibraryId, StringComparison.OrdinalIgnoreCase))?.Path;
+        var library = FolderPolicy.Libraries(_libraryManager.GetVirtualFolders())
             .FirstOrDefault(l => string.Equals(l.Id, request.LibraryId, StringComparison.OrdinalIgnoreCase));
         var targets = library is null ? null : LibraryRouting.TargetsOf(library, path);
         var target = candidate.IsSeries ? targets?.Tv : targets?.Films;

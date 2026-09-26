@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **FAM-06: Shared JSON file store.** The state file and the search cache are read and written through common's
+  `JsonFile`, and each states its policy for a missing, damaged or unreadable file (see DESIGN); the policies are
+  unchanged. Saves are now flushed to disk before the old file is replaced.
+- **ING-37: The sweep service is split up.** Folder safety (`FolderPolicy`), start-up maintenance, activity reporting,
+  retries and the provider-outage pause have their own classes; quarantine code lives in `Quarantine/`, and the AI
+  tie-breaker and transcriber in `Identification/`. The data folder is worked out in one place. No change in behaviour.
+
 ## [0.8.0-alpha] - 2026-09-26
 
 ### Added

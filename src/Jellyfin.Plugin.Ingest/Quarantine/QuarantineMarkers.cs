@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using Jellyfin.Plugin.Ingest.Planning;
 
-namespace Jellyfin.Plugin.Ingest.Service;
+namespace Jellyfin.Plugin.Ingest.Quarantine;
 
 /// <summary>
 /// Marks the dated quarantine folders Ingest creates, so the purge only ever deletes folders Ingest made itself, never a
@@ -45,6 +45,25 @@ public static class QuarantineMarkers
                 return candidate;
             }
         }
+    }
+
+    /// <summary>
+    /// The dated folder (directly inside the quarantine) that a quarantine destination falls in.
+    /// </summary>
+    /// <param name="quarantineRoot">The quarantine folder.</param>
+    /// <param name="destination">Where a file is quarantined to.</param>
+    /// <returns>The dated folder's path, or <c>null</c> if the destination isn't inside the quarantine.</returns>
+    public static string? DatedFolderOf(string quarantineRoot, string destination)
+    {
+        ArgumentNullException.ThrowIfNull(quarantineRoot);
+        ArgumentNullException.ThrowIfNull(destination);
+        if (!PathGuard.IsUnder(destination, quarantineRoot))
+        {
+            return null;
+        }
+
+        var first = Path.GetRelativePath(PathGuard.Normalise(quarantineRoot), PathGuard.Normalise(destination)).Split(Path.DirectorySeparatorChar)[0];
+        return Path.Combine(quarantineRoot, first);
     }
 
     /// <summary>

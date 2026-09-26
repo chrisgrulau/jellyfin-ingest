@@ -366,7 +366,7 @@ public sealed class IngestPlanner
         }
 
         // 4. everything else is quarantined, dated so the retention purge is a simple folder check
-        var quarantine = Service.QuarantineMarkers.DatedFolderFor(quarantineRoot, DateOnly.FromDateTime(_clock.GetLocalNow().DateTime));
+        var quarantine = Quarantine.QuarantineMarkers.DatedFolderFor(quarantineRoot, DateOnly.FromDateTime(_clock.GetLocalNow().DateTime));
         var leftovers = Transfer != Configuration.TransferMode.Move
             ? []
             : roles.Where(r => r.Value is FileRole.Clutter or FileRole.Sample).Select(r => r.Key).Concat(unpaired).Concat(skipped).Concat(skippedSubtitles);

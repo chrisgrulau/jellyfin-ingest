@@ -4,7 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 
-namespace Jellyfin.Plugin.Ingest.Service;
+namespace Jellyfin.Plugin.Ingest.Quarantine;
 
 /// <summary>
 /// Lists what is in a quarantine folder, for the plugin page: the dated folders, the releases in each and their files.

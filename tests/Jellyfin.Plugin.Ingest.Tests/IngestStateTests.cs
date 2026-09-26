@@ -143,7 +143,7 @@ public sealed class IngestStateTests : IDisposable
     {
         PlannedOperation Op(OperationKind k) => new(k, "/s", "/d");
         var ops = new[] { Op(OperationKind.Video), Op(OperationKind.Subtitle), Op(OperationKind.Subtitle), Op(OperationKind.Quarantine), Op(OperationKind.Quarantine), Op(OperationKind.Quarantine) };
-        Assert.Equal(expected, IngestService.Summarise(ops, dryRun));
+        Assert.Equal(expected, ActivityReport.Summarise(ops, dryRun));
     }
 
     [Fact]

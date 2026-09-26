@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Common.Storage;
 
 namespace Jellyfin.Plugin.Ingest.Identification;
 
@@ -156,7 +157,7 @@ public sealed class CachingMetadataLookup : IMetadataLookup
             return;
         }
 
-        string json;
+        Dictionary<string, CacheEntry> keep;
         lock (_lock)
         {
             if (!_dirty)
@@ -165,23 +166,19 @@ public sealed class CachingMetadataLookup : IMetadataLookup
             }
 
             var now = _clock.GetUtcNow();
-            var keep = _entries.Where(e => now - e.Value.Time < Lifetime).OrderByDescending(e => e.Value.Time).Take(MaxEntries).ToDictionary(e => e.Key, e => e.Value, StringComparer.Ordinal);
+            keep = _entries.Where(e => now - e.Value.Time < Lifetime).OrderByDescending(e => e.Value.Time).Take(MaxEntries).ToDictionary(e => e.Key, e => e.Value, StringComparer.Ordinal);
             _entries.Clear();
             foreach (var (k, v) in keep)
             {
                 _entries[k] = v;
             }
 
-            json = JsonSerializer.Serialize(keep, JsonOptions);
             _dirty = false;
         }
 
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            var temp = _path + ".tmp";
-            File.WriteAllText(temp, json);
-            File.Move(temp, _path, overwrite: true);
+            JsonFile.WriteAtomic(_path, keep, JsonOptions);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -191,17 +188,12 @@ public sealed class CachingMetadataLookup : IMetadataLookup
 
     private static Dictionary<string, CacheEntry> Load(string? path)
     {
-        try
+        // Policy: only a cache, so missing, damaged and unreadable all start empty (nothing is logged, and a damaged
+        // file is simply replaced by the next save)
+        if (path is not null
+            && JsonFile.Read<Dictionary<string, CacheEntry>>(path, JsonOptions) is { IsLoaded: true, Value: { } loaded })
         {
-            if (path is not null && File.Exists(path)
-                && JsonSerializer.Deserialize<Dictionary<string, CacheEntry>>(File.ReadAllText(path), JsonOptions) is { } loaded)
-            {
-                return new Dictionary<string, CacheEntry>(loaded.Where(e => e.Value is not null), StringComparer.Ordinal);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-        {
-            // Only a cache: start empty
+            return new Dictionary<string, CacheEntry>(loaded.Where(e => e.Value is not null), StringComparer.Ordinal);
         }
 
         return new Dictionary<string, CacheEntry>(StringComparer.Ordinal);

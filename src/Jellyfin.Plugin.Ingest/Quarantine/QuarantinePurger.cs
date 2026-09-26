@@ -4,7 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 
-namespace Jellyfin.Plugin.Ingest.Service;
+namespace Jellyfin.Plugin.Ingest.Quarantine;
 
 /// <summary>
 /// Deletes quarantine folders past the retention period. Only top-level folders named <c>yyyy-MM-dd</c> (the date the

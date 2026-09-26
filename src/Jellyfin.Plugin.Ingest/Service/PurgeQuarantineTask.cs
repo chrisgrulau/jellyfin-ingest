@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Ingest.Planning;
+using Jellyfin.Plugin.Ingest.Quarantine;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
@@ -63,8 +64,8 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
         }
 
         // Never purge in a quarantine that breaks the folder rules (e.g. one pointed at a library)
-        var problems = IngestService.FolderProblems(config, IngestService.Libraries(_libraryManager.GetVirtualFolders()), _paths, _configuration);
-        var roots = IngestService.SafeQuarantineRoots(config, problems);
+        var problems = FolderPolicy.FolderProblems(config, FolderPolicy.Libraries(_libraryManager.GetVirtualFolders()), _paths, _configuration);
+        var roots = FolderPolicy.SafeQuarantineRoots(config, problems);
         var retention = Math.Max(1, config.QuarantineRetentionDays);
         var today = DateOnly.FromDateTime(DateTime.Now);
         for (var i = 0; i < roots.Count; i++)

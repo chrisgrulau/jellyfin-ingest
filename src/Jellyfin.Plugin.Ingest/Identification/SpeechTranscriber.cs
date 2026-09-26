@@ -5,9 +5,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Common.Speech;
-using Jellyfin.Plugin.Ingest.Identification;
 
-namespace Jellyfin.Plugin.Ingest.Service;
+namespace Jellyfin.Plugin.Ingest.Identification;
 
 /// <summary>
 /// Gets a short transcript from the family's Subtitles plugin, if it is installed and allows Ingest to ask (its own
