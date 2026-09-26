@@ -27,6 +27,13 @@ All notable changes to this project are documented here. The format follows
   - a tidy-up problem after every file has moved is only a warning.
 - **ING-23:** recovery after a crash only acts on files that carry Ingest's own temporary name, sit beside their
   destination, and are inside a current library or quarantine folder. Anything else is reported as needing attention.
+- **ING-20:** if writing the action log fails right after a file has been moved into place (a full disk), that file
+  is now moved back with the rest of the release, instead of being left filed on its own.
+- **ING-21:** the free-space check only queries the file system being written to. Before, it asked every mounted
+  file system, so a network share that had stopped answering could stall filing even if Ingest never used it.
+- **ING-25:** choosing a title on the review screen now also sends the title, year and provider ids the page showed.
+  If another tab or administrator has searched the same release since, the choice is refused with a request to
+  refresh, instead of filing whatever is now in that row.
 
 ## [0.1.7-alpha] - 2026-09-25
 

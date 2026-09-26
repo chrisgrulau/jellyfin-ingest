@@ -70,7 +70,17 @@ public class ExecutorTests
             }
         }
 
-        public void AppendLine(string path, string line) => Log.Add(line);
+        public Func<string, bool>? FailAppend { get; set; }
+
+        public void AppendLine(string path, string line)
+        {
+            if (FailAppend?.Invoke(line) == true)
+            {
+                throw new IOException("No space left on device");
+            }
+
+            Log.Add(line);
+        }
 
         public bool HasRoomFor(string source, string destinationFolder, long bytes) => Room;
 
@@ -223,6 +233,25 @@ public class ExecutorTests
 
         Assert.Empty(new PlanExecutor(fs, TimeProvider.System).Recover(log, "/log", Roots));
         Assert.Empty(fs.Log);
+    }
+
+    // ING-20: a failed "done" line after a successful rename still rolls that file back with the rest
+    [Fact]
+    public void A_log_failure_after_a_move_rolls_that_file_back_too()
+    {
+        var fs = Seeded();
+        var dones = 0;
+        fs.FailAppend = line => line.Contains("\"phase\":\"done\"", StringComparison.Ordinal) && ++dones == 2;
+
+        var report = Run(fs);
+
+        Assert.False(report.Succeeded);
+        Assert.Equal(1000, fs.Files["/drop/r/a.mkv"]);
+        Assert.Equal(10, fs.Files["/drop/r/a.srt"]);
+        Assert.False(fs.Exists("/lib/Films/A (2019)/A (2019).mkv"));
+        Assert.False(fs.Exists("/lib/Films/A (2019)/A (2019).en.srt"));
+        Assert.Equal(2, report.RolledBack.Count);
+        Assert.Empty(report.RollbackProblems);
     }
 
     private static readonly string[] Roots = ["/lib"];
