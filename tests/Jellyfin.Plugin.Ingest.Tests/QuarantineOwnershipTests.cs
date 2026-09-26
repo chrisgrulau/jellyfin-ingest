@@ -70,4 +70,47 @@ public sealed class QuarantineOwnershipTests : IDisposable
         File.WriteAllText(Path.Combine(dated, "someone-elses.jpg"), "y");
         Assert.False(QuarantineMarkers.HoldsOnlyLoggedFiles(dated, set));
     }
+
+    // ING-34: a read-only file doesn't stop a purge, and a folder that can't be fully deleted keeps its marker (so it is
+    // tried again) while the other folders are still purged
+    [Fact]
+    public void A_read_only_file_is_purged()
+    {
+        var day = Path.Combine(_root, "2026-09-01");
+        QuarantineMarkers.Mark(_root, day);
+        var file = Path.Combine(day, "release", "info.nfo");
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, "clutter");
+        new FileInfo(file).IsReadOnly = true;
+
+        Assert.Equal([day], QuarantinePurger.Purge(_root, new DateOnly(2026, 11, 30), 30));
+        Assert.False(Directory.Exists(day));
+    }
+
+    [Fact]
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    public void A_folder_that_cant_be_emptied_keeps_its_marker_and_the_others_are_still_purged()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows() || Environment.UserName == "root", "Needs a non-root Unix account.");
+        var stuck = Path.Combine(_root, "2026-09-01");
+        var fine = Path.Combine(_root, "2026-09-02");
+        QuarantineMarkers.Mark(_root, stuck);
+        QuarantineMarkers.Mark(_root, fine);
+        var locked = Path.Combine(stuck, "locked");
+        Directory.CreateDirectory(locked);
+        File.WriteAllText(Path.Combine(locked, "a.nfo"), "x");
+        File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            var deleted = QuarantinePurger.Purge(_root, new DateOnly(2026, 11, 30), 30, out var failed);
+
+            Assert.Equal([fine], deleted);
+            Assert.Single(failed);
+            Assert.True(QuarantineMarkers.IsMarked(stuck));
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
 }

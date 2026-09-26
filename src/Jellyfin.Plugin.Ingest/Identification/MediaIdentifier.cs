@@ -521,6 +521,14 @@ public sealed class MediaIdentifier
 
     private async Task<(EpisodeListing? Hit, string Note, string? By)> FindByTranscriptAsync(ParsedRelease release, MetadataCandidate series, string videoPath, IEpisodePicker picker, CancellationToken ct)
     {
+        // The transcript first (ING-31): it answers at once when the Subtitles plugin is missing or doesn't allow Ingest,
+        // so the seasons are only listed when there is something to compare
+        var heard = await _transcriber!.TranscribeAsync(videoPath, ct).ConfigureAwait(false);
+        if (heard.Text is not { } text)
+        {
+            return (null, heard.Note.Length > 0 ? " " + heard.Note : string.Empty, null);
+        }
+
         // The season the name gives, or every season until one is empty (specials aren't guessed this way)
         var episodes = new List<EpisodeListing>();
         if (release.Season is { } known)
@@ -549,12 +557,6 @@ public sealed class MediaIdentifier
         if (episodes.Count > TranscriptOptions)
         {
             return (null, string.Create(CultureInfo.InvariantCulture, $" '{series.Name}' has too many episodes to compare a transcript with; a season number in the name would narrow it down."), null);
-        }
-
-        var heard = await _transcriber!.TranscribeAsync(videoPath, ct).ConfigureAwait(false);
-        if (heard.Text is not { } text)
-        {
-            return (null, heard.Note.Length > 0 ? " " + heard.Note : string.Empty, null);
         }
 
         var pick = await picker.PickFromTranscriptAsync(Path.GetFileName(videoPath), series.Name, text, episodes, ct).ConfigureAwait(false);

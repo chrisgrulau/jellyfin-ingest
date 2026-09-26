@@ -120,4 +120,15 @@ public class ReleaseNameParserTests
     {
         Assert.Equal(2005, ReleaseNameParser.Parse("Show Name (2004)/Show.Name.2005.S01E01.mkv").Year);
     }
+
+    // ING-35: digits outside ASCII are not episode or season numbers, and never throw
+    [Theory]
+    [InlineData("Show.Name.S０１E０２.mkv")]
+    [InlineData("Show Name Season １ Episode ２.mkv")]
+    [InlineData("Show.Name.１x０２.mkv")]
+    public void Non_ascii_digits_never_throw(string name)
+    {
+        var p = ReleaseNameParser.Parse(name);
+        Assert.Null(p.Episode);
+    }
 }

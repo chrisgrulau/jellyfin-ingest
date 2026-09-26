@@ -19,6 +19,21 @@ All notable changes to this project are documented here. The format follows
   - Only copies inside a library are replaced.
   - Subtitles for the new files come from the Shoal Subtitles finder, which checks them against the new audio.
 
+### Fixed
+
+- **FAM-02:** questions to the AI plugin carry text in every script as it is, not escaped. They are fitted to its
+  limit, with shorter synopses first and then a shorter transcript, and no offered episode is dropped. Before,
+  non-English synopses or transcripts were six times their size and often refused.
+- **FAM-03:** "off" answers from the AI plugin (switched off, or Ingest not allowed) are quiet like a missing plugin.
+  Other failures ("not configured", "unsupported version") are noted in the review reason.
+- **ING-31:** for an episode with no usable name, the transcript is asked for first. Without the Subtitles plugin (or
+  its permission) no season is listed at all.
+- **ING-34:** a read-only or undeletable file no longer stops the quarantine purge for good. A folder that can't be
+  fully deleted keeps its marker and is tried again, the other folders are still purged, and Recent activity says so.
+- **ING-35:** release and folder names with full-width or other non-ASCII digits no longer throw. Only ASCII digits
+  count as numbers.
+- **FAM-04:** the shared source is updated, and Dependabot now watches it.
+
 ## [0.3.0-alpha] - 2026-09-26
 
 ### Added

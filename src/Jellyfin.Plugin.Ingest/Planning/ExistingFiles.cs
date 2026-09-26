@@ -110,6 +110,6 @@ public static partial class ExistingFiles
 
     private static bool IsVideo(string path) => ReleaseClassifier.Classify(new ReleaseFile(Path.GetFileName(path), long.MaxValue)) == FileRole.Video;
 
-    [GeneratedRegex(@"^(?:Season|Series|S)[\s._-]*(\d{1,3})$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(?:Season|Series|S)[\s._-]*([0-9]{1,3})$", RegexOptions.IgnoreCase)]
     private static partial Regex SeasonName();
 }

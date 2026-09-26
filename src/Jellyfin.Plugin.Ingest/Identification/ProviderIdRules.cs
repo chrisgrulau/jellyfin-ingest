@@ -52,10 +52,10 @@ public static partial class ProviderIdRules
         return clean;
     }
 
-    [GeneratedRegex(@"^\d{1,10}$")]
+    [GeneratedRegex(@"^[0-9]{1,10}$")]
     private static partial Regex Numeric();
 
-    [GeneratedRegex(@"^tt\d{5,10}$")]
+    [GeneratedRegex(@"^tt[0-9]{5,10}$")]
     private static partial Regex Imdb();
 
     [GeneratedRegex(@"^[A-Za-z0-9._-]{1,40}$")]

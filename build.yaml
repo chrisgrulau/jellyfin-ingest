@@ -17,4 +17,6 @@ artifacts:
 changelog: >
   0.4.0-alpha: Replace existing copies in review. A release held back because its episodes or films are already on
   the server (a better-quality copy, say) can replace them: the old copies and their subtitle files move to
-  quarantine, restorable until it is purged, and the new files are filed in their place, all-or-nothing.
+  quarantine, restorable until it is purged, and the new files are filed in their place, all-or-nothing. Also: AI
+  questions in any script fit its limit, the quarantine purge carries on past a stuck file, and non-ASCII digits in
+  names no longer throw.
