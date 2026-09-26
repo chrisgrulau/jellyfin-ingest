@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **FAM-05: Jellyfin's Activity log.** Releases waiting for a decision, failures, filings and quarantines are also
+  written under Dashboard → Activity, so they're seen without opening the plugin page. The same release and outcome is
+  written at most once a day, however often it is retried.
+  - **Also write to Jellyfin's Activity log** is on by default.
+  - Dry runs, decisions and purges stay on the plugin page only.
+- **Shoal Ingest in the dashboard menu**, so the review queue is one click away.
+
 ### Fixed
 
 - **ING-26:** on a server whose metadata language isn't English, Ingest also searches in English and scores release

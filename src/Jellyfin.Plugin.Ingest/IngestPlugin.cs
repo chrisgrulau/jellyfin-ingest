@@ -68,7 +68,13 @@ public class IngestPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
             new PluginPageInfo
             {
                 Name = Name,
-                EmbeddedResourcePath = string.Format(CultureInfo.InvariantCulture, "{0}.Configuration.configPage.html", GetType().Namespace)
+                EmbeddedResourcePath = string.Format(CultureInfo.InvariantCulture, "{0}.Configuration.configPage.html", GetType().Namespace),
+
+                // In the dashboard's menu, so the review queue is one click away (FAM-05)
+                EnableInMainMenu = true,
+                MenuSection = "server",
+                MenuIcon = "move_to_inbox",
+                DisplayName = "Shoal Ingest",
             }
         ];
     }

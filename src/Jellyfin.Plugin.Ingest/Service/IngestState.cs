@@ -239,6 +239,11 @@ public sealed partial class IngestStateStore
     }
 
     /// <summary>
+    /// Gets or sets what else happens when an activity entry is recorded (copying it to Jellyfin's Activity log).
+    /// </summary>
+    public Action<ActivityEntry>? Recorded { get; set; }
+
+    /// <summary>
     /// Records an activity entry (newest first, capped).
     /// </summary>
     /// <param name="entry">The entry.</param>
@@ -257,6 +262,7 @@ public sealed partial class IngestStateStore
             }
 
             Save(s);
+            Recorded?.Invoke(entry);
         }
     }
 
