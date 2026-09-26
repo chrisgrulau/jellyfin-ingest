@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Jellyfin.Plugin.Ingest.Planning;
+using Jellyfin.Plugin.Ingest.Quarantine;
 using Jellyfin.Plugin.Ingest.Service;
 using Xunit;
 

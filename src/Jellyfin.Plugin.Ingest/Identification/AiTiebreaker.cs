@@ -7,10 +7,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Common;
 using Jellyfin.Plugin.Common.Ai;
-using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Parsing;
 
-namespace Jellyfin.Plugin.Ingest.Service;
+namespace Jellyfin.Plugin.Ingest.Identification;
 
 /// <summary>
 /// Settles close matches with the family's AI plugin, if it is installed and allowed to help Ingest.
