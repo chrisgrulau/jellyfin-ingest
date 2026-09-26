@@ -36,7 +36,21 @@ public static class QuarantinePurger
     /// <param name="retentionDays">Days to keep.</param>
     /// <returns>The folders deleted.</returns>
     public static IReadOnlyList<string> Purge(string quarantineRoot, DateOnly today, int retentionDays)
+        => Purge(quarantineRoot, today, retentionDays, out _);
+
+    /// <summary>
+    /// Deletes expired dated folders under a quarantine root. A folder that can't be fully deleted (a read-only or open
+    /// file) keeps its marker, so it is tried again next time, and the other folders are still purged.
+    /// </summary>
+    /// <param name="quarantineRoot">Absolute quarantine folder.</param>
+    /// <param name="today">Today's date.</param>
+    /// <param name="retentionDays">Days to keep.</param>
+    /// <param name="failed">Folders that couldn't be fully deleted, with why.</param>
+    /// <returns>The folders deleted.</returns>
+    public static IReadOnlyList<string> Purge(string quarantineRoot, DateOnly today, int retentionDays, out IReadOnlyList<string> failed)
     {
+        var problems = new List<string>();
+        failed = problems;
         ArgumentException.ThrowIfNullOrWhiteSpace(quarantineRoot);
         if (!Directory.Exists(quarantineRoot))
         {
@@ -54,10 +68,53 @@ public static class QuarantinePurger
                 continue;
             }
 
-            Directory.Delete(path, recursive: true);
-            deleted.Add(path);
+            try
+            {
+                DeleteMarkedFolder(path);
+                deleted.Add(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                problems.Add(path + ": " + ex.Message);
+            }
         }
 
         return deleted;
+    }
+
+    // The contents first (read-only files made writable), the marker last, then the folder: an interruption leaves the
+    // folder marked, so it is purged next time instead of being orphaned
+    private static void DeleteMarkedFolder(string path)
+    {
+        var marker = Path.Combine(path, QuarantineMarkers.DatedMarker);
+        foreach (var entry in new DirectoryInfo(path).EnumerateFileSystemInfos())
+        {
+            if (string.Equals(entry.FullName, marker, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (entry is DirectoryInfo dir && dir.LinkTarget is null)
+            {
+                foreach (var file in dir.EnumerateFiles("*", SearchOption.AllDirectories))
+                {
+                    file.IsReadOnly = false;
+                }
+
+                dir.Delete(recursive: true);
+            }
+            else
+            {
+                if (entry is FileInfo file)
+                {
+                    file.IsReadOnly = false;
+                }
+
+                entry.Delete();
+            }
+        }
+
+        File.Delete(marker);
+        Directory.Delete(path);
     }
 }

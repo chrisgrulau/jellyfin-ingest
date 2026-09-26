@@ -269,27 +269,27 @@ public static partial class ReleaseNameParser
     private sealed record EpisodeMatch(int Index, int Length, int Season, int Episode, int? EndingEpisode);
 
     // ---- episode patterns (tried in this order) --------------------------------------------------------------
-    [GeneratedRegex(@"(?<![a-z0-9])s(?<s>\d{1,2})\s?e(?<e>\d{1,3})(?:\s?-?\s?e(?<e>\d{1,3}))*(?:-(?<end>\d{1,3})(?![0-9p]))?(?![0-9])", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<![a-z0-9])s(?<s>[0-9]{1,2})\s?e(?<e>[0-9]{1,3})(?:\s?-?\s?e(?<e>[0-9]{1,3}))*(?:-(?<end>[0-9]{1,3})(?![0-9p]))?(?![0-9])", RegexOptions.IgnoreCase)]
     private static partial Regex SxxEyy();
 
-    [GeneratedRegex(@"(?<![a-z0-9])(?<s>\d{1,2})x(?<e>\d{2,3})(?:[-x](?<e>\d{2,3}))*(?![0-9])", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<![a-z0-9])(?<s>[0-9]{1,2})x(?<e>[0-9]{2,3})(?:[-x](?<e>[0-9]{2,3}))*(?![0-9])", RegexOptions.IgnoreCase)]
     private static partial Regex NxNN();
 
-    [GeneratedRegex(@"\bseason\s?(?<s>\d{1,2})\s?(?:-\s?)?episodes?\s?(?<e>\d{1,3})(?:\s?(?:,|&|-|and)\s?(?<e>\d{1,3}))*", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\bseason\s?(?<s>[0-9]{1,2})\s?(?:-\s?)?episodes?\s?(?<e>[0-9]{1,3})(?:\s?(?:,|&|-|and)\s?(?<e>[0-9]{1,3}))*", RegexOptions.IgnoreCase)]
     private static partial Regex SeasonEpisodeWords();
 
     // "S13SP4": a special aired during season 13. Provider special numbering differs, so the number is not kept.
-    [GeneratedRegex(@"(?<![a-z0-9])s\d{1,2}\s?sp\s?\d{1,2}(?![0-9])", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<![a-z0-9])s[0-9]{1,2}\s?sp\s?[0-9]{1,2}(?![0-9])", RegexOptions.IgnoreCase)]
     private static partial Regex SpecialCode();
 
     // "Lantern1E4": season digits glued to the title, then E + episode
-    [GeneratedRegex(@"(?<=[a-z])(?<s>\d{1,2})e(?<e>\d{1,3})(?![0-9a-z])", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<=[a-z])(?<s>[0-9]{1,2})e(?<e>[0-9]{1,3})(?![0-9a-z])", RegexOptions.IgnoreCase)]
     private static partial Regex CompactSE();
 
-    [GeneratedRegex(@"^(?:season|series|s)\s?\d{1,2}$|^specials$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(?:season|series|s)\s?[0-9]{1,2}$|^specials$", RegexOptions.IgnoreCase)]
     private static partial Regex SeasonFolder();
 
-    [GeneratedRegex(@"\s+(?:s\d{1,2}|season\s?\d{1,2}(?:\s?-\s?\d{1,2})?)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\s+(?:s[0-9]{1,2}|season\s?[0-9]{1,2}(?:\s?-\s?[0-9]{1,2})?)$", RegexOptions.IgnoreCase)]
     private static partial Regex TrailingSeason();
 
     // ---- normalisation ---------------------------------------------------------------------------------------
@@ -298,29 +298,29 @@ public static partial class ReleaseNameParser
     private static partial Regex GroupPrefix();
 
     // Some uploaders write "Title - Action 1993" / "Title - Family Comedy 1990": drop the genre, keep the year
-    [GeneratedRegex(@"\s-\s(?:(?:action|adventure|animation|comedy|crime|drama|family|fantasy|horror|musical|mystery|romance|sci-?fi|thriller|war|western|documentary)\s?){1,3}(?=\s*[\[(]?(?:19|20)\d\d)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\s-\s(?:(?:action|adventure|animation|comedy|crime|drama|family|fantasy|horror|musical|mystery|romance|sci-?fi|thriller|war|western|documentary)\s?){1,3}(?=\s*[\[(]?(?:19|20)[0-9][0-9])", RegexOptions.IgnoreCase)]
     private static partial Regex GenreBeforeYear();
 
-    [GeneratedRegex(@"[\[(]((?:19|20)\d\d)[\])]")]
+    [GeneratedRegex(@"[\[(]((?:19|20)[0-9][0-9])[\])]")]
     private static partial Regex BracketedYear();
 
     [GeneratedRegex(@"[\[{][^\]}]*[\]}]")]
     private static partial Regex BracketedTag();
 
-    [GeneratedRegex(@"[._]+|\s+-\s+(?=\S)|(?<=\S)-(?=(?:19|20)\d\d\b)")]
+    [GeneratedRegex(@"[._]+|\s+-\s+(?=\S)|(?<=\S)-(?=(?:19|20)[0-9][0-9]\b)")]
     private static partial Regex Separators();
 
     [GeneratedRegex(@"\s{2,}")]
     private static partial Regex MultiSpace();
 
-    [GeneratedRegex(@"(?<!\d)(?:19[2-9]\d|20[0-4]\d)(?!\d)")]
+    [GeneratedRegex(@"(?<![0-9])(?:19[2-9][0-9]|20[0-4][0-9])(?![0-9])")]
     private static partial Regex YearToken();
 
     [GeneratedRegex(@"\.(?:mkv|mp4|m4v|avi|mov|wmv|ts|mpg|mpeg|webm|srt|ass|ssa|sub|idx|vtt|sup)$", RegexOptions.IgnoreCase)]
     private static partial Regex KnownExtension();
 
     // Strong tokens only ever appear in release tags: the title ends at the first one.
-    [GeneratedRegex(@"(?<![a-z0-9])(?:\d{3,4}[pi]|4k|uhd|hdr(?:10\+?)?|sdr|blu-?ray|bdrip|brrip|web-?dl|web-?rip|web|hdtv|pdtv|dvdrip|hdrip|remux|amzn|dsnp|hmax|atvp|pcok|hulu|x ?26[45]|h ?26[45]|hevc|avc|xvid|divx|av1|10 ?bit|aac\d?|ac3|e-?ac-?3|dts(?:-?hd)?|ddp?\d?|truehd|atmos|flac|opus|eng(?:lish)? subs?|(?:ita|eng|hin|spa|fre|ger|rus)(?: (?:ita|eng|hin|spa|fre|ger|rus))* (?:multi-?)?subs?|(?:ita|eng|hin|spa|fre|ger|rus)(?: (?:ita|eng|hin|spa|fre|ger|rus))+|sub(?: (?:ita|eng|hin|spa|fre|ger|rus))+|multi-?subs?|esubs?|msubs?|tsv|yts|yify|rarbg|eztv|tgx|galaxyrg)(?![a-z0-9])", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<![a-z0-9])(?:[0-9]{3,4}[pi]|4k|uhd|hdr(?:10\+?)?|sdr|blu-?ray|bdrip|brrip|web-?dl|web-?rip|web|hdtv|pdtv|dvdrip|hdrip|remux|amzn|dsnp|hmax|atvp|pcok|hulu|x ?26[45]|h ?26[45]|hevc|avc|xvid|divx|av1|10 ?bit|aac[0-9]?|ac3|e-?ac-?3|dts(?:-?hd)?|ddp?[0-9]?|truehd|atmos|flac|opus|eng(?:lish)? subs?|(?:ita|eng|hin|spa|fre|ger|rus)(?: (?:ita|eng|hin|spa|fre|ger|rus))* (?:multi-?)?subs?|(?:ita|eng|hin|spa|fre|ger|rus)(?: (?:ita|eng|hin|spa|fre|ger|rus))+|sub(?: (?:ita|eng|hin|spa|fre|ger|rus))+|multi-?subs?|esubs?|msubs?|tsv|yts|yify|rarbg|eztv|tgx|galaxyrg)(?![a-z0-9])", RegexOptions.IgnoreCase)]
     private static partial Regex JunkToken();
 
     // Weak tokens are also ordinary words ("Internal Affairs", "NF"): only removed from episode titles.

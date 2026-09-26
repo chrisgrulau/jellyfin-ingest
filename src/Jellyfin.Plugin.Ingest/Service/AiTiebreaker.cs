@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Common;
 using Jellyfin.Plugin.Common.Ai;
 using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Parsing;
@@ -123,19 +124,20 @@ public sealed class AiTiebreaker : ITiebreaker, IEpisodePicker
             return earlier;
         }
 
-        var data = new
+        // Fitted to the AI plugin's limit (FAM-02): shorter synopses first, then a shorter transcript
+        var data = Fit((synopsis, heard) => new
         {
             file = fileName,
             series,
-            transcript,
+            transcript = Shorten(transcript, heard),
             episodes = options.Select((o, i) => new
             {
                 index = i,
                 code = string.Create(CultureInfo.InvariantCulture, $"S{o.Season:00}E{o.Episode:00}"),
                 title = o.Title,
-                synopsis = Shorten(o.Overview),
+                synopsis = Shorten(o.Overview, synopsis),
             }),
-        };
+        });
         var reply = await _ask("ingest", EpisodePurpose, TranscriptInstructions, data, Schema, 2048, "medium", cancellationToken).ConfigureAwait(false);
         var pick = Read(reply, options.Count);
         _asked[key] = pick;
@@ -152,7 +154,7 @@ public sealed class AiTiebreaker : ITiebreaker, IEpisodePicker
             return earlier;
         }
 
-        var data = new
+        var data = Fit((synopsis, _) => new
         {
             file = fileName,
             series,
@@ -164,9 +166,9 @@ public sealed class AiTiebreaker : ITiebreaker, IEpisodePicker
                 code = string.Create(CultureInfo.InvariantCulture, $"S{o.Season:00}E{o.Episode:00}"),
                 title = o.Title,
                 year = o.Year,
-                synopsis = Shorten(o.Overview),
+                synopsis = Shorten(o.Overview, synopsis),
             }),
-        };
+        });
         var reply = await _ask("ingest", EpisodePurpose, EpisodeInstructions, data, Schema, 2048, "low", cancellationToken).ConfigureAwait(false);
         var pick = Read(reply, options.Count);
         _asked[key] = pick;
@@ -185,7 +187,7 @@ public sealed class AiTiebreaker : ITiebreaker, IEpisodePicker
         if (!reply.Ok || reply.Answer is not { ValueKind: JsonValueKind.Object } answer)
         {
             // Not installed or not allowed: say nothing; anything else: say why the AI didn't settle it
-            return new TiebreakPick(null, reply.Failure is "not-installed" or "not-allowed" ? string.Empty : "The AI plugin couldn't help: " + reply.Error, null);
+            return new TiebreakPick(null, reply.Failure is "not-installed" or "not-allowed" or "off" ? string.Empty : "The AI plugin couldn't help: " + reply.Error, null);
         }
 
         var reason = answer.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String ? Trim(r.GetString()) : string.Empty;
@@ -201,10 +203,28 @@ public sealed class AiTiebreaker : ITiebreaker, IEpisodePicker
     }
 
     // Synopses are only a hint: the first 200 characters keep the question small
-    private static string? Shorten(string? text)
+    private static string? Shorten(string? text, int max = 200)
     {
         var t = (text ?? string.Empty).ReplaceLineEndings(" ").Trim();
-        return t.Length == 0 ? null : t.Length > 200 ? t[..200] + "…" : t;
+        return t.Length == 0 || max <= 0 ? null : t.Length > max ? t[..max] + "…" : t;
+    }
+
+    // The first shape of the data that fits the AI plugin's limit, trying shorter synopses, then a shorter transcript
+    // (the offered episodes and their positions never change, so an answer still names one of them)
+    private static object Fit(Func<int, int, object> make)
+    {
+        (int Synopsis, int Transcript)[] steps = [(200, 4000), (120, 4000), (60, 3000), (0, 2000), (0, 1000), (0, 400)];
+        object data = make(steps[0].Synopsis, steps[0].Transcript);
+        foreach (var (synopsis, transcript) in steps)
+        {
+            data = make(synopsis, transcript);
+            if (BridgeJson.Bytes(data) <= AiBridgeClient.MaxDataBytes - 1024)
+            {
+                break;
+            }
+        }
+
+        return data;
     }
 
     // Model text goes into the activity panel only: kept short and on one line

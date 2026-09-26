@@ -144,7 +144,7 @@ public sealed class EpisodeByTranscriptTests : IDisposable
     }
 
     [Fact]
-    public async Task A_show_with_too_many_episodes_isnt_transcribed()
+    public async Task A_show_with_too_many_episodes_waits_for_review_with_the_reason()
     {
         var transcriber = new Transcriber(new HeardText(Heard, string.Empty));
 
@@ -152,7 +152,56 @@ public sealed class EpisodeByTranscriptTests : IDisposable
 
         Assert.Equal(IdentificationStatus.NeedsReview, r.Status);
         Assert.Contains("too many episodes", r.Reason, StringComparison.Ordinal);
-        Assert.Empty(transcriber.Asked);
+    }
+
+    // ING-31: the transcript is asked for first, so without one the seasons aren't listed at all
+    [Fact]
+    public async Task Without_a_transcript_no_season_is_listed()
+    {
+        var lookup = new CountingLookup();
+
+        await Identify(lookup, Picks(1, 1), new Transcriber(new HeardText(null, string.Empty)));
+
+        Assert.Equal(0, lookup.Listed);
+    }
+
+    private sealed class CountingLookup : IMetadataLookup
+    {
+        public int Listed { get; private set; }
+
+        public Task<IReadOnlyList<MetadataCandidate>> SearchSeriesAsync(string name, int? year, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<MetadataCandidate>>([Show]);
+
+        public Task<IReadOnlyList<MetadataCandidate>> SearchMoviesAsync(string name, int? year, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<MetadataCandidate>>([]);
+
+        public Task<string?> GetEpisodeTitleAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, int episode, CancellationToken cancellationToken)
+            => Task.FromResult<string?>(null);
+
+        public Task<IReadOnlyList<EpisodeListing>> ListSeasonAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, CancellationToken cancellationToken)
+        {
+            Listed++;
+            return Task.FromResult<IReadOnlyList<EpisodeListing>>([]);
+        }
+    }
+
+    // FAM-02: a question in another script is fitted to the AI plugin's limit without dropping any offered episode
+    [Fact]
+    public async Task A_large_non_latin_question_is_fitted_to_the_limit()
+    {
+        object? sent = null;
+        var ai = new AiTiebreaker((caller, purpose, instructions, data, schema, max, effort, ct) =>
+        {
+            sent = data;
+            return Task.FromResult(new AiReply(true, JsonDocument.Parse("{\"choice\":149,\"reason\":\"x\"}").RootElement.Clone(), "m", null, null));
+        });
+        var episodes = Enumerable.Range(1, 150).Select(e => new EpisodeListing(1, e, "Серия " + e, 2004, new string('ж', 400))).ToList();
+
+        var pick = await ai.PickFromTranscriptAsync("a.mkv", "Гавань", new string('я', 4000), episodes, TestContext.Current.CancellationToken);
+
+        Assert.Equal(149, pick.Index);
+        Assert.True(Jellyfin.Plugin.Common.BridgeJson.Bytes(sent) <= Jellyfin.Plugin.Common.Ai.AiBridgeClient.MaxDataBytes);
+        Assert.Equal(150, JsonDocument.Parse(JsonSerializer.Serialize(sent)).RootElement.GetProperty("episodes").GetArrayLength());
     }
 
     [Fact]

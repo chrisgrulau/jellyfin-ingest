@@ -128,7 +128,7 @@ public static partial class SubtitlePairer
         return videos.Count == 1 ? videos.First() : null;
     }
 
-    [GeneratedRegex(@"^[\s._-]*\d{1,2}_")]
+    [GeneratedRegex(@"^[\s._-]*[0-9]{1,2}_")]
     private static partial Regex LeadingIndex();
 
     [GeneratedRegex(@"[\s._\-\[\]()]+")]
@@ -143,6 +143,6 @@ public static partial class SubtitlePairer
     [GeneratedRegex(@"comment", RegexOptions.IgnoreCase)]
     private static partial Regex CommentaryToken();
 
-    [GeneratedRegex(@"s\d{1,2}e\d{1,3}", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"s[0-9]{1,2}e[0-9]{1,3}", RegexOptions.IgnoreCase)]
     private static partial Regex EpisodeCode();
 }

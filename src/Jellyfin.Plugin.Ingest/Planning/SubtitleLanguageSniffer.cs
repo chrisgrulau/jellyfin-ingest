@@ -42,7 +42,7 @@ public static partial class SubtitleLanguageSniffer
         return scores[0].Share > 0.08 && scores[0].Share - scores[1].Share > 0.03 ? scores[0].Lang : null;
     }
 
-    [GeneratedRegex(@"<[^>]+>|\{[^}]*\}|-->|\d+:\d+:\d+[,.]\d+")]
+    [GeneratedRegex(@"<[^>]+>|\{[^}]*\}|-->|[0-9]+:[0-9]+:[0-9]+[,.][0-9]+")]
     private static partial Regex Markup();
 
     [GeneratedRegex(@"[\p{L}']+")]

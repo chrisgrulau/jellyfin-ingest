@@ -70,7 +70,19 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
         for (var i = 0; i < roots.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var deleted = QuarantinePurger.Purge(roots[i], today, retention);
+            var deleted = QuarantinePurger.Purge(roots[i], today, retention, out var failed);
+            if (failed.Count > 0)
+            {
+                _state.Record(new ActivityEntry
+                {
+                    Time = DateTimeOffset.UtcNow,
+                    Status = ActivityStatus.Failed,
+                    Release = roots[i],
+                    Summary = failed.Count == 1 ? "1 quarantine folder couldn't be fully deleted; it is tried again next time." : $"{failed.Count} quarantine folders couldn't be fully deleted; they are tried again next time.",
+                    Details = failed,
+                });
+            }
+
             foreach (var path in deleted)
             {
                 LogPurged(_logger, path);
