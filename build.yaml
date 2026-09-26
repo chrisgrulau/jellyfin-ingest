@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Ingest"
 guid: "88d6ced9-052e-45f6-b21d-fc4eefa7998d"
-version: "0.5.0.0"
+version: "0.6.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -15,6 +15,7 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Ingest.dll"
 changelog: >
-  0.5.0-alpha: choose file by file in review. For a release with several files waiting, each file can replace its
-  copies on the server, be quarantined (with its subtitles) instead of filed, or wait; the rest of the release is
-  filed as usual. Replace existing copies and Quarantine release still act on the whole release.
+  0.6.0-alpha: releases needing a decision, failures, filings and quarantines also go to Jellyfin's Activity log,
+  and Shoal Ingest is in the dashboard menu. Non-English metadata: English release names now match titles listed in
+  the server's language. The library picked on a review card survives the refresh; missing watch folders are
+  reported once; network (UNC) paths are accepted.

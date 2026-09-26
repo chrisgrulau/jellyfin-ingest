@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0-alpha] - 2026-09-26
+
 ### Added
 
 - **FAM-05: Jellyfin's Activity log.** Releases waiting for a decision, failures, filings and quarantines are also
