@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Ingest"
 guid: "88d6ced9-052e-45f6-b21d-fc4eefa7998d"
-version: "0.7.0.0"
+version: "0.8.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -15,6 +15,5 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Ingest.dll"
 changelog: >
-  0.7.0-alpha: hard link or copy per watch folder, so torrents keep seeding (moved stays the default); Ingest
-  remembers what it filed from there. Subtitle language tags in every ISO 639 language are recognised when filing,
-  and unknown tags are kept rather than dropped.
+  0.8.0-alpha: dry run per watch folder (on for new folders); a Waiting list with Process now; season and episode
+  per video in review; theme-aware, more accessible settings page.
