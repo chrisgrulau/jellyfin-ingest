@@ -28,7 +28,14 @@ public class IngestPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
         // Watch folders saved before dry run was per folder keep the old global setting (ING-32)
         if (WatchFolder.MigrateDryRun(Configuration.WatchFolders, Configuration.DryRun))
         {
-            SaveConfiguration();
+            try
+            {
+                SaveConfiguration();
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                // Not saved: the same values are read as the fallback until the settings are next saved
+            }
         }
     }
 
