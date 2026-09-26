@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0-alpha] - 2026-09-26
+
 ### Added
 
 - **AI tie-breaker (optional):** when a release is too close to call between candidates Ingest already found (best
