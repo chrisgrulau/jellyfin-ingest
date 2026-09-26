@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,12 +51,19 @@ public sealed class MediaIdentifier
     /// <summary>The most episodes offered to an <see cref="IEpisodePicker"/>.</summary>
     public const int EpisodeOptions = 40;
 
+    /// <summary>The most episodes compared with a transcript (too many and the question is too big to be useful).</summary>
+    public const int TranscriptOptions = 150;
+
+    /// <summary>The most seasons listed when the name gives no season.</summary>
+    public const int MaxSeasons = 40;
+
     /// <summary>The <see cref="MetadataCandidate.Source"/> value used for library hits.</summary>
     public const string LibrarySource = "Library";
 
     private readonly IMetadataLookup _lookup;
     private readonly ILibraryIndex? _library;
     private readonly ITiebreaker? _tiebreaker;
+    private readonly ITranscriber? _transcriber;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MediaIdentifier"/> class.
@@ -63,9 +71,12 @@ public sealed class MediaIdentifier
     /// <param name="lookup">Metadata provider access.</param>
     /// <param name="library">What's already in the destination library (optional).</param>
     /// <param name="tiebreaker">Settles close matches (optional; without it they wait for review).</param>
-    public MediaIdentifier(IMetadataLookup lookup, ILibraryIndex? library = null, ITiebreaker? tiebreaker = null)
+    /// <param name="transcriber">Transcribes a stretch of a video whose name doesn't say which episode it is (optional;
+    /// used only with a tie-breaker that is also an <see cref="IEpisodePicker"/>).</param>
+    public MediaIdentifier(IMetadataLookup lookup, ILibraryIndex? library = null, ITiebreaker? tiebreaker = null, ITranscriber? transcriber = null)
     {
         _tiebreaker = tiebreaker;
+        _transcriber = transcriber;
         _lookup = lookup ?? throw new ArgumentNullException(nameof(lookup));
         _library = library;
     }
@@ -76,9 +87,10 @@ public sealed class MediaIdentifier
     /// <param name="release">The parsed release name.</param>
     /// <param name="preferTv">Whether the destination library holds shows (used when the name alone is ambiguous).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <param name="fileName">The video's file name (no folders), for a tie-breaker.</param>
+    /// <param name="videoPath">The video's path (or just its file name). Only the file name is ever sent to a
+    /// tie-breaker; the full path is used to transcribe the video when its name doesn't say which episode it is.</param>
     /// <returns>The identification result.</returns>
-    public async Task<IdentificationResult> IdentifyAsync(ParsedRelease release, bool preferTv, CancellationToken cancellationToken, string? fileName = null)
+    public async Task<IdentificationResult> IdentifyAsync(ParsedRelease release, bool preferTv, CancellationToken cancellationToken, string? videoPath = null)
     {
         ArgumentNullException.ThrowIfNull(release);
 
@@ -88,14 +100,14 @@ public sealed class MediaIdentifier
         }
 
         var result = release.Kind == MediaKind.Episode || (release.Kind == MediaKind.Unknown && preferTv)
-            ? await IdentifyEpisodeAsync(release, fileName, cancellationToken).ConfigureAwait(false)
+            ? await IdentifyEpisodeAsync(release, videoPath, cancellationToken).ConfigureAwait(false)
             : await IdentifyMovieAsync(release, cancellationToken).ConfigureAwait(false);
-        return await SettleAsync(release, fileName, result, cancellationToken).ConfigureAwait(false);
+        return await SettleAsync(release, videoPath, result, cancellationToken).ConfigureAwait(false);
     }
 
     // A close call between candidates (not "nothing found", not "no episode number") goes to the tie-breaker, if any. Its
     // pick is filed exactly as if a person had chosen it in review; no pick leaves the review as it was.
-    private async Task<IdentificationResult> SettleAsync(ParsedRelease release, string? fileName, IdentificationResult result, CancellationToken ct)
+    private async Task<IdentificationResult> SettleAsync(ParsedRelease release, string? videoPath, IdentificationResult result, CancellationToken ct)
     {
         if (_tiebreaker is null || result.Status != IdentificationStatus.NeedsReview || result.Candidates.Count < 2
             || result.Candidates[0].Score < TiebreakFloor
@@ -105,14 +117,14 @@ public sealed class MediaIdentifier
         }
 
         var options = result.Candidates.Take(TiebreakOptions).ToList();
-        var pick = await _tiebreaker.PickAsync(release, fileName ?? release.Title, options, ct).ConfigureAwait(false);
+        var pick = await _tiebreaker.PickAsync(release, FileName(videoPath) ?? release.Title, options, ct).ConfigureAwait(false);
         if (pick.Index is not { } i || i < 0 || i >= options.Count)
         {
             return result with { Reason = result.Reason + " " + pick.Note };
         }
 
         var chosen = options[i].Candidate;
-        var settled = await IdentifyAsChosenAsync(release, chosen, chosen.IsSeries, ct, fileName).ConfigureAwait(false);
+        var settled = await IdentifyAsChosenAsync(release, chosen, chosen.IsSeries, ct, videoPath).ConfigureAwait(false);
         return settled.Status == IdentificationStatus.Identified
             ? settled with
             {
@@ -131,9 +143,9 @@ public sealed class MediaIdentifier
     /// <param name="chosen">The chosen candidate.</param>
     /// <param name="isTv">Whether the chosen title is a series.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <param name="fileName">The video's file name (no folders), for an episode picker.</param>
+    /// <param name="videoPath">The video's path (or just its file name), for an episode picker and transcript.</param>
     /// <returns>The identification result.</returns>
-    public async Task<IdentificationResult> IdentifyAsChosenAsync(ParsedRelease release, MetadataCandidate chosen, bool isTv, CancellationToken cancellationToken, string? fileName = null)
+    public async Task<IdentificationResult> IdentifyAsChosenAsync(ParsedRelease release, MetadataCandidate chosen, bool isTv, CancellationToken cancellationToken, string? videoPath = null)
     {
         ArgumentNullException.ThrowIfNull(release);
         ArgumentNullException.ThrowIfNull(chosen);
@@ -153,7 +165,7 @@ public sealed class MediaIdentifier
         var series = new SeriesIdentity { Title = chosen.Name, Year = chosen.Year, TvdbId = Id(chosen, "Tvdb"), TmdbId = Id(chosen, "Tmdb") };
         if (release.Season is not { } season || release.Episode is not { } episode)
         {
-            var byTitle = await FindByTitleAsync(release, chosen, fileName, cancellationToken).ConfigureAwait(false);
+            var byTitle = await FindEpisodeAsync(release, chosen, videoPath, cancellationToken).ConfigureAwait(false);
             return byTitle.Hit is { } hit
                 ? ByTitle(series, hit, 1, [], reason + " " + byTitle.Note, byTitle.By)
                 : new IdentificationResult
@@ -391,7 +403,7 @@ public sealed class MediaIdentifier
         };
     }
 
-    private async Task<IdentificationResult> IdentifyEpisodeAsync(ParsedRelease release, string? fileName, CancellationToken ct)
+    private async Task<IdentificationResult> IdentifyEpisodeAsync(ParsedRelease release, string? videoPath, CancellationToken ct)
     {
         var hits = await SearchAsync(true, release.Title, release.Year, ct).ConfigureAwait(false);
         var (best, ranked, reason) = Choose(release.Title, release.Year, hits);
@@ -412,7 +424,7 @@ public sealed class MediaIdentifier
 
         if (release.Season is not { } season || release.Episode is not { } episode)
         {
-            var byTitle = await FindByTitleAsync(release, c, fileName, ct).ConfigureAwait(false);
+            var byTitle = await FindEpisodeAsync(release, c, videoPath, ct).ConfigureAwait(false);
             return byTitle.Hit is { } hit
                 ? ByTitle(series, hit, Math.Min(1, best.Score), ranked, reason + " " + byTitle.Note, byTitle.By)
                 : new IdentificationResult
@@ -448,7 +460,7 @@ public sealed class MediaIdentifier
     // A file that names its episode by title only (typically a special, "S13SP2 A Special Title"): find that title in
     // the season's episode list. A clear match is taken; otherwise an episode picker (the AI plugin) may choose one of
     // the listed episodes. The note is appended to the reason either way.
-    private async Task<(EpisodeListing? Hit, string Note, string? By)> FindByTitleAsync(ParsedRelease release, MetadataCandidate series, string? fileName, CancellationToken ct)
+    private async Task<(EpisodeListing? Hit, string Note, string? By)> FindByTitleAsync(ParsedRelease release, MetadataCandidate series, string? videoPath, CancellationToken ct)
     {
         if (release.Season is not { } season || release.Episode is not null || string.IsNullOrWhiteSpace(release.EpisodeTitle))
         {
@@ -480,7 +492,7 @@ public sealed class MediaIdentifier
             .Take(EpisodeOptions)
             .Select(x => x.Listing)
             .ToList();
-        var pick = await picker.PickEpisodeAsync(fileName ?? title, series.Name, title, release.Year, options, ct).ConfigureAwait(false);
+        var pick = await picker.PickEpisodeAsync(FileName(videoPath) ?? title, series.Name, title, release.Year, options, ct).ConfigureAwait(false);
         if (pick.Index is not { } i || i < 0 || i >= options.Count)
         {
             return (null, string.IsNullOrEmpty(pick.Note) ? string.Create(CultureInfo.InvariantCulture, $" No episode of season {season} clearly has that title.") : " " + pick.Note, null);
@@ -488,5 +500,70 @@ public sealed class MediaIdentifier
 
         var chosen = options[i];
         return (chosen, string.Create(CultureInfo.InvariantCulture, $"Episode S{chosen.Season:00}E{chosen.Episode:00} '{chosen.Title}' chosen by {pick.By ?? "the episode picker"} from {options.Count} listed episodes. {pick.Note}"), pick.By ?? "episode picker");
+    }
+
+    private static string? FileName(string? videoPath) => string.IsNullOrEmpty(videoPath) ? null : Path.GetFileName(videoPath);
+
+    // The episode number is missing: first by the episode title in the name, then (with a transcriber and an episode
+    // picker) by comparing a short transcript with the episode synopses
+    private async Task<(EpisodeListing? Hit, string Note, string? By)> FindEpisodeAsync(ParsedRelease release, MetadataCandidate series, string? videoPath, CancellationToken ct)
+    {
+        var byTitle = await FindByTitleAsync(release, series, videoPath, ct).ConfigureAwait(false);
+        if (byTitle.Hit is not null || release.Episode is not null || _transcriber is null || _tiebreaker is not IEpisodePicker picker
+            || videoPath is null || !Path.IsPathFullyQualified(videoPath))
+        {
+            return byTitle;
+        }
+
+        var byTranscript = await FindByTranscriptAsync(release, series, videoPath, picker, ct).ConfigureAwait(false);
+        return byTranscript.Hit is not null ? byTranscript : (null, byTitle.Note + byTranscript.Note, null);
+    }
+
+    private async Task<(EpisodeListing? Hit, string Note, string? By)> FindByTranscriptAsync(ParsedRelease release, MetadataCandidate series, string videoPath, IEpisodePicker picker, CancellationToken ct)
+    {
+        // The season the name gives, or every season until one is empty (specials aren't guessed this way)
+        var episodes = new List<EpisodeListing>();
+        if (release.Season is { } known)
+        {
+            episodes.AddRange(await _lookup.ListSeasonAsync(series.ProviderIds, known, ct).ConfigureAwait(false));
+        }
+        else
+        {
+            for (var season = 1; season <= MaxSeasons && episodes.Count <= TranscriptOptions; season++)
+            {
+                var list = await _lookup.ListSeasonAsync(series.ProviderIds, season, ct).ConfigureAwait(false);
+                if (list.Count == 0)
+                {
+                    break;
+                }
+
+                episodes.AddRange(list);
+            }
+        }
+
+        if (episodes.Count == 0)
+        {
+            return (null, string.Empty, null);
+        }
+
+        if (episodes.Count > TranscriptOptions)
+        {
+            return (null, string.Create(CultureInfo.InvariantCulture, $" '{series.Name}' has too many episodes to compare a transcript with; a season number in the name would narrow it down."), null);
+        }
+
+        var heard = await _transcriber!.TranscribeAsync(videoPath, ct).ConfigureAwait(false);
+        if (heard.Text is not { } text)
+        {
+            return (null, heard.Note.Length > 0 ? " " + heard.Note : string.Empty, null);
+        }
+
+        var pick = await picker.PickFromTranscriptAsync(Path.GetFileName(videoPath), series.Name, text, episodes, ct).ConfigureAwait(false);
+        if (pick.Index is not { } i || i < 0 || i >= episodes.Count)
+        {
+            return (null, string.IsNullOrEmpty(pick.Note) ? string.Empty : " From a transcript: " + pick.Note, null);
+        }
+
+        var chosen = episodes[i];
+        return (chosen, string.Create(CultureInfo.InvariantCulture, $"Episode S{chosen.Season:00}E{chosen.Episode:00} '{chosen.Title}' identified from a transcript by {pick.By ?? "the episode picker"}, among {episodes.Count} episodes. {pick.Note}"), pick.By ?? "episode picker");
     }
 }

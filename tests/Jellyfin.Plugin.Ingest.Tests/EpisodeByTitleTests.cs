@@ -65,6 +65,9 @@ public class EpisodeByTitleTests
             Offered = options;
             return Task.FromResult(answer(options));
         }
+
+        public Task<TiebreakPick> PickFromTranscriptAsync(string fileName, string series, string transcript, IReadOnlyList<EpisodeListing> options, CancellationToken cancellationToken)
+            => Task.FromResult(new TiebreakPick(null, string.Empty, null));
     }
 
     private static Task<IdentificationResult> Identify(IMetadataLookup lookup, string file, ITiebreaker? picker = null)

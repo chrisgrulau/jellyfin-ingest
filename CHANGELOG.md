@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Episodes with no usable name identified from a short transcript** (optional; **Identify unnamed episodes from a
+  short transcript**, on by default but needing both other plugins). When the series is known but not the episode, and
+  the episode title in the name (if any) doesn't settle it:
+  - The Shoal Subtitles plugin transcribes two minutes of the video, from five minutes in (or one minute in for a
+    short video). It must allow this (**Let Ingest ask for short transcripts**). It uses its "Context for AI
+    decisions" speech-to-text service, built-in by default, which is free and keeps the audio on this server.
+  - The Shoal AI plugin compares the transcript with the episode synopses of the season in the name, or of every
+    season (up to 150 episodes), and must pick one of them or none.
+  - No pick, too little speech, or a missing plugin leaves the release in review, with the reason.
+  - Each file is transcribed once while it's unchanged.
+- The shared source is updated to include the Subtitles plugin's speech client (`SpeechBridgeClient`).
+
+### Changed
+
+- Activity entries where the AI plugin decided something now say "The AI plugin decided part of this (see the details)".
+
 ## [0.2.1-alpha] - 2026-09-26
 
 ### Added

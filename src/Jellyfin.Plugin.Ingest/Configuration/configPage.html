@@ -149,6 +149,13 @@
             </label>
             <div class="fieldDescription checkboxFieldDescription">Only when the Shoal AI plugin is installed and allows Ingest (its settings page, where its spending limits also apply). When two or more candidates are too close to call, it picks one of them, using only the file name and the candidates' titles and years. When a file names its episode by title only (a special, say) and no title matches clearly, it picks one of that season's episodes from their titles and short synopses. Anything else waits for review as before. Each settled match is noted in the activity panel with the reason.</div>
           </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input id="UseTranscripts" name="UseTranscripts" type="checkbox" is="emby-checkbox" />
+              <span>Identify unnamed episodes from a short transcript</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">When an episode's name doesn't say which episode it is, the Shoal Subtitles plugin transcribes two minutes of it and the AI plugin compares that with the episode synopses. Needs both plugins, with <strong>Let Ingest ask for short transcripts</strong> on in the Subtitles plugin (built-in speech-to-text is free and stays on this server). The AI must pick one of the show's listed episodes; anything else waits for review.</div>
+          </div>
           <div>
             <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
           </div>
@@ -549,6 +556,7 @@
             page.querySelector('#DryRun').checked = config.DryRun;
             page.querySelector('#ScanLibraryAfterIngest').checked = config.ScanLibraryAfterIngest;
             page.querySelector('#UseAiTiebreak').checked = config.UseAiTiebreak !== false;
+            page.querySelector('#UseTranscripts').checked = config.UseTranscripts !== false;
             syncBanner();
             Dashboard.hideLoadingMsg();
             loadStatus();
@@ -644,6 +652,7 @@
             current.DryRun = page.querySelector('#DryRun').checked;
             current.ScanLibraryAfterIngest = page.querySelector('#ScanLibraryAfterIngest').checked;
             current.UseAiTiebreak = page.querySelector('#UseAiTiebreak').checked;
+            current.UseTranscripts = page.querySelector('#UseTranscripts').checked;
             config = current;
             return ApiClient.updatePluginConfiguration(pluginId, current).then(function (r) {
               Dashboard.processPluginConfigurationUpdateResult(r);

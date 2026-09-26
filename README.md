@@ -63,6 +63,7 @@ plugin page, where you pick the right title (and library) with one click or sear
 | Extras | Trailers, featurettes, deleted scenes … filed into Jellyfin's extras folders. |
 | Clutter | Moved to a dated quarantine folder (default or user-chosen), purged after N days (default 30). *Quarantine* on the plugin page shows what is there and when each day's folder is deleted. |
 | AI tie-breaker | Optional, with the Shoal AI plugin: a close call between candidates Ingest already found is settled by the AI choosing one of them (or none). Only file names, titles and years are sent; every choice is shown in *Recent activity*. |
+| Episodes from a transcript | Optional, with the Shoal Subtitles and AI plugins: when a name doesn't say which episode it is, two minutes of it are transcribed (built-in speech-to-text by default, on this server) and the AI picks the listed episode whose synopsis fits, or none. |
 | Episodes named by title | A file that gives the episode title but no number (typically a special) is matched against that season's episode list from your providers; if no title clearly matches, the AI plugin (when installed) may choose one of the listed episodes. |
 | Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. |
 | Activity | *Recent activity* on the plugin page: filed, dry run, needs review, decisions, failures, quarantine and purges, with what went where. |
@@ -106,6 +107,7 @@ nothing is watched until you do. Dry run is on until you turn it off.
 | Settle time | 300 s | How long nothing in a release (files, sizes, write times) may change before it is processed. |
 | Refresh filed folders after ingest | On | Only the film or show folders filed into are refreshed, never whole libraries. |
 | Let the AI plugin settle close matches | On | Does nothing unless the Shoal AI plugin is installed and allows Ingest. |
+| Identify unnamed episodes from a short transcript | On | Also needs the Shoal Subtitles plugin, with **Let Ingest ask for short transcripts** on there. |
 
 ## What Ingest stores and logs
 
@@ -151,7 +153,7 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] New episodes of a show you already have follow it to the library it's in
 - [x] Optional AI tie-breaker for close calls (Shoal AI plugin)
 - [x] Episodes named by title only (specials), with the AI plugin as a fallback
-- [ ] Episodes with no usable name: a short transcript compared with episode synopses
+- [x] Episodes with no usable name: a short transcript compared with episode synopses
 
 Design notes live in [`docs/DESIGN.md`](docs/DESIGN.md).
 

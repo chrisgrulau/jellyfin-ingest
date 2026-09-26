@@ -91,6 +91,26 @@ the lists carry synopses).
 
 The same path runs when a person chooses the series in review.
 
+### Episodes from a transcript
+
+When the series is known but the episode number isn't, and the title (if any) didn't settle it, `MediaIdentifier` can
+compare a short transcript with the episode synopses. This needs an `ITranscriber` (`SpeechTranscriber`, through the
+Subtitles plugin's `SpeechBridge`) and a tie-breaker that is also an `IEpisodePicker`.
+
+1. **Episodes:** the season in the name, or seasons 1, 2 … until one is empty. Specials aren't guessed this way. More
+   than 150 episodes gives up with a note, because a season number in the name would be needed.
+2. **Transcript:** two minutes from 5:00 in, past most title sequences and recaps, or from 1:00 in if that gives too
+   little speech (fewer than 15 words).
+   - The Subtitles plugin decides whether Ingest may ask and which service it uses: its "Context for AI decisions"
+     tier, built-in whisper by default. A paid service is metered against its own limits.
+   - Transcripts are remembered per file (path, size, modified time) for the service's life, so a release is
+     transcribed once.
+3. **Pick:** the AI plugin (`ingest.episode`, medium effort) gets the file name, the series, the transcript (as data,
+   at most 4,000 characters), and each episode's code, title and first 200 characters of synopsis. It must answer
+   with a listed position or -1.
+
+Anything else leaves the release in review, with the reason.
+
 ## Subtitle pairing
 
 For each video in a release, in order:
