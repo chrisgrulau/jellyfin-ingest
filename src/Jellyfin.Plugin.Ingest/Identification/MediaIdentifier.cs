@@ -197,7 +197,9 @@ public sealed class MediaIdentifier
     {
         ArgumentNullException.ThrowIfNull(candidate);
 
-        var score = TitleMatcher.Similarity(title, candidate.Name);
+        // Scored against the name that fits best (the server's language, or English)
+        var name = candidate.AlternativeNames.Prepend(candidate.Name).MaxBy(n => TitleMatcher.Similarity(title, n)) ?? candidate.Name;
+        var score = TitleMatcher.Similarity(title, name);
         if (string.Equals(candidate.Source, LibrarySource, StringComparison.Ordinal))
         {
             score += InLibraryBonus;
@@ -215,7 +217,7 @@ public sealed class MediaIdentifier
 
         // Providers rank by relevance and popularity: a small nudge stops an obscure exact-name title beating the famous one
         score += candidate.ProviderRank switch { 0 => 0.05, 1 => 0.025, _ => 0 };
-        score -= NumberMismatchPenalty(title, candidate.Name);
+        score -= NumberMismatchPenalty(title, name);
         if (IsImdbOnly(candidate))
         {
             score -= ImdbOnlyPenalty;
@@ -354,7 +356,7 @@ public sealed class MediaIdentifier
 
         // A wrong or missing year in the release name shouldn't hide the right title: unless there is a near-exact
         // title hit, also search without the year.
-        if (year is not null && !hits.Any(h => TitleMatcher.Similarity(title, h.Name) >= 0.95))
+        if (year is not null && !hits.Any(h => h.AlternativeNames.Prepend(h.Name).Any(n => TitleMatcher.Similarity(title, n) >= 0.95)))
         {
             var more = Ranked(series
                 ? await _lookup.SearchSeriesAsync(title, null, ct).ConfigureAwait(false)

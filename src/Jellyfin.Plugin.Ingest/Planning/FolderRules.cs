@@ -10,7 +10,11 @@ namespace Jellyfin.Plugin.Ingest.Planning;
 /// </summary>
 /// <param name="Folder">The folder as configured (a watch folder, or the quarantine folder).</param>
 /// <param name="Problem">Why it can't be used, in plain language.</param>
-public sealed record FolderProblem(string Folder, string Problem);
+public sealed record FolderProblem(string Folder, string Problem)
+{
+    /// <summary>Gets a value indicating whether this is only a warning (saving is allowed).</summary>
+    public bool Warning { get; init; }
+}
 
 /// <summary>
 /// Which watch and quarantine folders are safe. Everything in a watch folder gets renamed, moved or quarantined (and

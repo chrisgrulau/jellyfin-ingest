@@ -106,11 +106,21 @@ public class IngestController : ControllerBase
     {
         ArgumentNullException.ThrowIfNull(request);
         var libraries = IngestService.Libraries(_libraryManager.GetVirtualFolders());
-        return FolderRules.Check(
-            [.. request.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w))],
+        var watch = request.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w)).ToList();
+        var problems = FolderRules.Check(
+            [.. watch],
             request.QuarantinePath,
             [.. libraries.SelectMany(l => l.Locations)],
             IngestService.ProtectedFolders(_paths, _configuration)).ToList();
+
+        // A folder this server can't see yet isn't unsafe, but is worth saying (ING-29): a Docker host path instead of the
+        // container's, a mapped drive a service can't see, a share that isn't mounted
+        foreach (var folder in watch.Where(w => problems.All(p => p.Folder != w) && System.IO.Path.IsPathFullyQualified(w) && !System.IO.Directory.Exists(w)))
+        {
+            problems.Add(new FolderProblem(folder, "Jellyfin can't see this folder right now (is it mounted, and is it the path as this server sees it?). Nothing is ingested from it until it can.") { Warning = true });
+        }
+
+        return problems;
     }
 
     /// <summary>
@@ -132,7 +142,7 @@ public class IngestController : ControllerBase
             return BadRequest("A title is required.");
         }
 
-        var lookup = new JellyfinMetadataLookup(_providerManager);
+        var lookup = new JellyfinMetadataLookup(_providerManager, () => (_configuration as MediaBrowser.Controller.Configuration.IServerConfigurationManager)?.Configuration.PreferredMetadataLanguage);
         var hits = series
             ? await lookup.SearchSeriesAsync(name.Trim(), year, cancellationToken).ConfigureAwait(false)
             : await lookup.SearchMoviesAsync(name.Trim(), year, cancellationToken).ConfigureAwait(false);

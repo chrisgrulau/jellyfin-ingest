@@ -52,6 +52,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private readonly TimeProvider _clock = TimeProvider.System;
     private CachingMetadataLookup? _lookup;
 
+    // When a missing watch folder was last reported
+    private readonly Dictionary<string, DateTimeOffset> _missingReported = new(StringComparer.Ordinal);
+
     // Kept for the service's life, so a file is transcribed once while it is unchanged
     private readonly SpeechTranscriber _transcriber = new();
     private DateTimeOffset _identificationPausedUntil;
@@ -283,7 +286,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var libraries = Libraries(_libraryManager.GetVirtualFolders());
 
         // One search cache for the service's life (kept on disk), and one library index per sweep
-        _lookup ??= new CachingMetadataLookup(new JellyfinMetadataLookup(_providerManager), _clock, Path.Combine(plugin.DataFolderPath, "search-cache.json"));
+        _lookup ??= new CachingMetadataLookup(new JellyfinMetadataLookup(_providerManager, () => (_configuration as MediaBrowser.Controller.Configuration.IServerConfigurationManager)?.Configuration.PreferredMetadataLanguage), _clock, Path.Combine(plugin.DataFolderPath, "search-cache.json"));
         _lookup.BeginSweep();
         var sweep = new Sweep(
             new MediaIdentifier(_lookup, new JellyfinLibraryIndex(_libraryManager, []), config.UseAiTiebreak ? new AiTiebreaker() : null, config.UseTranscripts ? _transcriber : null),
@@ -350,9 +353,26 @@ public sealed partial class IngestService : IHostedService, IDisposable
     {
         if (!Directory.Exists(watch.Path))
         {
-            LogMissingWatchFolder(_logger, watch.Path);
+            // Said once in Recent activity, and logged at most hourly, not every sweep (ING-29)
+            var now = _clock.GetUtcNow();
+            if (!_missingReported.TryGetValue(watch.Path, out var last) || now - last >= TimeSpan.FromHours(1))
+            {
+                _missingReported[watch.Path] = now;
+                LogMissingWatchFolder(_logger, watch.Path);
+                _state.RecordUnlessRepeat(new ActivityEntry
+                {
+                    Time = now,
+                    Status = ActivityStatus.Failed,
+                    Release = watch.Path,
+                    WatchFolder = watch.Path,
+                    Summary = "The watch folder isn't available: it isn't mounted, or it isn't the path as this server sees it (a Docker host path, or a mapped drive a service can't see). Nothing is ingested from it until it is.",
+                });
+            }
+
             return;
         }
+
+        _missingReported.Remove(watch.Path);
 
         var destinations = DestinationsOf(watch);
         var routing = LibraryRouting.Route(destinations, libraries);

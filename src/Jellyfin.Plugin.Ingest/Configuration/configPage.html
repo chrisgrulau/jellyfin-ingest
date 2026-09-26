@@ -309,6 +309,9 @@
         var expanded = {};
         var searchResults = {};
         var busyCard = null;
+
+        // The library picked in a card, kept across the automatic refresh (ING-27)
+        var libChoice = {};
         var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Decision', 'Decisions'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged']];
         var labels = {}; filters.forEach(function (f) { labels[f[0]] = f[1]; });
         var SHOWN = 5;
@@ -351,7 +354,7 @@
           if (!cands.length) { return ''; }
           var isTv = !!cands[0].Candidate.IsSeries;
           var key = r.Id + ':' + list;
-          var selected = defaultLibrary(r.WatchFolder, isTv);
+          var selected = libChoice[key] || defaultLibrary(r.WatchFolder, isTv);
           var opts = mediaLibs().filter(function (l) { return isTv ? isTvLib(l) : isFilmLib(l); }).map(function (l) {
             return '<option value="' + esc(l.ItemId) + '"' + (l.ItemId === selected ? ' selected' : '') + '>' + esc(l.Name) + '</option>';
           }).join('');
@@ -368,7 +371,7 @@
             ? '<button type="button" class="ingest-more" data-key="' + esc(key) + '">Show ' + (cands.length - SHOWN) + ' more</button>' : '';
           return '<div class="ingest-pick" data-list="' + list + '">' +
             '<div class="ingest-into"><strong>' + (list === 'suggested' ? 'Possible matches' : 'Search results') + '</strong>' +
-            '<label>File into <select class="ingest-lib">' + (opts || '<option value="">No ' + (isTv ? 'TV' : 'film') + ' library</option>') + '</select></label></div>' +
+            '<label>File into <select class="ingest-lib" data-key="' + esc(key) + '">' + (opts || '<option value="">No ' + (isTv ? 'TV' : 'film') + ' library</option>') + '</select></label></div>' +
             '<table class="ingest-cands"><tbody>' + rows + '</tbody></table>' + more + '</div>';
         }
 
@@ -557,6 +560,8 @@
         });
 
         page.querySelector('#Reviews').addEventListener('change', function (e) {
+          var lib = e.target.closest('.ingest-lib');
+          if (lib) { libChoice[lib.getAttribute('data-key')] = lib.value; return; }
           var sel = e.target.closest('.ingest-file-choice');
           var card = e.target.closest('.ingest-card');
           if (!sel || !card) { return; }
@@ -616,7 +621,7 @@
             Dashboard.hideLoadingMsg();
             loadStatus();
             loadQuarantine();
-            if (!statusTimer) { statusTimer = setInterval(function () { if (!document.hidden && !busyCard) { loadStatus(); } }, 15000); }
+            if (!statusTimer) { statusTimer = setInterval(function () { if (!document.hidden && !busyCard && !page.querySelector('#Reviews').contains(document.activeElement)) { loadStatus(); } }, 15000); }
           });
         });
 
@@ -640,7 +645,7 @@
             var error = '';
             if (!path && !dests.length) { row.remove(); return null; }
             if (!path) { error = 'Enter the folder to watch.'; }
-            else if (!/^(\/|[A-Za-z]:[\\/])/.test(path)) { error = 'Use a full path, e.g. /media/incoming.'; }
+            else if (!/^(\/|[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+\\.+)/.test(path)) { error = 'Use a full path, e.g. /media/incoming, D:\\Downloads or \\\\nas\\share\\incoming (on Windows, a network path rather than a mapped drive letter).'; }
             else if (seen[path]) { error = 'This folder is already watched above.'; }
             else if (!dests.length) { error = 'Choose at least one destination library.'; }
             seen[path] = true;
@@ -673,8 +678,10 @@
             data: JSON.stringify({ WatchFolders: folders.map(function (w) { return w.Path; }), QuarantinePath: quarantinePath }),
             contentType: 'application/json',
             dataType: 'json'
-          }).then(function (problems) {
-            problems = problems || [];
+          }).then(function (all) {
+            all = all || [];
+            var problems = all.filter(function (p) { return !p.Warning; });
+            var warnings = all.filter(function (p) { return p.Warning; });
             var qError = page.querySelector('#QuarantinePathError');
             qError.textContent = problems.filter(function (p) { return p.Folder === quarantinePath; }).map(function (p) { return p.Problem; }).join(' ');
             Array.prototype.forEach.call(page.querySelectorAll('.ingest-row'), function (row) {
@@ -690,7 +697,11 @@
               return;
             }
 
-            return saveSettings(folders, quarantinePath);
+            return Promise.resolve(saveSettings(folders, quarantinePath)).then(function () {
+              if (warnings.length) {
+                Dashboard.alert('Saved. Note: ' + warnings.map(function (w) { return w.Folder + ': ' + w.Problem; }).join(' '));
+              }
+            });
           }, function () {
             Dashboard.hideLoadingMsg();
             Dashboard.alert('The folder settings couldn\'t be checked; nothing was saved.');
