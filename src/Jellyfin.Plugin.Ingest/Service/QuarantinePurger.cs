@@ -25,7 +25,7 @@ public static class QuarantinePurger
         ArgumentOutOfRangeException.ThrowIfNegative(retentionDays);
 
         var cutoff = today.AddDays(-retentionDays);
-        return [.. folderNames.Where(n => DateOnly.TryParseExact(n, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) && d < cutoff)];
+        return [.. folderNames.Where(n => QuarantineMarkers.DateOf(n) is { } d && d < cutoff)];
     }
 
     /// <summary>
