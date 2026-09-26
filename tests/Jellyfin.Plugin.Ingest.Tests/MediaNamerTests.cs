@@ -65,13 +65,11 @@ public class MediaNamerTests
     }
 
     [Fact]
-    public void Episode_path_with_and_without_title()
+    public void Episode_file_name_with_and_without_title()
     {
         var ep = new EpisodeIdentity { Series = Series, Season = 1, Episode = 4, Title = "A Broken: Heart?" };
 
-        Assert.Equal(
-            Path.Combine("Show Name (2005) [tvdbid-7] [tmdbid-9]", "Season 01", "Show Name S01E04 - A Broken - Heart.mp4"),
-            MediaNamer.EpisodeRelativePath(ep, ".mp4"));
+        Assert.Equal("Show Name S01E04 - A Broken - Heart.mp4", MediaNamer.EpisodeFileName(ep, ".mp4"));
         Assert.Equal("Show Name S01E04.mkv", MediaNamer.EpisodeFileName(ep with { Title = null }, "mkv"));
     }
 

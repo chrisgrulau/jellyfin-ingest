@@ -233,10 +233,7 @@
         function kinds(l) { return l ? { tv: isTvLib(l), film: isFilmLib(l) } : { tv: false, film: false }; }
         function overlaps(a, b) { return (a.tv && b.tv) || (a.film && b.film); }
 
-        function destinationsOf(w) {
-          if (w.Destinations && w.Destinations.length) { return w.Destinations; }
-          return w.TargetLibraryId ? [{ LibraryId: w.TargetLibraryId, Path: w.TargetPath }] : [];
-        }
+        function destinationsOf(w) { return w.Destinations || []; }
 
         // Rebuilds each destination's library list so it only offers libraries that don't overlap the row's others.
         function refreshDestinations(row) {
@@ -790,7 +787,7 @@
             row.querySelector('.wf-error').textContent = error;
             row.classList.toggle('invalid', !!error);
             if (error) { ok = false; }
-            return { Path: path, Destinations: dests, TargetLibraryId: '', TargetPath: '', Enabled: row.querySelector('.wf-on').checked, Transfer: row.querySelector('.wf-mode').value, DryRun: row.querySelector('.wf-dry').checked };
+            return { Path: path, Destinations: dests, Enabled: row.querySelector('.wf-on').checked, Transfer: row.querySelector('.wf-mode').value, DryRun: row.querySelector('.wf-dry').checked };
           }).filter(Boolean);
           if (!ok) { return null; }
           if (!folders.length) { addRow(); return null; }

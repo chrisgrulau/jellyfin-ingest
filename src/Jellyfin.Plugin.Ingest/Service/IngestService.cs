@@ -216,16 +216,14 @@ public sealed partial class IngestService : IHostedService, IDisposable
             .Select(l => new MediaLibrary(l.ItemId, l.Name ?? l.ItemId, LibraryRouting.KindOf(l.CollectionType?.ToString()), l.Locations ?? []))];
 
     /// <summary>
-    /// A watch folder's configured destinations (a configuration from 0.1.0-alpha.1 has a single library instead).
+    /// A watch folder's configured destinations.
     /// </summary>
     /// <param name="watch">The watch folder.</param>
     /// <returns>The destinations, in order.</returns>
     public static IReadOnlyList<DestinationSetting> DestinationsOf(WatchFolder watch)
     {
         ArgumentNullException.ThrowIfNull(watch);
-        return watch.Destinations.Count > 0
-            ? [.. watch.Destinations.Select(d => new DestinationSetting(d.LibraryId, d.Path))]
-            : [new DestinationSetting(watch.TargetLibraryId, watch.TargetPath)];
+        return [.. watch.Destinations.Select(d => new DestinationSetting(d.LibraryId, d.Path))];
     }
 
     /// <summary>

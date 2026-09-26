@@ -38,6 +38,13 @@ All notable changes to this project are documented here. The format follows
     labels for screen readers.
   - Results of actions (a decision sent, a search finished, settings saved, an error) are announced to screen readers.
 
+### Removed
+
+- **FAM-08:** the 0.1.0-alpha.1 single-library settings of a watch folder (`TargetLibraryId`, `TargetPath`) are no
+  longer read. Every release since has saved destinations instead. A configuration that still holds them loads as
+  before, without them: a watch folder saved only by 0.1.0-alpha.1 and never since needs its destination chosen again.
+- Unused code: `MediaNamer.EpisodeRelativePath`, which only the tests called.
+
 ## [0.7.0-alpha] - 2026-09-26
 
 ### Added

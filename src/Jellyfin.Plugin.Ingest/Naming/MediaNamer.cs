@@ -126,18 +126,6 @@ public static class MediaNamer
     }
 
     /// <summary>
-    /// Builds an episode's path relative to the library root: <c>Series (Year) [ids]/Season NN/File.ext</c>.
-    /// </summary>
-    /// <param name="episode">The identified episode.</param>
-    /// <param name="extension">File extension including the dot.</param>
-    /// <returns>The relative path.</returns>
-    public static string EpisodeRelativePath(EpisodeIdentity episode, string extension)
-    {
-        ArgumentNullException.ThrowIfNull(episode);
-        return Path.Combine(SeriesFolderName(episode.Series), SeasonFolderName(episode.Season), EpisodeFileName(episode, extension));
-    }
-
-    /// <summary>
     /// Gets the Jellyfin extras folder name for an extra type.
     /// </summary>
     /// <param name="type">The extra type.</param>

@@ -24,17 +24,6 @@ public class WatchFolder
     public Collection<LibraryDestination> Destinations { get; set; } = [];
 
     /// <summary>
-    /// Gets or sets the library of a configuration saved by 0.1.0-alpha.1 (single destination). Only read when
-    /// <see cref="Destinations"/> is empty; the settings page converts it on the next save.
-    /// </summary>
-    public string TargetLibraryId { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Gets or sets the library folder that goes with <see cref="TargetLibraryId"/>.
-    /// </summary>
-    public string TargetPath { get; set; } = string.Empty;
-
-    /// <summary>
     /// Gets or sets a value indicating whether this folder is being watched.
     /// </summary>
     public bool Enabled { get; set; } = true;

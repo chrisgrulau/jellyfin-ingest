@@ -48,6 +48,18 @@ public class WatchFolderConfigTests
     }
 
     [Fact]
+    public void A_configuration_with_the_removed_alpha_1_library_fields_still_loads()
+    {
+        // 0.1.0-alpha.1 wrote TargetLibraryId and TargetPath; they are no longer read (FAM-08), and unknown elements are skipped
+        var w = FromXml("<WatchFolder><Path>/in</Path><TargetLibraryId>abc</TargetLibraryId><TargetPath>/lib</TargetPath>"
+            + "<Destinations><LibraryDestination><LibraryId>def</LibraryId><Path /></LibraryDestination></Destinations><Enabled>false</Enabled></WatchFolder>");
+
+        Assert.Equal("/in", w.Path);
+        Assert.Equal("def", Assert.Single(w.Destinations).LibraryId);
+        Assert.False(w.Enabled);
+    }
+
+    [Fact]
     public void Per_folder_dry_run_survives_the_xml_round_trip()
     {
         var serializer = new XmlSerializer(typeof(WatchFolder));
