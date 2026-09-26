@@ -20,6 +20,7 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
     private readonly IngestStateStore _state;
     private readonly ILibraryManager _libraryManager;
     private readonly IApplicationPaths _paths;
+    private readonly IConfigurationManager _configuration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PurgeQuarantineTask"/> class.
@@ -27,9 +28,11 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
     /// <param name="state">Activity shown on the dashboard.</param>
     /// <param name="libraryManager">Jellyfin library manager (to check the quarantine is safe).</param>
     /// <param name="paths">Jellyfin's own folders (to check the quarantine is safe).</param>
+    /// <param name="configuration">Jellyfin's configuration (for the transcode folder).</param>
     /// <param name="logger">Logger.</param>
-    public PurgeQuarantineTask(IngestStateStore state, ILibraryManager libraryManager, IApplicationPaths paths, ILogger<PurgeQuarantineTask> logger)
+    public PurgeQuarantineTask(IngestStateStore state, ILibraryManager libraryManager, IApplicationPaths paths, IConfigurationManager configuration, ILogger<PurgeQuarantineTask> logger)
     {
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
@@ -60,7 +63,7 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
         }
 
         // Never purge in a quarantine that breaks the folder rules (e.g. one pointed at a library)
-        var problems = IngestService.FolderProblems(config, IngestService.Libraries(_libraryManager.GetVirtualFolders()), _paths);
+        var problems = IngestService.FolderProblems(config, IngestService.Libraries(_libraryManager.GetVirtualFolders()), _paths, _configuration);
         var roots = IngestService.SafeQuarantineRoots(config, problems);
         var retention = Math.Max(1, config.QuarantineRetentionDays);
         var today = DateOnly.FromDateTime(DateTime.Now);

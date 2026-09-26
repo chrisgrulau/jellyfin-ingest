@@ -9,6 +9,7 @@ using Jellyfin.Plugin.Ingest.Configuration;
 using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Planning;
 using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Entities;
@@ -41,6 +42,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private readonly ILogger<IngestService> _logger;
     private readonly IngestStateStore _state;
     private readonly IApplicationPaths _paths;
+    private readonly IConfigurationManager _configuration;
     private bool _markersMigrated;
     private DateTimeOffset _logTrimmed;
     private readonly Dictionary<string, ReleaseTracker> _trackers = new(StringComparer.Ordinal);
@@ -62,9 +64,11 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// <param name="providerManager">Jellyfin provider manager.</param>
     /// <param name="state">Reviews and activity shown on the dashboard.</param>
     /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
+    /// <param name="configuration">Jellyfin's configuration (for the transcode folder).</param>
     /// <param name="logger">Logger.</param>
-    public IngestService(ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IProviderManager providerManager, IngestStateStore state, IApplicationPaths paths, ILogger<IngestService> logger)
+    public IngestService(ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IProviderManager providerManager, IngestStateStore state, IApplicationPaths paths, IConfigurationManager configuration, ILogger<IngestService> logger)
     {
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _libraryMonitor = libraryMonitor ?? throw new ArgumentNullException(nameof(libraryMonitor));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
@@ -116,11 +120,25 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// </summary>
     /// <param name="paths">Jellyfin's application paths.</param>
     /// <returns>The folders.</returns>
-    public static IReadOnlyList<string> ProtectedFolders(IApplicationPaths paths)
+    /// <param name="configuration">Jellyfin's configuration (for a transcode folder moved elsewhere), if available.</param>
+    public static IReadOnlyList<string> ProtectedFolders(IApplicationPaths paths, IConfigurationManager? configuration = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
-        return [.. new[] { paths.ProgramDataPath, paths.ProgramSystemPath, paths.DataPath, paths.ConfigurationDirectoryPath, paths.CachePath, paths.LogDirectoryPath, paths.PluginsPath, paths.TempDirectory }
-            .Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.Ordinal)];
+
+        // The metadata and transcode folders can be moved out of the data folder in Jellyfin's settings
+        string? metadata = (paths as IServerApplicationPaths)?.InternalMetadataPath;
+        string? transcode = null;
+        try
+        {
+            transcode = configuration?.GetTranscodePath();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            // Not configured yet: the default lives in the cache folder, which is already listed
+        }
+
+        return [.. new[] { paths.ProgramDataPath, paths.ProgramSystemPath, paths.DataPath, paths.ConfigurationDirectoryPath, paths.CachePath, paths.LogDirectoryPath, paths.PluginsPath, paths.TempDirectory, metadata, transcode }
+            .OfType<string>().Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.Ordinal)];
     }
 
     /// <summary>
@@ -129,15 +147,16 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// <param name="config">Plugin configuration.</param>
     /// <param name="libraries">The server's libraries.</param>
     /// <param name="paths">Jellyfin's application paths.</param>
+    /// <param name="configuration">Jellyfin's configuration, if available.</param>
     /// <returns>The problems found.</returns>
-    public static IReadOnlyList<FolderProblem> FolderProblems(PluginConfiguration config, IEnumerable<MediaLibrary> libraries, IApplicationPaths paths)
+    public static IReadOnlyList<FolderProblem> FolderProblems(PluginConfiguration config, IEnumerable<MediaLibrary> libraries, IApplicationPaths paths, IConfigurationManager? configuration = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         return FolderRules.Check(
             [.. config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path)).Select(w => w.Path)],
             config.QuarantinePath,
             [.. libraries.SelectMany(l => l.Locations)],
-            ProtectedFolders(paths));
+            ProtectedFolders(paths, configuration));
     }
 
     /// <summary>
@@ -266,7 +285,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var sweep = new Sweep(
             new MediaIdentifier(_lookup, new JellyfinLibraryIndex(_libraryManager, [])),
             [.. libraries.SelectMany(l => l.Locations)]);
-        var problems = FolderProblems(config, libraries, _paths);
+        var problems = FolderProblems(config, libraries, _paths, _configuration);
         if (!_markersMigrated)
         {
             _markersMigrated = true;
@@ -378,8 +397,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
             }
         }
 
-        _state.PruneReviews(watch.Path, [.. snapshot.Keys, .. scan.Links, .. scan.Unsettled]);
+        _state.PruneReviews(watch.Path, [.. snapshot.Keys, .. scan.Links, .. scan.Unsettled, .. scan.Unreadable]);
         ReviewLinks(watch, scan.Links);
+        ReviewUnreadable(watch, scan.Unreadable);
         foreach (var review in _state.Snapshot().Reviews.Where(r => r.WatchFolder == watch.Path && r.Request != ReviewRequest.None))
         {
             if (review.Request == ReviewRequest.Quarantine && snapshot.TryGetValue(review.Release, out var releaseFiles))
@@ -586,18 +606,24 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
     // A top-level symbolic link is never followed; it waits for review so the user knows why nothing happened
     private void ReviewLinks(WatchFolder watch, IReadOnlyList<string> links)
+        => ReviewOnce(watch, links, "This is a symbolic link. Links aren't followed, so nothing outside the watch folder can be moved; move or copy the files themselves into the watch folder.");
+
+    // Likewise a release the server's account can't open, which would otherwise be skipped without a word
+    private void ReviewUnreadable(WatchFolder watch, IReadOnlyList<string> entries)
+        => ReviewOnce(watch, entries, "Jellyfin's account can't read this, so it can't be filed. Give the account read access (and write access to the watch folder), then retry.");
+
+    private void ReviewOnce(WatchFolder watch, IReadOnlyList<string> entries, string reason)
     {
-        foreach (var link in links)
+        foreach (var entry in entries)
         {
-            var id = IngestStateStore.ReviewId(watch.Path, link);
+            var id = IngestStateStore.ReviewId(watch.Path, entry);
             if (_state.GetReview(id) is not null)
             {
                 continue;
             }
 
-            const string Reason = "This is a symbolic link. Links aren't followed, so nothing outside the watch folder can be moved; move or copy the files themselves into the watch folder.";
-            _state.Record(new ActivityEntry { Time = _clock.GetUtcNow(), Status = ActivityStatus.NeedsReview, Release = link, WatchFolder = watch.Path, Summary = Reason });
-            _state.PutReview(new PendingReview { Id = id, WatchFolder = watch.Path, Release = link, Time = _clock.GetUtcNow(), Items = [new PendingReviewItem(link, Reason)] });
+            _state.Record(new ActivityEntry { Time = _clock.GetUtcNow(), Status = ActivityStatus.NeedsReview, Release = entry, WatchFolder = watch.Path, Summary = reason });
+            _state.PutReview(new PendingReview { Id = id, WatchFolder = watch.Path, Release = entry, Time = _clock.GetUtcNow(), Items = [new PendingReviewItem(entry, reason)] });
         }
     }
 

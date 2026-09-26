@@ -60,7 +60,41 @@ public static class PathGuard
         ArgumentNullException.ThrowIfNull(root);
         var p = Normalise(path);
         var r = Normalise(root);
-        return p.Equals(r, Comparison) || p.StartsWith(r + Path.DirectorySeparatorChar, Comparison);
+
+        // A drive or file-system root keeps its separator after normalising (E:\, /)
+        var prefix = r.EndsWith(Path.DirectorySeparatorChar) ? r : r + Path.DirectorySeparatorChar;
+        return p.Equals(r, Comparison) || p.StartsWith(prefix, Comparison);
+    }
+
+    /// <summary>
+    /// The real location of a path: every existing folder along it that is a symbolic link or junction is replaced by
+    /// its final target. Parts that don't exist are kept as written.
+    /// </summary>
+    /// <param name="path">The path.</param>
+    /// <returns>The resolved, normalised path.</returns>
+    public static string Resolve(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        var full = Normalise(path);
+        var root = Path.GetPathRoot(full) ?? string.Empty;
+        var current = root;
+        foreach (var part in full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, part);
+            try
+            {
+                if (new DirectoryInfo(current).ResolveLinkTarget(returnFinalTarget: true) is { } target)
+                {
+                    current = Normalise(target.FullName);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Unreadable: compared as written
+            }
+        }
+
+        return Normalise(current);
     }
 
     /// <summary>

@@ -32,6 +32,7 @@ public class IngestController : ControllerBase
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
     private readonly IApplicationPaths _paths;
+    private readonly IConfigurationManager _configuration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IngestController"/> class.
@@ -40,8 +41,10 @@ public class IngestController : ControllerBase
     /// <param name="libraryManager">Jellyfin library manager.</param>
     /// <param name="providerManager">Jellyfin provider manager.</param>
     /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
-    public IngestController(IngestStateStore state, ILibraryManager libraryManager, IProviderManager providerManager, IApplicationPaths paths)
+    /// <param name="configuration">Jellyfin's configuration (for the transcode folder).</param>
+    public IngestController(IngestStateStore state, ILibraryManager libraryManager, IProviderManager providerManager, IApplicationPaths paths, IConfigurationManager configuration)
     {
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
@@ -80,7 +83,7 @@ public class IngestController : ControllerBase
             return new List<QuarantineFolder>();
         }
 
-        var problems = IngestService.FolderProblems(config, IngestService.Libraries(_libraryManager.GetVirtualFolders()), _paths);
+        var problems = IngestService.FolderProblems(config, IngestService.Libraries(_libraryManager.GetVirtualFolders()), _paths, _configuration);
         var retention = Math.Max(1, config.QuarantineRetentionDays);
         var today = DateOnly.FromDateTime(DateTime.Now);
         return IngestService.SafeQuarantineRoots(config, problems)
@@ -106,7 +109,7 @@ public class IngestController : ControllerBase
             [.. request.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w))],
             request.QuarantinePath,
             [.. libraries.SelectMany(l => l.Locations)],
-            IngestService.ProtectedFolders(_paths)).ToList();
+            IngestService.ProtectedFolders(_paths, _configuration)).ToList();
     }
 
     /// <summary>
