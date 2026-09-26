@@ -100,7 +100,7 @@ nothing is watched until you do. Dry run is on until you turn it off.
 
 | Setting | Default | Notes |
 |---|---|---|
-| Watch folders | — | Required. One or more folders, each with one or more destination libraries (one per kind). |
+| Watch folders | — | Required. One or more folders, each with one or more destination libraries (one per kind). Use the path as the Jellyfin server sees it: the container path in Docker, and on a Windows service a network path (`\\nas\share\incoming`) rather than a mapped drive letter, which services can't see. |
 | Quarantine folder | `<watch folder>/.ingest-quarantine` | Keep it on the same filesystem as the watch folder so moves are instant. |
 | Quarantine retention | 30 days | Enforced by the *Purge Ingest quarantine* scheduled task. |
 | Dry run | On | Records what would happen (see *Recent activity*) without moving anything. Turn off once you are happy with the results. |
