@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Ingest"
 guid: "88d6ced9-052e-45f6-b21d-fc4eefa7998d"
-version: "0.6.0.0"
+version: "0.7.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -15,7 +15,6 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Ingest.dll"
 changelog: >
-  0.6.0-alpha: releases needing a decision, failures, filings and quarantines also go to Jellyfin's Activity log,
-  and Shoal Ingest is in the dashboard menu. Non-English metadata: English release names now match titles listed in
-  the server's language. The library picked on a review card survives the refresh; missing watch folders are
-  reported once; network (UNC) paths are accepted.
+  0.7.0-alpha: hard link or copy per watch folder, so torrents keep seeding (moved stays the default); Ingest
+  remembers what it filed from there. Subtitle language tags in every ISO 639 language are recognised when filing,
+  and unknown tags are kept rather than dropped.
