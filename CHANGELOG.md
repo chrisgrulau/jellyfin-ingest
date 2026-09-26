@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1-alpha] - 2026-09-26
+
 ### Added
 
 - **Episodes named by title only** (typically specials, `Show S13SP2 A Special Title`): Ingest now lists that
