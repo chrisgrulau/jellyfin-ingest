@@ -53,4 +53,7 @@ public sealed record IdentificationResult
     /// title and a provider outage look the same, so this is worth trying again later.
     /// </summary>
     public bool NothingFound { get; init; }
+
+    /// <summary>Gets who settled a close match (for example the AI plugin's model), when it wasn't the scores alone.</summary>
+    public string? DecidedBy { get; init; }
 }

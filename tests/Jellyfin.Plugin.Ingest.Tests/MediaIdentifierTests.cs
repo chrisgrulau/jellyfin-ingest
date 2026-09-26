@@ -227,4 +227,71 @@ public class MediaIdentifierTests
             MediaIdentifier.Score("Quiet Harbour", 2010, imdbOnly),
             precision: 6);
     }
+
+    // Stage 2: close calls settled by a tie-breaker (the AI plugin in the real server)
+    private sealed class FakeTiebreaker(Func<IReadOnlyList<ScoredCandidate>, TiebreakPick> answer) : ITiebreaker
+    {
+        public int Calls { get; private set; }
+
+        public string? FileName { get; private set; }
+
+        public Task<TiebreakPick> PickAsync(ParsedRelease release, string fileName, IReadOnlyList<ScoredCandidate> options, CancellationToken cancellationToken)
+        {
+            Calls++;
+            FileName = fileName;
+            return Task.FromResult(answer(options));
+        }
+    }
+
+    private static Task<IdentificationResult> Settle(FakeLookup lookup, string fileName, ITiebreaker tiebreaker)
+        => new MediaIdentifier(lookup, null, tiebreaker).IdentifyAsync(ReleaseNameParser.Parse(fileName), preferTv: false, CancellationToken.None, fileName);
+
+    [Fact]
+    public async Task A_close_call_is_filed_as_the_tie_breaker_picks()
+    {
+        var lookup = new FakeLookup();
+        lookup.Series.AddRange([C("Time Doctor", 1963, "1", "10"), C("Time Doctor", 2005, "2", "20")]);
+        lookup.Episodes[(1, 2)] = "The Second One";
+        var tiebreaker = new FakeTiebreaker(options => new TiebreakPick(options.ToList().FindIndex(o => o.Candidate.Year == 2005), "Modern episode naming.", "AI (test)"));
+
+        var r = await Settle(lookup, "Time.Doctor.S01E02.mkv", tiebreaker);
+
+        Assert.Equal(IdentificationStatus.Identified, r.Status);
+        Assert.Equal(2005, r.Episode!.Series.Year);
+        Assert.Equal("The Second One", r.Episode.Title);
+        Assert.Equal("AI (test)", r.DecidedBy);
+        Assert.Contains("Chosen by AI (test)", r.Reason, StringComparison.Ordinal);
+        Assert.Equal("Time.Doctor.S01E02.mkv", tiebreaker.FileName);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(7)]
+    [InlineData(-1)]
+    public async Task No_pick_or_an_impossible_one_leaves_the_review(int? index)
+    {
+        var lookup = new FakeLookup();
+        lookup.Series.AddRange([C("Time Doctor", 1963, "1"), C("Time Doctor", 2005, "2")]);
+
+        var r = await Settle(lookup, "Time.Doctor.S01E02.mkv", new FakeTiebreaker(_ => new TiebreakPick(index, "Not sure.", "AI (test)")));
+
+        Assert.Equal(IdentificationStatus.NeedsReview, r.Status);
+        Assert.Null(r.DecidedBy);
+        Assert.Contains("Not sure.", r.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Clear_matches_and_weak_ones_never_reach_the_tie_breaker()
+    {
+        var clear = new FakeLookup();
+        clear.Movies.Add(C("Harbour Lights", 2024, "5"));
+        var weak = new FakeLookup();
+        weak.Movies.AddRange([C("Something Else Entirely", 1990, "6"), C("Another Thing", 1991, "7")]);
+        var tiebreaker = new FakeTiebreaker(_ => new TiebreakPick(0, "x", "AI (test)"));
+
+        Assert.Equal(IdentificationStatus.Identified, (await Settle(clear, "Harbour.Lights.2024.1080p.mkv", tiebreaker)).Status);
+        await Settle(weak, "Harbour.Lights.2024.1080p.mkv", tiebreaker);
+
+        Assert.Equal(0, tiebreaker.Calls);
+    }
 }

@@ -35,19 +35,28 @@ public sealed class MediaIdentifier
     /// </summary>
     public const double ImdbOnlyPenalty = 0.20;
 
+    /// <summary>The lowest best score a tie-breaker is asked about (below it, nothing found is close enough to settle).</summary>
+    public const double TiebreakFloor = 0.60;
+
+    /// <summary>The most candidates a tie-breaker chooses between.</summary>
+    public const int TiebreakOptions = 5;
+
     /// <summary>The <see cref="MetadataCandidate.Source"/> value used for library hits.</summary>
     public const string LibrarySource = "Library";
 
     private readonly IMetadataLookup _lookup;
     private readonly ILibraryIndex? _library;
+    private readonly ITiebreaker? _tiebreaker;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MediaIdentifier"/> class.
     /// </summary>
     /// <param name="lookup">Metadata provider access.</param>
     /// <param name="library">What's already in the destination library (optional).</param>
-    public MediaIdentifier(IMetadataLookup lookup, ILibraryIndex? library = null)
+    /// <param name="tiebreaker">Settles close matches (optional; without it they wait for review).</param>
+    public MediaIdentifier(IMetadataLookup lookup, ILibraryIndex? library = null, ITiebreaker? tiebreaker = null)
     {
+        _tiebreaker = tiebreaker;
         _lookup = lookup ?? throw new ArgumentNullException(nameof(lookup));
         _library = library;
     }
@@ -58,8 +67,9 @@ public sealed class MediaIdentifier
     /// <param name="release">The parsed release name.</param>
     /// <param name="preferTv">Whether the destination library holds shows (used when the name alone is ambiguous).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="fileName">The video's file name (no folders), for a tie-breaker.</param>
     /// <returns>The identification result.</returns>
-    public async Task<IdentificationResult> IdentifyAsync(ParsedRelease release, bool preferTv, CancellationToken cancellationToken)
+    public async Task<IdentificationResult> IdentifyAsync(ParsedRelease release, bool preferTv, CancellationToken cancellationToken, string? fileName = null)
     {
         ArgumentNullException.ThrowIfNull(release);
 
@@ -68,9 +78,40 @@ public sealed class MediaIdentifier
             return new IdentificationResult { Status = IdentificationStatus.NotFound, Reason = "No title could be read from the name." };
         }
 
-        return release.Kind == MediaKind.Episode || (release.Kind == MediaKind.Unknown && preferTv)
+        var result = release.Kind == MediaKind.Episode || (release.Kind == MediaKind.Unknown && preferTv)
             ? await IdentifyEpisodeAsync(release, cancellationToken).ConfigureAwait(false)
             : await IdentifyMovieAsync(release, cancellationToken).ConfigureAwait(false);
+        return await SettleAsync(release, fileName, result, cancellationToken).ConfigureAwait(false);
+    }
+
+    // A close call between candidates (not "nothing found", not "no episode number") goes to the tie-breaker, if any. Its
+    // pick is filed exactly as if a person had chosen it in review; no pick leaves the review as it was.
+    private async Task<IdentificationResult> SettleAsync(ParsedRelease release, string? fileName, IdentificationResult result, CancellationToken ct)
+    {
+        if (_tiebreaker is null || result.Status != IdentificationStatus.NeedsReview || result.Candidates.Count < 2
+            || result.Candidates[0].Score < TiebreakFloor
+            || (release.Kind == MediaKind.Episode && (release.Season is null || release.Episode is null)))
+        {
+            return result;
+        }
+
+        var options = result.Candidates.Take(TiebreakOptions).ToList();
+        var pick = await _tiebreaker.PickAsync(release, fileName ?? release.Title, options, ct).ConfigureAwait(false);
+        if (pick.Index is not { } i || i < 0 || i >= options.Count)
+        {
+            return result with { Reason = result.Reason + " " + pick.Note };
+        }
+
+        var chosen = options[i].Candidate;
+        var settled = await IdentifyAsChosenAsync(release, chosen, chosen.IsSeries, ct).ConfigureAwait(false);
+        return settled.Status == IdentificationStatus.Identified
+            ? settled with
+            {
+                Reason = $"Chosen by {pick.By ?? "the tie-breaker"} from {options.Count} close candidates: '{chosen.Name}'{(chosen.Year is { } y ? $" ({y})" : string.Empty)}. {pick.Note}",
+                Candidates = result.Candidates,
+                DecidedBy = pick.By ?? "tie-breaker",
+            }
+            : result;
     }
 
     /// <summary>

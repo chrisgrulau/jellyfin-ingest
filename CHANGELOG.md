@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **AI tie-breaker (optional):** when a release is too close to call between candidates Ingest already found (best
+  score at least 0.60, and for episodes only when the season and episode are known), and the Shoal AI plugin is
+  installed and allows Ingest, Ingest asks it to choose among the top five.
+  - Only the file name and each candidate's title, year, kind and whether it's already on the server are sent.
+  - The answer must be one of the candidates offered, or "none". Anything else, no answer, or no AI plugin leaves the
+    release in *Needs review* as before, with the AI's note added to the reason.
+  - Every AI choice is shown in *Recent activity*. Each question is asked once per sweep.
+  - On by default; turn off with **Let the AI plugin settle close matches**. Costs and limits are set in the AI plugin.
+- The shared source (`external/common`) is now a submodule of this repository; clone with `--recurse-submodules`.
+
 ## [0.1.8-alpha] - 2026-09-26
 
 ### Fixed

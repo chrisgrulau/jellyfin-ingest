@@ -58,6 +58,23 @@ The thresholds were tuned against a private set of real release names with known
 a clear majority are identified automatically, higher when the destination library already has the title, and the
 rest go to review rather than being guessed.
 
+### AI tie-breaker
+
+When the result would be *needs review* but the best score is **≥ 0.60** and there are at least two candidates (for
+episodes, only when the season and episode are known), `MediaIdentifier` hands the top five to an `ITiebreaker`. The
+real one, `AiTiebreaker`, calls the Shoal AI plugin in process through the shared `AiBridgeClient` (caller `ingest`,
+purpose `ingest.match`) with a JSON schema that allows only `{choice, reason}`.
+
+- Sent: the file name, the parsed title, year and episode code, and per candidate its title, year, kind and whether
+  it is already on the server. No paths, provider ids or library names.
+- Accepted: an integer that is the position of an offered candidate. `-1` (none fits), anything else, an error or a
+  missing AI plugin leaves the release in review; the AI's note is added to the reason unless the plugin simply
+  isn't there or doesn't allow Ingest.
+- A pick is identified exactly as a manual choice would be (`IdentifyAsChosenAsync`), so episode lookup and the
+  never-a-second-copy rule still apply, and the result records who decided (`DecidedBy`), which the activity panel
+  shows.
+- Answers are memoised per sweep, so a release that waits for several sweeps isn't asked again each time.
+
 ## Subtitle pairing
 
 For each video in a release, in order:

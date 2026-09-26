@@ -126,13 +126,19 @@ public sealed class IngestPlanner
         var owners = new HashSet<string>(StringComparer.Ordinal);
         var requiredFolders = new HashSet<string>(StringComparer.Ordinal);
         var plannedEpisodes = new HashSet<(string Series, int Season, int Episode)>();
+        var notes = new List<string>();
         foreach (var video in mains)
         {
             // Only a TV library to file into: a name without an episode code is most likely a show; otherwise a film
             var preferTv = targets.Tv is not null && targets.Films is null;
             var result = chosen is null
-                ? await _identifier.IdentifyAsync(parsed[video], preferTv, cancellationToken).ConfigureAwait(false)
+                ? await _identifier.IdentifyAsync(parsed[video], preferTv, cancellationToken, Path.GetFileName(video)).ConfigureAwait(false)
                 : await _identifier.IdentifyAsChosenAsync(parsed[video], chosen.Candidate, chosen.Target.IsTv, cancellationToken).ConfigureAwait(false);
+            if (result.DecidedBy is not null)
+            {
+                notes.Add(Path.GetFileName(video) + ": " + result.Reason);
+            }
+
             if (result.Status != IdentificationStatus.Identified)
             {
                 review.Add(new ReviewItem(Abs(video), result.Reason) { Candidates = result.Candidates, Retry = result.NothingFound ? RetryKind.NothingFound : RetryKind.None });
@@ -304,7 +310,7 @@ public sealed class IngestPlanner
             ops.Add(new PlannedOperation(OperationKind.Quarantine, Abs(rel), destination));
         }
 
-        return new IngestPlan { ReleaseName = releaseName, Operations = ops, AllowedRoots = [.. owners, quarantine], RequiredFolders = [.. requiredFolders] };
+        return new IngestPlan { ReleaseName = releaseName, Operations = ops, AllowedRoots = [.. owners, quarantine], RequiredFolders = [.. requiredFolders], Notes = notes };
     }
 
     private static Dictionary<string, string> MovieIds(MovieIdentity movie)

@@ -62,6 +62,7 @@ plugin page, where you pick the right title (and library) with one click or sear
 | Subtitles | Matched by name, by folder (`Subs/`), or by being the only video in the release; renamed `<video>[.Title].<lang>[.default][.sdh][.forced].srt`. When a language has several tracks, the main one is marked default. |
 | Extras | Trailers, featurettes, deleted scenes … filed into Jellyfin's extras folders. |
 | Clutter | Moved to a dated quarantine folder (default or user-chosen), purged after N days (default 30). *Quarantine* on the plugin page shows what is there and when each day's folder is deleted. |
+| AI tie-breaker | Optional, with the Shoal AI plugin: a close call between candidates Ingest already found is settled by the AI choosing one of them (or none). Only file names, titles and years are sent; every choice is shown in *Recent activity*. |
 | Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. |
 | Activity | *Recent activity* on the plugin page: filed, dry run, needs review, decisions, failures, quarantine and purges, with what went where. |
 | Safety | Dry-run mode (on by default), never overwrites, never files a second copy of an episode or film already on the server, crash-safe moves (hidden temporary name, size check, then rename; interrupted moves are finished or discarded at the next start), all-or-nothing per release (a failure undoes the moves already made), a JSON-lines action log. |
@@ -103,6 +104,7 @@ nothing is watched until you do. Dry run is on until you turn it off.
 | Dry run | On | Records what would happen (see *Recent activity*) without moving anything. Turn off once you are happy with the results. |
 | Settle time | 300 s | How long nothing in a release (files, sizes, write times) may change before it is processed. |
 | Refresh filed folders after ingest | On | Only the film or show folders filed into are refreshed, never whole libraries. |
+| Let the AI plugin settle close matches | On | Does nothing unless the Shoal AI plugin is installed and allows Ingest. |
 
 ## What Ingest stores and logs
 
@@ -146,6 +148,7 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Unit tests; CI; release packaging (pre-releases)
 - [ ] Plugin repository manifest
 - [x] New episodes of a show you already have follow it to the library it's in
+- [x] Optional AI tie-breaker for close calls (Shoal AI plugin)
 
 Design notes live in [`docs/DESIGN.md`](docs/DESIGN.md).
 

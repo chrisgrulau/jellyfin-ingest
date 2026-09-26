@@ -283,7 +283,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         _lookup ??= new CachingMetadataLookup(new JellyfinMetadataLookup(_providerManager), _clock, Path.Combine(plugin.DataFolderPath, "search-cache.json"));
         _lookup.BeginSweep();
         var sweep = new Sweep(
-            new MediaIdentifier(_lookup, new JellyfinLibraryIndex(_libraryManager, [])),
+            new MediaIdentifier(_lookup, new JellyfinLibraryIndex(_libraryManager, []), config.UseAiTiebreak ? new AiTiebreaker() : null),
             [.. libraries.SelectMany(l => l.Locations)]);
         var problems = FolderProblems(config, libraries, _paths, _configuration);
         if (!_markersMigrated)
@@ -752,8 +752,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
             Status = config.DryRun ? ActivityStatus.DryRun : ActivityStatus.Filed,
             Release = release,
             WatchFolder = watch.Path,
-            Summary = summaryLine,
-            Details = Describe(watch.Path, report.Completed),
+            Summary = summaryLine + (plan.Notes.Count > 0 ? " A close match was settled by the AI plugin." : string.Empty),
+            Details = [.. plan.Notes, .. Describe(watch.Path, report.Completed)],
         });
 
         if (config.DryRun && previous?.Chosen is { } chosen)
