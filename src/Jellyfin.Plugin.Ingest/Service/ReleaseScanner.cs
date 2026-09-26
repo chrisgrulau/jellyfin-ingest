@@ -18,6 +18,9 @@ public sealed record ScanResult
 
     /// <summary>Gets releases skipped this time because a file changed or vanished while it was being read.</summary>
     public IReadOnlyList<string> Unsettled { get; init; } = [];
+
+    /// <summary>Gets top-level entries the server's account can't read (reported, never moved).</summary>
+    public IReadOnlyList<string> Unreadable { get; init; } = [];
 }
 
 /// <summary>
@@ -59,6 +62,7 @@ public static class ReleaseScanner
         var releases = new Dictionary<string, IReadOnlyList<ReleaseFile>>(StringComparer.Ordinal);
         var links = new List<string>();
         var unsettled = new List<string>();
+        var unreadable = new List<string>();
         var quarantineRoot = PathGuard.Normalise(quarantine);
 
         foreach (var entry in new DirectoryInfo(watchFolder).EnumerateFileSystemInfos("*", TopLevel))
@@ -72,6 +76,12 @@ public static class ReleaseScanner
             if (entry.LinkTarget is not null || entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
             {
                 links.Add(name);
+                continue;
+            }
+
+            if (!CanRead(entry))
+            {
+                unreadable.Add(name);
                 continue;
             }
 
@@ -91,7 +101,35 @@ public static class ReleaseScanner
             }
         }
 
-        return new ScanResult { Releases = releases, Links = links, Unsettled = unsettled };
+        return new ScanResult { Releases = releases, Links = links, Unsettled = unsettled, Unreadable = unreadable };
+    }
+
+    // A release the server's account can't open would otherwise look empty and be skipped without a word
+    private static bool CanRead(FileSystemInfo entry)
+    {
+        try
+        {
+            if (entry is DirectoryInfo dir)
+            {
+                using var e = Directory.EnumerateFileSystemEntries(dir.FullName).GetEnumerator();
+                e.MoveNext();
+            }
+            else
+            {
+                using var f = new FileStream(entry.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            }
+
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            // Locked or vanished: handled by the settle and scan logic as before
+            return true;
+        }
     }
 
     private static List<ReleaseFile> Files(string watchFolder, DirectoryInfo folder)
