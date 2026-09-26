@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **ING-26:** on a server whose metadata language isn't English, Ingest also searches in English and scores release
+  names against both names. So "Money.Heist" finds "Haus des Geldes" on a German server instead of waiting for review.
+  Folders are still named in the server's language.
+- **ING-27:** the library picked on a review card ("File into") is kept when the page refreshes itself. The page also
+  no longer refreshes while a control on a card has focus.
+- **ING-29:** a watch folder Jellyfin can't see is reported once in Recent activity, and the log line appears at most
+  hourly instead of every sweep. Saving the settings warns about such a folder, without refusing to save.
+- **ING-33:** watch folders can be network paths (`\\nas\share\folder`). On a Windows service, use these rather than
+  mapped drive letters.
+
 ## [0.5.0-alpha] - 2026-09-26
 
 ### Added
