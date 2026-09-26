@@ -58,6 +58,18 @@ The thresholds were tuned against a private set of real release names with known
 a clear majority are identified automatically, higher when the destination library already has the title, and the
 rest go to review rather than being guessed.
 
+### Replacing copies already on the server
+
+A duplicate review item carries the copies it found (`ReviewItem.Existing`, kept as `PendingReviewItem.Existing`).
+**Replace existing copies** (`POST Reviews/{id}/Replace`) needs every item to be such a duplicate, and the body must
+repeat the copies the page showed (otherwise 409). The next sweep then plans with `IngestPlanner.ReplaceExisting`:
+
+- each duplicate inside a library (all of a multi-episode file's) and its subtitle sidecars (same stem, subtitle
+  extensions) are listed in `IngestPlan.Replacing`, and their paths count as free when naming the new files;
+- they become quarantine moves into `<dated>/Replaced/`, placed first, so the new files can take their names;
+- the executor accepts a source outside the release only if it is in `Replacing` and the move is a quarantine move.
+  The moves are logged as quarantine, so the purge and a rollback treat them like any other.
+
 ### AI tie-breaker
 
 When the result would be *needs review* but the best score is **≥ 0.60** and there are at least two candidates (for

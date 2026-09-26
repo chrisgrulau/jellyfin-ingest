@@ -278,6 +278,11 @@
         var reviews = [];
         var filter = 'All';
         var confirmQuarantine = {};
+        var confirmReplace = {};
+
+        // A release held back only by copies already on the server can replace them (they go to quarantine)
+        function canReplace(r) { return (r.Items || []).length > 0 && r.Items.every(function (i) { return i.Existing; }); }
+        function existingCount(r) { return r.Items.reduce(function (n, i) { return n + i.Existing.split('\n').length; }, 0); }
         var expanded = {};
         var searchResults = {};
         var busyCard = null;
@@ -364,7 +369,7 @@
                 (config.DryRun ? '<div class="ingest-muted">Dry run is on, so it has only been planned (see Recent activity). It will be filed once dry run is off.</div>' : '') + '</div>';
             }
             if (pending) {
-              return html + '<p class="ingest-muted">' + (r.Request === 'Quarantine' ? 'Quarantining' : 'Planning again') + ' on the next sweep (within 30 seconds)…</p></div>';
+              return html + '<p class="ingest-muted">' + (r.Request === 'Quarantine' ? 'Quarantining' : r.Request === 'Replace' ? 'Replacing what\'s on the server' : 'Planning again') + ' on the next sweep (within 30 seconds)…</p></div>';
             }
             html += pickTable(r, r.Candidates || [], 'suggested');
             var sr = searchResults[r.Id];
@@ -378,6 +383,7 @@
               '<button is="emby-button" type="submit" class="raised button-alt"><span>Search</span></button></form></details>';
             html += '<div class="ingest-actions">' +
               '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>' + (r.Chosen ? 'Clear choice and retry' : 'Retry') + '</span></button>' +
+              (canReplace(r) ? '<button is="emby-button" type="button" class="raised button-submit ingest-replace"><span>' + (confirmReplace[r.Id] ? 'Confirm: replace ' + existingCount(r) + ' file' + (existingCount(r) === 1 ? '' : 's') + ' on the server' : 'Replace existing copies') + '</span></button>' : '') +
               '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>' +
               '</div>';
             return html + '</div>';
@@ -508,6 +514,12 @@
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose', { List: list === 'search' ? 'search' : 'suggested', Index: index, LibraryId: lib, Key: candidateKey(shown[index].Candidate) });
           } else if (btn.classList.contains('ingest-retry')) {
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Retry');
+          } else if (btn.classList.contains('ingest-replace')) {
+            var rr = reviewById(id);
+            if (!rr) { return; }
+            if (!confirmReplace[id]) { confirmReplace[id] = true; renderReviews(); return; }
+            delete confirmReplace[id];
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Replace', { Existing: rr.Items.map(function (i) { return i.Existing; }).join('\n') });
           } else if (btn.classList.contains('ingest-quarantine')) {
             if (!confirmQuarantine[id]) { confirmQuarantine[id] = true; btn.querySelector('span').textContent = 'Confirm: quarantine whole release'; return; }
             delete confirmQuarantine[id];

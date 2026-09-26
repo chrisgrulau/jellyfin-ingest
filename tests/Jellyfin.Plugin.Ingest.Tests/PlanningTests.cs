@@ -548,4 +548,90 @@ public class PlanningTests
         Assert.Equal(RetryKind.None, plan.Retry);
         Assert.NotEmpty(plan.Review);
     }
+
+    // ING-30: replacing copies already on the server, when asked for in review
+    private const string OldSeason = "/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]/Season 01";
+
+    private static IngestPlanner Replacer(IExistingMedia existing, Func<string, bool>? exists = null, IEnumerable<string>? filesInSeason = null) =>
+        new IngestPlanner(
+            new MediaIdentifier(new Lookup()),
+            p => !Path.HasExtension(p) || (exists?.Invoke(p) ?? false),
+            _ => null,
+            new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)),
+            existing,
+            p => PathGuard.IsUnder(p, "/lib"),
+            dir => dir == OldSeason ? filesInSeason ?? [] : [])
+        {
+            ReplaceExisting = true,
+        };
+
+    [Fact]
+    public async Task A_copy_on_the_server_is_offered_for_replacing_in_review()
+    {
+        var existing = new Existing("/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]");
+        existing.Episodes[(1, 4)] = OldSeason + "/Lantern S01E04 - Glass Harbour.avi";
+
+        var plan = await Planner(existing: existing).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.1080p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.Equal(OldSeason + "/Lantern S01E04 - Glass Harbour.avi", Assert.Single(plan.Review).Existing);
+    }
+
+    [Fact]
+    public async Task Replacing_moves_the_old_copy_and_its_subtitles_to_quarantine_first_then_files_the_new_one()
+    {
+        var old = OldSeason + "/Lantern S01E04 - Glass Harbour.avi";
+        var existing = new Existing("/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]");
+        existing.Episodes[(1, 4)] = old;
+        string[] season = [old, OldSeason + "/Lantern S01E04 - Glass Harbour.eng.srt", OldSeason + "/Lantern S01E04 - Glass Harbour.nfo", OldSeason + "/Lantern S01E05 - Other.eng.srt"];
+
+        var plan = await Replacer(existing, p => season.Contains(p), season).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.1080p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.IsReady);
+        Assert.Equal([old, OldSeason + "/Lantern S01E04 - Glass Harbour.eng.srt"], plan.Replacing);
+        Assert.Equal(OperationKind.Quarantine, plan.Operations[0].Kind);
+        Assert.Equal(old, plan.Operations[0].Source);
+        Assert.StartsWith(Path.Combine(Quarantine, "2026-09-24", "Replaced"), plan.Operations[0].Destination, StringComparison.Ordinal);
+        Assert.Equal(OperationKind.Quarantine, plan.Operations[1].Kind);
+        Assert.Contains(plan.Operations, o => o.Kind == OperationKind.Video && o.Destination == OldSeason + "/Lantern S01E04 - Glass Harbour.mkv");
+    }
+
+    [Fact]
+    public async Task A_new_file_may_take_the_exact_name_of_the_copy_it_replaces()
+    {
+        var old = OldSeason + "/Lantern S01E04 - Glass Harbour.mkv";
+        var existing = new Existing("/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]");
+        existing.Episodes[(1, 4)] = old;
+
+        var plan = await Replacer(existing, p => p == old).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.1080p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.IsReady);
+        Assert.Contains(plan.Operations, o => o.Kind == OperationKind.Video && o.Destination == old);
+        Assert.True(plan.Operations.ToList().FindIndex(o => o.Source == old) < plan.Operations.ToList().FindIndex(o => o.Destination == old));
+    }
+
+    [Fact]
+    public async Task A_multi_episode_file_replaces_every_copy_it_covers()
+    {
+        var existing = new Existing("/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]");
+        existing.Episodes[(1, 4)] = OldSeason + "/Lantern S01E04.avi";
+        existing.Episodes[(1, 5)] = OldSeason + "/Lantern S01E05.avi";
+
+        var plan = await Replacer(existing).PlanAsync(Watch, "a", [F("a/Lantern.S01E04E05.1080p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.IsReady);
+        Assert.Equal([OldSeason + "/Lantern S01E04.avi", OldSeason + "/Lantern S01E05.avi"], plan.Replacing);
+    }
+
+    [Fact]
+    public async Task A_copy_outside_the_libraries_is_never_replaced()
+    {
+        var existing = new Existing("/lib/Other Shows/Lantern (2001) [tvdbid-7] [tmdbid-9]");
+        existing.Episodes[(1, 4)] = "/elsewhere/Lantern S01E04.avi";
+
+        var plan = await Replacer(existing).PlanAsync(Watch, "a", [F("a/Lantern.S01E04.1080p.mkv")], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.False(plan.IsReady);
+        Assert.Empty(plan.Replacing);
+        Assert.Contains("already on the server", Assert.Single(plan.Review).Reason, StringComparison.Ordinal);
+    }
 }

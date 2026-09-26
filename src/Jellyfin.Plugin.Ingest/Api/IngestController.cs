@@ -239,6 +239,59 @@ public class IngestController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Files the release on the next sweep, replacing the copies already on the server that held it back: they move to
+    /// quarantine (with their subtitle files) and can be restored until it is purged.
+    /// </summary>
+    /// <param name="id">Review id.</param>
+    /// <param name="request">The copies the page showed (they must still be the ones holding the release back).</param>
+    /// <returns>No content.</returns>
+    [HttpPost("Reviews/{id}/Replace")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult Replace([FromRoute] string id, [FromBody, Required] ReplaceRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var review = _state.GetReview(id);
+        if (review is null)
+        {
+            return NotFound();
+        }
+
+        // Only a release held back by copies already on the server, and only the copies the page showed
+        if (review.Items.Count == 0 || review.Items.Any(i => i.Existing.Length == 0))
+        {
+            return BadRequest("Only a release held back because it is already on the server can replace what's there.");
+        }
+
+        if (!string.Equals(ExistingOf(review), request.Existing, StringComparison.Ordinal))
+        {
+            return Conflict("What's on the server changed since the page was drawn; look again before replacing.");
+        }
+
+        if (!_state.RequestReplace(id))
+        {
+            return NotFound();
+        }
+
+        RecordDecision(review, "Asked to replace the copies already on the server (they go to quarantine).");
+        return NoContent();
+    }
+
+    /// <summary>
+    /// The copies holding a review back, as the page sends them back: every item's, in order, one per line.
+    /// </summary>
+    /// <param name="review">The review.</param>
+    /// <returns>The copies.</returns>
+    public static string ExistingOf(PendingReview review)
+    {
+        ArgumentNullException.ThrowIfNull(review);
+        return string.Join('\n', review.Items.Select(i => i.Existing));
+    }
+
     private static string Describe(MetadataCandidate c)
         => c.Year is { } y ? $"{c.Name} ({y})" : c.Name;
 
@@ -282,4 +335,13 @@ public sealed record FolderCheckRequest
 
     /// <summary>Gets the proposed custom quarantine folder (empty for the default).</summary>
     public string? QuarantinePath { get; init; }
+}
+
+/// <summary>
+/// Body of <see cref="IngestController.Replace"/>.
+/// </summary>
+public sealed record ReplaceRequest
+{
+    /// <summary>Gets the copies the page showed, one per line (every review item's, in order).</summary>
+    public string? Existing { get; init; }
 }

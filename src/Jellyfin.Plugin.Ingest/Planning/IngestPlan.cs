@@ -60,6 +60,12 @@ public sealed record ReviewItem(string Source, string Reason)
 
     /// <summary>Gets whether (and why) the problem may clear up by itself, so the release is tried again automatically.</summary>
     public RetryKind Retry { get; init; }
+
+    /// <summary>
+    /// Gets the copies already on the server that hold this file back (absolute paths, one per line), or empty. The
+    /// review can offer to replace them.
+    /// </summary>
+    public string Existing { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -111,4 +117,11 @@ public sealed record IngestPlan
     /// no video filed). Only such a plan may run without a video.
     /// </summary>
     public bool WholeReleaseQuarantine { get; init; }
+
+    /// <summary>
+    /// Gets the files already on the server that this plan replaces (asked for in review): each is moved to quarantine,
+    /// with its subtitle files, before the new files are filed. These exact paths are the only sources outside the
+    /// release the executor accepts, and only for quarantine moves.
+    /// </summary>
+    public IReadOnlyList<string> Replacing { get; init; } = [];
 }
