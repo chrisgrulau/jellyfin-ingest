@@ -231,7 +231,7 @@ public sealed class UndoTests : IDisposable
         Assert.True(outcome.Succeeded, outcome.Message);
         Assert.Equal(16, new FileInfo(Path.Combine(Drop, "r", "english.srt")).Length);
         Assert.Equal(1000, new FileInfo(Path.Combine(Drop, "r", "Rocket.Club.2019.mkv")).Length);
-        Assert.Contains("1 subtitles had changed since filing and were moved back as they are", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("1 subtitle had changed since filing and was moved back as it is", outcome.Message, StringComparison.Ordinal);
         Assert.True(Review!.Held);
     }
 
@@ -248,7 +248,7 @@ public sealed class UndoTests : IDisposable
         Assert.True(outcome.Succeeded, outcome.Message);
         Assert.False(File.Exists(Subtitle));
         Assert.True(File.Exists(Path.Combine(Drop, "r", "english.srt")));
-        Assert.Contains("1 subtitles had changed", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("1 subtitle had changed", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]

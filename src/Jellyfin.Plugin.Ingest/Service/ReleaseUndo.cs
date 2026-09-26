@@ -349,7 +349,7 @@ public sealed class ReleaseUndo
         }
 
         var summary = "Undone by an administrator: " + string.Join("; ", parts) + "."
-            + (planned.ChangedSubtitles > 0 ? string.Create(CultureInfo.InvariantCulture, $" {planned.ChangedSubtitles} subtitles had changed since filing and were moved back as they are.") : string.Empty)
+            + (planned.ChangedSubtitles > 0 ? string.Create(CultureInfo.InvariantCulture, $" {planned.ChangedSubtitles} {(planned.ChangedSubtitles == 1 ? "subtitle had" : "subtitles had")} changed since filing and {(planned.ChangedSubtitles == 1 ? "was" : "were")} moved back as {(planned.ChangedSubtitles == 1 ? "it is" : "they are")}.") : string.Empty)
             + " It now waits under Needs review.";
         Record(filing, ActivityStatus.Undone, summary, [.. problems.Select(p => "Needs attention: " + p), .. planned.Plan.Operations.Select(o => $"{o.Kind}: {o.Source} → {(planned.SetAside.Contains(o) ? "deleted" : o.Destination)}")]);
         return new ReturnOutcome(true, summary, planned.Refresh);
