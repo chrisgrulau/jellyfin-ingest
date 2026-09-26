@@ -14,16 +14,26 @@ namespace Jellyfin.Plugin.Ingest.Service;
 /// <summary>
 /// Settles close matches with the family's AI plugin, if it is installed and allowed to help Ingest.
 /// <list type="bullet">
-/// <item>Only the file name and the candidates' titles, years and kinds are sent (no paths, no user names).</item>
+/// <item>Only the file name and the candidates' titles, years and kinds are sent (no paths, no user names). To pick
+/// an episode named by title, the season's episode titles, years and short synopses from the providers are sent too.</item>
 /// <item>The answer must be one of the offered positions, or -1 for none; anything else is ignored.</item>
 /// <item>Each question is asked once per sweep (a season pack asks once, not once per episode).</item>
 /// <item>Without an answer the release waits for review, as it always has.</item>
 /// </list>
 /// </summary>
-public sealed class AiTiebreaker : ITiebreaker
+public sealed class AiTiebreaker : ITiebreaker, IEpisodePicker
 {
     /// <summary>The purpose the AI plugin sees (and budgets under).</summary>
     public const string Purpose = "ingest.match";
+
+    /// <summary>The purpose the AI plugin sees for picking an episode by its title.</summary>
+    public const string EpisodePurpose = "ingest.episode";
+
+    private const string EpisodeInstructions =
+        "A downloaded TV episode names its episode by title, not number, and the title doesn't exactly match the "
+        + "provider's list. Choose the listed episode this file most likely is, using the file name, the episode title "
+        + "read from it (it may be a working, broadcast or alternative title), the year if any, and each episode's "
+        + "title, year and synopsis. If no episode clearly fits, answer -1. Give a one-sentence reason.";
 
     private const string Instructions =
         "A downloaded video must be filed under the right film or TV series. Choose the candidate this file most likely "
@@ -95,6 +105,37 @@ public sealed class AiTiebreaker : ITiebreaker
         return pick;
     }
 
+    /// <inheritdoc />
+    public async Task<TiebreakPick> PickEpisodeAsync(string fileName, string series, string episodeTitle, int? year, IReadOnlyList<EpisodeListing> options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var key = string.Join('|', "E", series, episodeTitle, year, string.Join(';', options.Select(o => o.Season + "/" + o.Episode)));
+        if (_asked.TryGetValue(key, out var earlier))
+        {
+            return earlier;
+        }
+
+        var data = new
+        {
+            file = fileName,
+            series,
+            episodeTitle,
+            year,
+            episodes = options.Select((o, i) => new
+            {
+                index = i,
+                code = string.Create(CultureInfo.InvariantCulture, $"S{o.Season:00}E{o.Episode:00}"),
+                title = o.Title,
+                year = o.Year,
+                synopsis = Shorten(o.Overview),
+            }),
+        };
+        var reply = await _ask("ingest", EpisodePurpose, EpisodeInstructions, data, Schema, 2048, "low", cancellationToken).ConfigureAwait(false);
+        var pick = Read(reply, options.Count);
+        _asked[key] = pick;
+        return pick;
+    }
+
     /// <summary>
     /// Reads the AI plugin's reply into a pick, accepting only an offered position.
     /// </summary>
@@ -120,6 +161,13 @@ public sealed class AiTiebreaker : ITiebreaker
         return choice == -1
             ? new TiebreakPick(null, "The AI didn't think any candidate clearly fits: " + reason, null)
             : new TiebreakPick(choice, reason, by);
+    }
+
+    // Synopses are only a hint: the first 200 characters keep the question small
+    private static string? Shorten(string? text)
+    {
+        var t = (text ?? string.Empty).ReplaceLineEndings(" ").Trim();
+        return t.Length == 0 ? null : t.Length > 200 ? t[..200] + "…" : t;
     }
 
     // Model text goes into the activity panel only: kept short and on one line

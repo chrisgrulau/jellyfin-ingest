@@ -29,6 +29,16 @@ public sealed record MetadataCandidate
 }
 
 /// <summary>
+/// One episode of a season, as listed by the metadata providers.
+/// </summary>
+/// <param name="Season">Season number (0 for specials).</param>
+/// <param name="Episode">Episode number.</param>
+/// <param name="Title">Episode title.</param>
+/// <param name="Year">Year first aired, if known.</param>
+/// <param name="Overview">Short synopsis, if known.</param>
+public sealed record EpisodeListing(int Season, int Episode, string Title, int? Year, string? Overview);
+
+/// <summary>
 /// The provider operations identification needs. In the plugin this is backed by Jellyfin's provider manager, so it
 /// uses whatever metadata providers (and keys) the server already has configured.
 /// </summary>
@@ -55,4 +65,14 @@ public interface IMetadataLookup
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The episode title, or <c>null</c> if the provider doesn't know the episode.</returns>
     Task<string?> GetEpisodeTitleAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, int episode, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Lists one season's episodes (numbers, titles, first-aired year and a short synopsis), for files that name an
+    /// episode by title only. Lookups that can't list return nothing.
+    /// </summary>
+    /// <param name="seriesProviderIds">The series' provider ids.</param>
+    /// <param name="season">The season (0 for specials).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The episodes found, in order.</returns>
+    Task<IReadOnlyList<EpisodeListing>> ListSeasonAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, CancellationToken cancellationToken);
 }

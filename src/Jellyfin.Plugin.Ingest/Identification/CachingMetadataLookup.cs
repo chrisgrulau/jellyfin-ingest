@@ -28,6 +28,9 @@ public sealed class CachingMetadataLookup : IMetadataLookup
     /// <summary>The most searches kept (the newest).</summary>
     public const int MaxEntries = 500;
 
+    /// <summary>The most season listings kept in memory.</summary>
+    public const int MaxSeasons = 20;
+
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
     private readonly IMetadataLookup _inner;
@@ -35,6 +38,7 @@ public sealed class CachingMetadataLookup : IMetadataLookup
     private readonly string? _path;
     private readonly Lock _lock = new();
     private readonly Dictionary<string, CacheEntry> _entries;
+    private readonly Dictionary<string, (DateTimeOffset Time, IReadOnlyList<EpisodeListing> Episodes)> _seasons = new(StringComparer.Ordinal);
     private readonly HashSet<string> _emptyThisSweep = new(StringComparer.Ordinal);
     private bool _dirty;
 
@@ -106,6 +110,39 @@ public sealed class CachingMetadataLookup : IMetadataLookup
         }
 
         return title;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Season listings are kept in memory only (they carry synopses), for <see cref="Lifetime"/>.</remarks>
+    public async Task<IReadOnlyList<EpisodeListing>> ListSeasonAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(seriesProviderIds);
+        var key = string.Join(',', seriesProviderIds.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase).Select(p => p.Key + "=" + p.Value))
+            + "|" + season.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        lock (_lock)
+        {
+            if (_seasons.TryGetValue(key, out var cached) && _clock.GetUtcNow() - cached.Time < Lifetime)
+            {
+                Hits++;
+                return cached.Episodes;
+            }
+        }
+
+        var episodes = await _inner.ListSeasonAsync(seriesProviderIds, season, cancellationToken).ConfigureAwait(false);
+        if (episodes.Count > 0)
+        {
+            lock (_lock)
+            {
+                if (_seasons.Count >= MaxSeasons)
+                {
+                    _seasons.Remove(_seasons.MinBy(e => e.Value.Time).Key);
+                }
+
+                _seasons[key] = (_clock.GetUtcNow(), episodes);
+            }
+        }
+
+        return episodes;
     }
 
     /// <summary>

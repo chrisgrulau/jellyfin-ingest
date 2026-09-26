@@ -63,6 +63,7 @@ plugin page, where you pick the right title (and library) with one click or sear
 | Extras | Trailers, featurettes, deleted scenes … filed into Jellyfin's extras folders. |
 | Clutter | Moved to a dated quarantine folder (default or user-chosen), purged after N days (default 30). *Quarantine* on the plugin page shows what is there and when each day's folder is deleted. |
 | AI tie-breaker | Optional, with the Shoal AI plugin: a close call between candidates Ingest already found is settled by the AI choosing one of them (or none). Only file names, titles and years are sent; every choice is shown in *Recent activity*. |
+| Episodes named by title | A file that gives the episode title but no number (typically a special) is matched against that season's episode list from your providers; if no title clearly matches, the AI plugin (when installed) may choose one of the listed episodes. |
 | Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. |
 | Activity | *Recent activity* on the plugin page: filed, dry run, needs review, decisions, failures, quarantine and purges, with what went where. |
 | Safety | Dry-run mode (on by default), never overwrites, never files a second copy of an episode or film already on the server, crash-safe moves (hidden temporary name, size check, then rename; interrupted moves are finished or discarded at the next start), all-or-nothing per release (a failure undoes the moves already made), a JSON-lines action log. |
@@ -149,6 +150,8 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Plugin repository manifest (the Shoal repository)
 - [x] New episodes of a show you already have follow it to the library it's in
 - [x] Optional AI tie-breaker for close calls (Shoal AI plugin)
+- [x] Episodes named by title only (specials), with the AI plugin as a fallback
+- [ ] Episodes with no usable name: a short transcript compared with episode synopses
 
 Design notes live in [`docs/DESIGN.md`](docs/DESIGN.md).
 

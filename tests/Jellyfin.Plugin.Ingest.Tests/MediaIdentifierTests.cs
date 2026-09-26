@@ -50,6 +50,9 @@ public class MediaIdentifierTests
 
         public Task<string?> GetEpisodeTitleAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, int episode, CancellationToken cancellationToken)
             => Task.FromResult(Episodes.TryGetValue((season, episode), out var t) ? t : null);
+
+        public Task<IReadOnlyList<EpisodeListing>> ListSeasonAsync(IReadOnlyDictionary<string, string> seriesProviderIds, int season, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<EpisodeListing>>([.. Episodes.Where(e => e.Key.Item1 == season).OrderBy(e => e.Key.Item2).Select(e => new EpisodeListing(season, e.Key.Item2, e.Value, null, null))]);
     }
 
     private sealed class FakeLibrary(params MetadataCandidate[] series) : ILibraryIndex

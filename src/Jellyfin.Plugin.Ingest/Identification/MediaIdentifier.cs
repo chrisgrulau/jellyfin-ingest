@@ -41,6 +41,15 @@ public sealed class MediaIdentifier
     /// <summary>The most candidates a tie-breaker chooses between.</summary>
     public const int TiebreakOptions = 5;
 
+    /// <summary>How close an episode title must be to count as a match on its own.</summary>
+    public const double EpisodeTitleMatch = 0.85;
+
+    /// <summary>How far ahead of the next episode title a match must be.</summary>
+    public const double EpisodeTitleLead = 0.10;
+
+    /// <summary>The most episodes offered to an <see cref="IEpisodePicker"/>.</summary>
+    public const int EpisodeOptions = 40;
+
     /// <summary>The <see cref="MetadataCandidate.Source"/> value used for library hits.</summary>
     public const string LibrarySource = "Library";
 
@@ -79,7 +88,7 @@ public sealed class MediaIdentifier
         }
 
         var result = release.Kind == MediaKind.Episode || (release.Kind == MediaKind.Unknown && preferTv)
-            ? await IdentifyEpisodeAsync(release, cancellationToken).ConfigureAwait(false)
+            ? await IdentifyEpisodeAsync(release, fileName, cancellationToken).ConfigureAwait(false)
             : await IdentifyMovieAsync(release, cancellationToken).ConfigureAwait(false);
         return await SettleAsync(release, fileName, result, cancellationToken).ConfigureAwait(false);
     }
@@ -103,7 +112,7 @@ public sealed class MediaIdentifier
         }
 
         var chosen = options[i].Candidate;
-        var settled = await IdentifyAsChosenAsync(release, chosen, chosen.IsSeries, ct).ConfigureAwait(false);
+        var settled = await IdentifyAsChosenAsync(release, chosen, chosen.IsSeries, ct, fileName).ConfigureAwait(false);
         return settled.Status == IdentificationStatus.Identified
             ? settled with
             {
@@ -122,8 +131,9 @@ public sealed class MediaIdentifier
     /// <param name="chosen">The chosen candidate.</param>
     /// <param name="isTv">Whether the chosen title is a series.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="fileName">The video's file name (no folders), for an episode picker.</param>
     /// <returns>The identification result.</returns>
-    public async Task<IdentificationResult> IdentifyAsChosenAsync(ParsedRelease release, MetadataCandidate chosen, bool isTv, CancellationToken cancellationToken)
+    public async Task<IdentificationResult> IdentifyAsChosenAsync(ParsedRelease release, MetadataCandidate chosen, bool isTv, CancellationToken cancellationToken, string? fileName = null)
     {
         ArgumentNullException.ThrowIfNull(release);
         ArgumentNullException.ThrowIfNull(chosen);
@@ -140,16 +150,19 @@ public sealed class MediaIdentifier
             };
         }
 
+        var series = new SeriesIdentity { Title = chosen.Name, Year = chosen.Year, TvdbId = Id(chosen, "Tvdb"), TmdbId = Id(chosen, "Tmdb") };
         if (release.Season is not { } season || release.Episode is not { } episode)
         {
-            return new IdentificationResult
-            {
-                Status = IdentificationStatus.NeedsReview,
-                Reason = $"Series is '{chosen.Name}', but the season or episode number can't be read from the file name.",
-            };
+            var byTitle = await FindByTitleAsync(release, chosen, fileName, cancellationToken).ConfigureAwait(false);
+            return byTitle.Hit is { } hit
+                ? ByTitle(series, hit, 1, [], reason + " " + byTitle.Note, byTitle.By)
+                : new IdentificationResult
+                {
+                    Status = IdentificationStatus.NeedsReview,
+                    Reason = $"Series is '{chosen.Name}', but the season or episode number can't be read from the file name." + byTitle.Note,
+                };
         }
 
-        var series = new SeriesIdentity { Title = chosen.Name, Year = chosen.Year, TvdbId = Id(chosen, "Tvdb"), TmdbId = Id(chosen, "Tmdb") };
         var title = await _lookup.GetEpisodeTitleAsync(chosen.ProviderIds, season, episode, cancellationToken).ConfigureAwait(false);
         return new IdentificationResult
         {
@@ -378,7 +391,7 @@ public sealed class MediaIdentifier
         };
     }
 
-    private async Task<IdentificationResult> IdentifyEpisodeAsync(ParsedRelease release, CancellationToken ct)
+    private async Task<IdentificationResult> IdentifyEpisodeAsync(ParsedRelease release, string? fileName, CancellationToken ct)
     {
         var hits = await SearchAsync(true, release.Title, release.Year, ct).ConfigureAwait(false);
         var (best, ranked, reason) = Choose(release.Title, release.Year, hits);
@@ -399,13 +412,16 @@ public sealed class MediaIdentifier
 
         if (release.Season is not { } season || release.Episode is not { } episode)
         {
-            return new IdentificationResult
-            {
-                Status = IdentificationStatus.NeedsReview,
-                Confidence = Math.Min(1, best.Score),
-                Candidates = ranked,
-                Reason = string.Create(CultureInfo.InvariantCulture, $"Series is '{c.Name}', but the episode number is unknown (special named '{release.EpisodeTitle}')."),
-            };
+            var byTitle = await FindByTitleAsync(release, c, fileName, ct).ConfigureAwait(false);
+            return byTitle.Hit is { } hit
+                ? ByTitle(series, hit, Math.Min(1, best.Score), ranked, reason + " " + byTitle.Note, byTitle.By)
+                : new IdentificationResult
+                {
+                    Status = IdentificationStatus.NeedsReview,
+                    Confidence = Math.Min(1, best.Score),
+                    Candidates = ranked,
+                    Reason = string.Create(CultureInfo.InvariantCulture, $"Series is '{c.Name}', but the episode number is unknown (special named '{release.EpisodeTitle}').") + byTitle.Note,
+                };
         }
 
         var title = await _lookup.GetEpisodeTitleAsync(c.ProviderIds, season, episode, ct).ConfigureAwait(false);
@@ -417,5 +433,60 @@ public sealed class MediaIdentifier
             Reason = title is null ? reason + " Episode title not found at the provider." : reason,
             Episode = new EpisodeIdentity { Series = series, Season = season, Episode = episode, EndingEpisode = release.EndingEpisode, Title = title ?? release.EpisodeTitle },
         };
+    }
+
+    private static IdentificationResult ByTitle(SeriesIdentity series, EpisodeListing hit, double confidence, IReadOnlyList<ScoredCandidate> ranked, string reason, string? by) => new()
+    {
+        Status = IdentificationStatus.Identified,
+        Confidence = confidence,
+        Candidates = ranked,
+        Reason = reason.Trim(),
+        DecidedBy = by,
+        Episode = new EpisodeIdentity { Series = series, Season = hit.Season, Episode = hit.Episode, Title = hit.Title },
+    };
+
+    // A file that names its episode by title only (typically a special, "S13SP2 A Special Title"): find that title in
+    // the season's episode list. A clear match is taken; otherwise an episode picker (the AI plugin) may choose one of
+    // the listed episodes. The note is appended to the reason either way.
+    private async Task<(EpisodeListing? Hit, string Note, string? By)> FindByTitleAsync(ParsedRelease release, MetadataCandidate series, string? fileName, CancellationToken ct)
+    {
+        if (release.Season is not { } season || release.Episode is not null || string.IsNullOrWhiteSpace(release.EpisodeTitle))
+        {
+            return (null, string.Empty, null);
+        }
+
+        var title = release.EpisodeTitle;
+        var list = await _lookup.ListSeasonAsync(series.ProviderIds, season, ct).ConfigureAwait(false);
+        if (list.Count == 0)
+        {
+            return (null, string.Create(CultureInfo.InvariantCulture, $" The providers have no episode list for season {season}."), null);
+        }
+
+        var scored = list.Select(l => (Listing: l, Score: TitleMatcher.Similarity(title, l.Title))).OrderByDescending(x => x.Score).ToList();
+        var top = scored[0];
+        if (top.Score >= EpisodeTitleMatch && (scored.Count == 1 || scored[1].Score <= top.Score - EpisodeTitleLead))
+        {
+            return (top.Listing, string.Create(CultureInfo.InvariantCulture, $"Episode S{top.Listing.Season:00}E{top.Listing.Episode:00} '{top.Listing.Title}' found by its title."), null);
+        }
+
+        if (_tiebreaker is not IEpisodePicker picker)
+        {
+            return (null, string.Create(CultureInfo.InvariantCulture, $" No episode of season {season} clearly has that title."), null);
+        }
+
+        // Likeliest first: title similarity, then the year the name gives
+        var options = scored
+            .OrderByDescending(x => x.Score + (release.Year is { } y && x.Listing.Year == y ? 0.2 : 0))
+            .Take(EpisodeOptions)
+            .Select(x => x.Listing)
+            .ToList();
+        var pick = await picker.PickEpisodeAsync(fileName ?? title, series.Name, title, release.Year, options, ct).ConfigureAwait(false);
+        if (pick.Index is not { } i || i < 0 || i >= options.Count)
+        {
+            return (null, string.IsNullOrEmpty(pick.Note) ? string.Create(CultureInfo.InvariantCulture, $" No episode of season {season} clearly has that title.") : " " + pick.Note, null);
+        }
+
+        var chosen = options[i];
+        return (chosen, string.Create(CultureInfo.InvariantCulture, $"Episode S{chosen.Season:00}E{chosen.Episode:00} '{chosen.Title}' chosen by {pick.By ?? "the episode picker"} from {options.Count} listed episodes. {pick.Note}"), pick.By ?? "episode picker");
     }
 }

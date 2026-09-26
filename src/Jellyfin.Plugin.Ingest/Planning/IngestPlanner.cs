@@ -133,7 +133,7 @@ public sealed class IngestPlanner
             var preferTv = targets.Tv is not null && targets.Films is null;
             var result = chosen is null
                 ? await _identifier.IdentifyAsync(parsed[video], preferTv, cancellationToken, Path.GetFileName(video)).ConfigureAwait(false)
-                : await _identifier.IdentifyAsChosenAsync(parsed[video], chosen.Candidate, chosen.Target.IsTv, cancellationToken).ConfigureAwait(false);
+                : await _identifier.IdentifyAsChosenAsync(parsed[video], chosen.Candidate, chosen.Target.IsTv, cancellationToken, Path.GetFileName(video)).ConfigureAwait(false);
             if (result.DecidedBy is not null)
             {
                 notes.Add(Path.GetFileName(video) + ": " + result.Reason);
