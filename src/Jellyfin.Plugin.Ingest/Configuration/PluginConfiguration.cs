@@ -56,4 +56,10 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <see cref="UseAiTiebreak"/>.
     /// </summary>
     public bool UseTranscripts { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether releases waiting for a decision, failures, filings and quarantines are
+    /// also written to Jellyfin's Activity log (Dashboard → Activity), at most once a day per release and outcome.
+    /// </summary>
+    public bool WriteToActivityLog { get; set; } = true;
 }
