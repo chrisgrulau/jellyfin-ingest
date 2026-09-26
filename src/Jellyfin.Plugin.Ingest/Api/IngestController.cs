@@ -30,6 +30,7 @@ public class IngestController : ControllerBase
     private const int MaxSearchResults = 10;
 
     private readonly IngestStateStore _state;
+    private readonly IngestProgress _progress;
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
     private readonly IApplicationPaths _paths;
@@ -39,21 +40,23 @@ public class IngestController : ControllerBase
     /// Initializes a new instance of the <see cref="IngestController"/> class.
     /// </summary>
     /// <param name="state">Reviews and activity.</param>
+    /// <param name="progress">What the sweep is waiting for and working on.</param>
     /// <param name="libraryManager">Jellyfin library manager.</param>
     /// <param name="providerManager">Jellyfin provider manager.</param>
     /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
     /// <param name="configuration">Jellyfin's configuration (for the transcode folder).</param>
-    public IngestController(IngestStateStore state, ILibraryManager libraryManager, IProviderManager providerManager, IApplicationPaths paths, IConfigurationManager configuration)
+    public IngestController(IngestStateStore state, IngestProgress progress, ILibraryManager libraryManager, IProviderManager providerManager, IApplicationPaths paths, IConfigurationManager configuration)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
+        _progress = progress ?? throw new ArgumentNullException(nameof(progress));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
         _providerManager = providerManager ?? throw new ArgumentNullException(nameof(providerManager));
     }
 
     /// <summary>
-    /// Gets pending reviews and recent activity.
+    /// Gets pending reviews, recent activity, releases waiting to settle and the release being worked on.
     /// </summary>
     /// <param name="limit">Maximum activity entries to return.</param>
     /// <returns>The dashboard state.</returns>
@@ -66,8 +69,24 @@ public class IngestController : ControllerBase
         {
             Reviews = [.. s.Reviews.OrderByDescending(r => r.Time)],
             Activity = [.. s.Activity.Take(Math.Clamp(limit, 1, IngestStateStore.MaxActivity))],
+            Waiting = _progress.Waiting(),
+            Working = _progress.Working,
         };
     }
+
+    /// <summary>
+    /// Processes a waiting release on the next sweep, which starts now, without waiting for the rest of its settle time.
+    /// It is still only processed if nothing in it has changed since the last sweep.
+    /// </summary>
+    /// <param name="id">The waiting release's id.</param>
+    /// <returns>No content.</returns>
+    [HttpPost("Waiting/{id}/ProcessNow")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult ProcessNow([FromRoute] string id)
+        => _progress.RequestProcessNow(id)
+            ? NoContent()
+            : NotFound("That release isn't waiting any more, or it still holds files that are downloading.");
 
     /// <summary>
     /// Lists what is in quarantine: the dated folders, newest first, with their releases and files, and when each is

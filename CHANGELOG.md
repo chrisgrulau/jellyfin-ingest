@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **ING-36: Waiting**, on the plugin page and in the Status API. Before, nothing showed while a release settled (five
+  minutes by default) or while a long copy ran. Now the page lists:
+  - releases seen but not handled yet, and when each will settle if nothing changes (or that it is still downloading);
+  - the release being identified or filed, with "Filing file 2 of 5".
+
+  **Process now** skips the rest of a release's settle wait and starts a sweep straight away. The release is still
+  only processed if nothing in it has changed since the last look. After a restart, releases settle again as before.
+
 ### Changed
 
 - **ING-32: Dry run per watch folder.** Each watch folder has its own **Dry run** tick box, next to how its files are

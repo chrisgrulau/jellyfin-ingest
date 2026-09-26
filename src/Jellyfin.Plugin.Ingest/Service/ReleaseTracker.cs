@@ -24,6 +24,7 @@ public sealed partial class ReleaseTracker
 
     private readonly Dictionary<string, (string Signature, DateTimeOffset Since)> _seen = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _handled = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _downloading = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Returns whether a top-level entry of a watch folder should be ignored entirely (hidden files and folders such as
@@ -77,14 +78,23 @@ public sealed partial class ReleaseTracker
             _handled.Remove(gone);
         }
 
+        _downloading.RemoveWhere(d => !snapshot.ContainsKey(d));
+
         var ready = new List<string>();
         foreach (var (name, files) in snapshot)
         {
             if (files.Count == 0 || files.Any(f => PartialDownload().IsMatch(f.RelativePath)))
             {
                 _seen.Remove(name);
+                if (files.Count > 0)
+                {
+                    _downloading.Add(name);
+                }
+
                 continue;
             }
+
+            _downloading.Remove(name);
 
             var sig = Signature(files);
             if (!_seen.TryGetValue(name, out var prev) || !string.Equals(prev.Signature, sig, StringComparison.Ordinal))
@@ -100,6 +110,38 @@ public sealed partial class ReleaseTracker
         }
 
         return ready;
+    }
+
+    /// <summary>
+    /// The releases seen but not yet handled, as of the last <see cref="Observe"/>: still arriving, settling, or settled
+    /// and about to be processed (ING-36).
+    /// </summary>
+    /// <param name="settle">How long contents must stay unchanged.</param>
+    /// <returns>Each release and when it settles (<c>null</c> while it still holds in-progress download files).</returns>
+    public IReadOnlyList<(string Release, DateTimeOffset? SettlesAt)> Pending(TimeSpan settle)
+    {
+        var pending = _seen
+            .Where(s => !(_handled.TryGetValue(s.Key, out var done) && string.Equals(done, s.Value.Signature, StringComparison.Ordinal)))
+            .Select(s => (s.Key, (DateTimeOffset?)(s.Value.Since == DateTimeOffset.MinValue ? DateTimeOffset.MinValue : s.Value.Since + settle)))
+            .Concat(_downloading.Select(d => (d, (DateTimeOffset?)null)));
+        return [.. pending.OrderBy(p => p.Item1, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Skips the rest of a release's settle wait ("Process now"): it is offered on the next <see cref="Observe"/> if
+    /// nothing in it has changed since the last one.
+    /// </summary>
+    /// <param name="name">Release name.</param>
+    /// <returns>Whether the release is being watched (a release still holding in-progress download files isn't).</returns>
+    public bool SettleNow(string name)
+    {
+        if (!_seen.TryGetValue(name, out var s))
+        {
+            return false;
+        }
+
+        _seen[name] = (s.Signature, DateTimeOffset.MinValue);
+        return true;
     }
 
     /// <summary>

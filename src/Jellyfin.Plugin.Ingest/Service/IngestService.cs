@@ -41,6 +41,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
     private readonly IProviderManager _providerManager;
     private readonly ILogger<IngestService> _logger;
     private readonly IngestStateStore _state;
+    private readonly IngestProgress _progress;
     private readonly IApplicationPaths _paths;
     private readonly IConfigurationManager _configuration;
     private bool _markersMigrated;
@@ -69,11 +70,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// <param name="libraryMonitor">Jellyfin library monitor (told which folders changed, so only those are refreshed).</param>
     /// <param name="providerManager">Jellyfin provider manager.</param>
     /// <param name="state">Reviews and activity shown on the dashboard.</param>
+    /// <param name="progress">What the sweep is waiting for and working on, shown on the dashboard.</param>
     /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
     /// <param name="configuration">Jellyfin's configuration (for the transcode folder).</param>
     /// <param name="logger">Logger.</param>
     /// <param name="activity">Jellyfin's Activity log (entries that need attention are copied there).</param>
-    public IngestService(ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IProviderManager providerManager, IngestStateStore state, IApplicationPaths paths, IConfigurationManager configuration, ILogger<IngestService> logger, MediaBrowser.Model.Activity.IActivityManager? activity = null)
+    public IngestService(ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IProviderManager providerManager, IngestStateStore state, IngestProgress progress, IApplicationPaths paths, IConfigurationManager configuration, ILogger<IngestService> logger, MediaBrowser.Model.Activity.IActivityManager? activity = null)
     {
         // What needs attention (and what was done) is copied to Jellyfin's Activity log, unless switched off (FAM-05)
         if (activity is not null && state is not null)
@@ -99,6 +101,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         _libraryMonitor = libraryMonitor ?? throw new ArgumentNullException(nameof(libraryMonitor));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
+        _progress = progress ?? throw new ArgumentNullException(nameof(progress));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
         _providerManager = providerManager ?? throw new ArgumentNullException(nameof(providerManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -286,7 +289,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
             try
             {
-                await Task.Delay(SweepInterval, ct).ConfigureAwait(false);
+                // Sooner when "Process now" is pressed (ING-36)
+                await _progress.WaitForNextSweepAsync(SweepInterval, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -328,6 +332,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
         // Reviews of a watch folder that has been removed from the settings can never be acted on
         _state.PruneWatchFolders([.. config.WatchFolders.Select(w => w.Path)]);
+        _progress.KeepOnly([.. config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)).Select(w => w.Path)]);
         foreach (var watch in config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)))
         {
             // Each watch folder on its own: one that can't be read (permissions, offline share) mustn't stop the others
@@ -390,6 +395,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 });
             }
 
+            _progress.SetWaiting(watch.Path, []);
             return;
         }
 
@@ -465,7 +471,16 @@ public sealed partial class IngestService : IHostedService, IDisposable
             }
         }
 
-        foreach (var release in tracker.Observe(snapshot, _clock.GetUtcNow(), TimeSpan.FromSeconds(Math.Max(5, config.SettleSeconds))))
+        // "Process now" skips the rest of a release's settle wait (ING-36)
+        foreach (var release in snapshot.Keys.Where(r => _progress.TakeProcessNow(IngestStateStore.ReviewId(watch.Path, r))))
+        {
+            tracker.SettleNow(release);
+        }
+
+        var settle = TimeSpan.FromSeconds(Math.Max(5, config.SettleSeconds));
+        var ready = tracker.Observe(snapshot, _clock.GetUtcNow(), settle);
+        PublishWaiting(watch, tracker, settle, snapshot);
+        foreach (var release in ready)
         {
             ct.ThrowIfCancellationRequested();
 
@@ -484,6 +499,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
             // The request this planning acts on; one made while planning runs is kept for the next sweep
             var seen = _state.GetReview(IngestStateStore.ReviewId(watch.Path, release))?.RequestVersion ?? 0;
+            _progress.SetWorking(new WorkInProgress { Id = IngestStateStore.ReviewId(watch.Path, release), WatchFolder = watch.Path, Release = release, Stage = "Identifying", Since = _clock.GetUtcNow() });
             try
             {
                 await IngestAsync(plugin.DataFolderPath, config, sweep, watch, release, snapshot[release], targets, quarantine, seen, ct).ConfigureAwait(false);
@@ -499,10 +515,42 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 LogReleaseFailed(_logger, release, ex);
                 ReportFailure(watch, release, ex.Message, [], seen);
             }
+            finally
+            {
+                _progress.SetWorking(null);
+            }
 
             tracker.MarkHandled(release);
+            PublishWaiting(watch, tracker, settle, snapshot);
             PauseIfProvidersLookDown();
         }
+    }
+
+    // What this watch folder is still waiting for, for the page (ING-36). Releases with a review are shown there instead,
+    // and one filed by copy or hard link that is only being checked again isn't news.
+    private void PublishWaiting(WatchFolder watch, ReleaseTracker tracker, TimeSpan settle, IReadOnlyDictionary<string, IReadOnlyList<ReleaseFile>> snapshot)
+    {
+        var now = _clock.GetUtcNow();
+        var waiting = new List<WaitingRelease>();
+        foreach (var (release, settlesAt) in tracker.Pending(settle))
+        {
+            var id = IngestStateStore.ReviewId(watch.Path, release);
+            if (_state.GetReview(id) is not null
+                || (watch.Transfer != TransferMode.Move && snapshot.TryGetValue(release, out var files) && _state.WasCopied(watch.Path, release, IngestStateStore.CopySignature(files))))
+            {
+                continue;
+            }
+
+            waiting.Add(new WaitingRelease
+            {
+                Id = id,
+                WatchFolder = watch.Path,
+                Release = release,
+                SettlesAt = settlesAt is { } at && at < now ? now : settlesAt,
+            });
+        }
+
+        _progress.SetWaiting(watch.Path, waiting);
     }
 
     // Many searches in a row found nothing: most likely an outage, so stop spending quota and try again later
@@ -768,7 +816,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
             }
         }
 
-        var report = new PlanExecutor(new PhysicalFileOperations(), _clock)
+        var working = new WorkInProgress { Id = id, WatchFolder = watch.Path, Release = release, Stage = "Filing", Since = _clock.GetUtcNow() };
+        var report = new PlanExecutor(new PhysicalFileOperations(), _clock) { Filing = (file, count) => _progress.SetWorking(working with { File = file, Files = count }) }
             .Execute(plan, Path.Combine(watch.Path, release), Path.Combine(dataFolder, "actions.jsonl"), dryRun, ct);
         var prefix = dryRun ? "[dry run] would" : "Did";
         // Per-file detail (paths can hold user and share names) only at Debug; one line per release at Information

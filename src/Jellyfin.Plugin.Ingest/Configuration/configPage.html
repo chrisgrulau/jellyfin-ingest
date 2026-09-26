@@ -79,6 +79,10 @@
       #IngestConfigPage .ingest-q li { display: flex; justify-content: space-between; gap: 1em; padding: .1em 0; }
       #IngestConfigPage .ingest-q li span:first-child { min-width: 0; word-break: break-word; }
       #IngestConfigPage .ingest-q .size { font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .75; }
+      #IngestConfigPage .ingest-waiting { list-style: none; margin: 0 0 1em; padding: 0; }
+      #IngestConfigPage .ingest-waiting > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5em 1em; padding: .5em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
+      #IngestConfigPage .ingest-waiting .what { min-width: 0; word-break: break-word; }
+      #IngestConfigPage .ingest-waiting .emby-button { margin: 0; }
       #IngestConfigPage .ingest-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; flex-wrap: wrap; }
       @media (max-width: 720px) {
         #IngestConfigPage .wf-top, #IngestConfigPage .wf-dest { grid-template-columns: 1fr; }
@@ -98,6 +102,12 @@
 
         <div class="ingest-banner" id="DryRunBanner" hidden>
           <strong id="DryRunBannerTitle">Dry run is on.</strong> Ingest records what it would do in these watch folders and moves nothing. Check <em>Recent activity</em>, then turn dry run off for the folder under <em>Watch folders</em> and save.
+        </div>
+
+        <div id="WaitingBox" hidden>
+          <h3 class="sectionTitle">Waiting <span class="ingest-muted" id="WaitingCount"></span></h3>
+          <p class="ingest-muted">Releases seen in a watch folder that haven't finished arriving yet. Each is processed once nothing in it has changed for the settle time.</p>
+          <ul class="ingest-waiting" id="Waiting"></ul>
         </div>
 
         <div class="ingest-head">
@@ -439,6 +449,32 @@
           }).join('');
         }
 
+        // ---- Waiting (ING-36) ----
+        var waiting = [], working = null;
+        function minutesFromNow(iso) { return Math.max(0, Math.round((new Date(iso) - new Date()) / 60000)); }
+        function renderWaiting() {
+          var shown = waiting.filter(function (w) { return !working || w.Id !== working.Id; });
+          page.querySelector('#WaitingBox').hidden = !shown.length && !working;
+          page.querySelector('#WaitingCount').textContent = shown.length ? '(' + shown.length + ')' : '';
+          var items = [];
+          if (working) {
+            items.push('<li><div class="what"><strong>' + esc(working.Release) + '</strong><div class="ingest-muted">' + esc(working.WatchFolder) + '</div></div><span>' +
+              (working.Stage === 'Filing' && working.Files ? 'Filing file ' + working.File + ' of ' + working.Files + '…' : 'Identifying…') + '</span></li>');
+          }
+          shown.forEach(function (w) {
+            var state, button = '';
+            if (!w.SettlesAt) { state = 'Still downloading (in-progress files such as .part are in it)'; }
+            else if (w.ProcessNow) { state = 'Processing on the next sweep…'; }
+            else {
+              var m = minutesFromNow(w.SettlesAt);
+              state = m < 1 ? 'Settled; processing on the next sweep' : 'Settles at ' + when(w.SettlesAt) + ' (in about ' + m + ' min) if nothing changes';
+              button = '<button is="emby-button" type="button" class="raised button-alt ingest-process-now" data-id="' + esc(w.Id) + '"><span>Process now</span></button>';
+            }
+            items.push('<li><div class="what"><strong>' + esc(w.Release) + '</strong><div class="ingest-muted">' + esc(w.WatchFolder) + ' · ' + esc(state) + '</div></div>' + button + '</li>');
+          });
+          page.querySelector('#Waiting').innerHTML = items.join('');
+        }
+
         // ---- Recent activity ----
         function renderActivity() {
           page.querySelector('#ActivityFilters').innerHTML = filters.map(function (f) {
@@ -466,6 +502,9 @@
             var open = Array.prototype.map.call(page.querySelectorAll('#Activity details[open]'), function (d) { return d.closest('li').getAttribute('data-k'); });
             activity = s.Activity || [];
             reviews = s.Reviews || [];
+            waiting = s.Waiting || [];
+            working = s.Working || null;
+            renderWaiting();
             renderReviews();
             renderActivity();
             open.forEach(function (k) {
@@ -614,6 +653,14 @@
             if (document.activeElement) { document.activeElement.blur(); }
             return loadStatus();
           }, function () { Dashboard.alert('Search failed; check the Jellyfin log.'); }).then(function () { busyCard = null; Dashboard.hideLoadingMsg(); });
+        });
+
+        page.querySelector('#Waiting').addEventListener('click', function (e) {
+          var b = e.target.closest('.ingest-process-now');
+          if (!b) { return; }
+          b.disabled = true;
+          // Starts a sweep now; refresh again once it has had a moment to pick the release up
+          post('Ingest/Waiting/' + encodeURIComponent(b.getAttribute('data-id')) + '/ProcessNow').then(function () { setTimeout(loadStatus, 5000); });
         });
 
         page.querySelector('#ActivityFilters').addEventListener('click', function (e) {

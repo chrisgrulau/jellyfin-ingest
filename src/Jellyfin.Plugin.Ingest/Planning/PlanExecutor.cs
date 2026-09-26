@@ -143,6 +143,12 @@ public sealed class PlanExecutor
     }
 
     /// <summary>
+    /// Gets what is told, before each file is moved, which file it is (from 1) and how many there are, so the page can
+    /// show "filing 2 of 5" during a long copy (ING-36). Called on the executing thread; it must not throw.
+    /// </summary>
+    public Action<int, int>? Filing { get; init; }
+
+    /// <summary>
     /// Executes a plan.
     /// </summary>
     /// <param name="plan">A ready plan.</param>
@@ -205,6 +211,7 @@ public sealed class PlanExecutor
                 };
             }
 
+            Filing?.Invoke(done.Count + 1, plan.Operations.Count);
             var folder = Path.GetDirectoryName(op.Destination)!;
             var temp = Path.Combine(folder, TempPrefix + Guid.NewGuid().ToString("N") + TempSuffix);
             long size = 0;

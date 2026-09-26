@@ -180,6 +180,14 @@ public sealed record IngestState
 
     /// <summary>Gets recent activity, newest first.</summary>
     public IReadOnlyList<ActivityEntry> Activity { get; init; } = [];
+
+    /// <summary>Gets releases seen but not handled yet, soonest first (only in the Status API; never saved).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<WaitingRelease>? Waiting { get; init; }
+
+    /// <summary>Gets the release being identified or filed right now (only in the Status API; never saved).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WorkInProgress? Working { get; init; }
 }
 
 /// <summary>
