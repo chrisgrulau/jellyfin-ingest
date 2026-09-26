@@ -7,6 +7,11 @@
 <body>
   <div id="IngestConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
     <style>
+      /* Theme-aware colours (FAM-07): dark theme by default; .ingest-light is set when the theme's text is dark */
+      #IngestConfigPage { --ingest-error: #ff9aa2; --ingest-field-bg: rgba(0,0,0,.25); --ingest-option-bg: #202020; --ingest-option-fg: #eee; color-scheme: dark; }
+      #IngestConfigPage.ingest-light { --ingest-error: #b3261e; --ingest-field-bg: #fff; --ingest-option-bg: #fff; --ingest-option-fg: #111; color-scheme: light; }
+      #IngestConfigPage select option { background: var(--ingest-option-bg); color: var(--ingest-option-fg); }
+      #IngestConfigPage .ingest-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
       #IngestConfigPage .ingest-row { padding: 1em; margin: .75em 0; border-radius: 6px; border: 1px solid rgba(128,128,128,.25); }
       #IngestConfigPage .ingest-row.invalid { border-color: rgba(220,53,69,.8); }
       #IngestConfigPage .wf-top { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 1em; align-items: end; }
@@ -15,7 +20,7 @@
       #IngestConfigPage .ingest-row .inputContainer, #IngestConfigPage .ingest-row .selectContainer { margin: 0; }
       #IngestConfigPage .ingest-row .emby-button { margin: 0; }
       #IngestConfigPage .wf-hint { margin: .25em 0 0; }
-      #IngestConfigPage .wf-error { color: #ff6b76; margin: .5em 0 0; }
+      #IngestConfigPage .wf-error { color: var(--ingest-error); margin: .5em 0 0; }
       #IngestConfigPage .wf-error:empty { display: none; }
       #IngestConfigPage .ingest-banner { padding: .75em 1em; border-radius: 4px; margin: 1em 0; background: rgba(255,170,0,.15); }
       #IngestConfigPage .ingest-banner[hidden] { display: none; }
@@ -29,8 +34,7 @@
       #IngestConfigPage .ingest-reasons li { word-break: break-word; }
       #IngestConfigPage .ingest-pick { max-width: 56em; margin: .75em 0; }
       #IngestConfigPage .ingest-into { display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1em; margin-bottom: .25em; }
-      #IngestConfigPage .ingest-into select { min-width: 14em; max-width: 100%; padding: .35em .5em; background: rgba(0,0,0,.25); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
-      #IngestConfigPage .ingest-into select option { background: #202020; }
+      #IngestConfigPage .ingest-into select { min-width: 14em; max-width: 100%; padding: .35em .5em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
       #IngestConfigPage .ingest-cands { width: 100%; border-collapse: collapse; }
       #IngestConfigPage .ingest-cands td { padding: .4em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; }
       #IngestConfigPage .ingest-cands td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%; }
@@ -42,19 +46,18 @@
       #IngestConfigPage .ingest-actions { display: flex; flex-wrap: wrap; gap: .5em; margin-top: .75em; }
       #IngestConfigPage .ingest-files { margin-top: .75em; }
       #IngestConfigPage .wf-transfer { margin: .5em 0; display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1.5em; }
-      #IngestConfigPage .wf-transfer select { padding: .3em .45em; background: rgba(128,128,128,.15); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; max-width: 100%; }
+      #IngestConfigPage .wf-transfer select { padding: .3em .45em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; max-width: 100%; }
       #IngestConfigPage .ingest-files > summary { cursor: pointer; }
       #IngestConfigPage .ingest-files table { width: 100%; border-collapse: collapse; margin: .5em 0; }
       #IngestConfigPage .ingest-files td { padding: .3em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; word-break: break-word; }
       #IngestConfigPage .ingest-files td.ingest-num { white-space: nowrap; }
       #IngestConfigPage .ingest-files input[type=number] { width: 4.5em; padding: .3em .4em; background: transparent; color: inherit; border: 1px solid rgba(128,128,128,.5); border-radius: 4px; font: inherit; }
-      #IngestConfigPage .ingest-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-      #IngestConfigPage .ingest-files select { padding: .3em .4em; background: rgba(128,128,128,.15); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
+      #IngestConfigPage .ingest-files select { padding: .3em .4em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
       #IngestConfigPage .ingest-actions .emby-button { margin: 0; }
       #IngestConfigPage .ingest-chosen { padding: .5em .75em; border-radius: 4px; background: rgba(0,164,220,.15); border-left: 3px solid rgba(0,164,220,.7); margin: .5em 0; }
       #IngestConfigPage .ingest-search summary { cursor: pointer; margin-top: .75em; opacity: .85; }
       #IngestConfigPage .ingest-search form { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; margin: .5em 0; }
-      #IngestConfigPage .ingest-search input, #IngestConfigPage .ingest-search select { padding: .4em .5em; background: rgba(0,0,0,.25); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
+      #IngestConfigPage .ingest-search input, #IngestConfigPage .ingest-search select { padding: .4em .5em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
       #IngestConfigPage .ingest-search input[name=q] { flex: 1 1 14em; min-width: 0; }
       #IngestConfigPage .ingest-search input[name=y] { width: 5.5em; }
       #IngestConfigPage .ingest-search .emby-button { margin: 0; }
@@ -97,6 +100,7 @@
     <div data-role="content">
       <div class="content-primary">
         <h2 class="sectionTitle">Shoal Ingest</h2>
+        <div id="IngestStatus" class="ingest-visually-hidden" role="status" aria-live="polite"></div>
         <p>New media dropped into a watch folder is identified, renamed to Jellyfin's naming standard and moved into the chosen library with its subtitles. Anything else in the release is quarantined and deleted after the retention period. Releases that can't be identified confidently are left where they are and listed under <em>Needs review</em>.</p>
 
         <div class="ingest-banner setup" id="SetupBanner" hidden>
@@ -138,7 +142,7 @@
             <label class="inputLabel inputLabelUnfocused" for="QuarantinePath">Quarantine folder</label>
             <input id="QuarantinePath" name="QuarantinePath" type="text" is="emby-input" />
             <div class="fieldDescription">Leave empty to use a hidden <code>.ingest-quarantine</code> folder inside each watch folder (same disk, so moves are instant). It must not be, contain or sit inside a library folder; only the dated folders Ingest creates there are ever deleted.</div>
-            <div class="wf-error" id="QuarantinePathError"></div>
+            <div class="wf-error" id="QuarantinePathError" aria-live="polite"></div>
           </div>
           <div class="inputContainer">
             <label class="inputLabel inputLabelUnfocused" for="QuarantineRetentionDays">Keep quarantined items for (days)</label>
@@ -190,6 +194,20 @@
         var libraries = [];
         var config = { WatchFolders: [] };
         var rowCount = 0;
+
+        // Status messages for screen readers (FAM-07)
+        function announce(text) {
+          var box = page.querySelector('#IngestStatus');
+          box.textContent = '';
+          setTimeout(function () { box.textContent = text; }, 50);
+        }
+
+        // Light or dark theme: dark text on the page means a light theme (FAM-07)
+        function syncTheme() {
+          var m = (getComputedStyle(page).color || '').match(/\d+(\.\d+)?/g);
+          var light = !!m && (0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2]) < 128;
+          page.classList.toggle('ingest-light', light);
+        }
 
         function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
@@ -275,15 +293,15 @@
             '<input is="emby-input" type="text" id="wf-path-' + n + '" class="wf-path" value="' + esc(w.Path) + '" placeholder="/media/incoming" /></div>' +
             '<label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" id="wf-on-' + n + '" class="wf-on"' + (w.Enabled ? ' checked' : '') + ' /><span>On</span></label>' +
             '<button is="emby-button" type="button" class="raised button-cancel wf-remove"><span>Remove folder</span></button></div>' +
-            '<div class="wf-transfer"><label>Files are <select class="wf-mode">' +
+            '<div class="wf-transfer"><label for="wf-mode-' + n + '">Files are</label> <select id="wf-mode-' + n + '" class="wf-mode">' +
             '<option value="Move"' + (!w.Transfer || w.Transfer === 'Move' ? ' selected' : '') + '>moved (Usenet, or downloads nothing else needs)</option>' +
             '<option value="HardLink"' + (w.Transfer === 'HardLink' ? ' selected' : '') + '>hard-linked (torrents keep seeding; no extra space, same drive)</option>' +
             '<option value="Copy"' + (w.Transfer === 'Copy' ? ' selected' : '') + '>copied (torrents keep seeding; uses the space twice)</option>' +
-            '</select></label>' +
+            '</select>' +
             '<label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" id="wf-dry-' + n + '" class="wf-dry"' + (dry ? ' checked' : '') + ' /><span>Dry run (record only, move nothing)</span></label></div>' +
             '<div class="wf-dests"></div>' +
             '<button is="emby-button" type="button" class="raised button-alt wf-add-dest"><span>Add destination</span></button>' +
-            '<p class="ingest-muted wf-hint"></p><p class="wf-error"></p>';
+            '<p class="ingest-muted wf-hint"></p><p class="wf-error" aria-live="polite"></p>';
           row.querySelector('.wf-remove').addEventListener('click', function () { row.remove(); syncBanner(); });
           row.querySelector('.wf-dry').addEventListener('change', syncBanner);
           row.querySelector('.wf-on').addEventListener('change', syncBanner);
@@ -428,10 +446,11 @@
           var more = cands.length > SHOWN && !expanded[key]
             ? '<button type="button" class="ingest-more" data-key="' + esc(key) + '">Show ' + (cands.length - SHOWN) + ' more</button>' : '';
           var videos = videoCount(r);
+          var libId = 'ingest-lib-' + r.Id + '-' + list;
           var warn = videos > 1 ? '<div class="ingest-muted">“Use this” files all ' + videos + ' waiting videos as this title. To set one aside, use <em>Choose file by file</em> below.</div>' : '';
           return '<div class="ingest-pick" data-list="' + list + '">' +
             '<div class="ingest-into"><strong>' + (list === 'suggested' ? 'Possible matches' : 'Search results') + '</strong>' +
-            '<label>File into <select class="ingest-lib" data-key="' + esc(key) + '">' + (opts || '<option value="">No ' + (isTv ? 'TV' : 'film') + ' library</option>') + '</select></label></div>' +
+            '<label for="' + esc(libId) + '">File into</label> <select id="' + esc(libId) + '" class="ingest-lib" data-key="' + esc(key) + '">' + (opts || '<option value="">No ' + (isTv ? 'TV' : 'film') + ' library</option>') + '</select></div>' +
             warn + '<table class="ingest-cands"><tbody>' + rows + '</tbody></table>' + more + '</div>';
         }
 
@@ -463,9 +482,9 @@
             else if (sr) { html += '<p class="ingest-muted">No results for “' + esc(sr.q) + '”.</p>'; }
             var guessTv = (r.Candidates || []).length ? !!r.Candidates[0].Candidate.IsSeries : !!(libById(defaultLibrary(r.WatchFolder, true)) && !defaultLibrary(r.WatchFolder, false));
             html += '<details class="ingest-search"' + (sr || !(r.Candidates || []).length ? ' open' : '') + '><summary>Search for a different title</summary>' +
-              '<form><input name="q" type="text" placeholder="Title" value="' + esc(sr ? sr.q : '') + '" required />' +
-              '<input name="y" type="number" min="1880" max="2100" placeholder="Year" value="' + esc(sr ? sr.y : '') + '" />' +
-              '<select name="k"><option value="film"' + ((sr ? sr.k === 'film' : !guessTv) ? ' selected' : '') + '>Film</option><option value="tv"' + ((sr ? sr.k === 'tv' : guessTv) ? ' selected' : '') + '>Show</option></select>' +
+              '<form><label class="ingest-visually-hidden" for="ingest-q-' + esc(r.Id) + '">Title to search for</label><input id="ingest-q-' + esc(r.Id) + '" name="q" type="text" placeholder="Title" value="' + esc(sr ? sr.q : '') + '" required />' +
+              '<label class="ingest-visually-hidden" for="ingest-y-' + esc(r.Id) + '">Year (optional)</label><input id="ingest-y-' + esc(r.Id) + '" name="y" type="number" min="1880" max="2100" placeholder="Year" value="' + esc(sr ? sr.y : '') + '" />' +
+              '<label class="ingest-visually-hidden" for="ingest-k-' + esc(r.Id) + '">Film or show</label><select id="ingest-k-' + esc(r.Id) + '" name="k"><option value="film"' + ((sr ? sr.k === 'film' : !guessTv) ? ' selected' : '') + '>Film</option><option value="tv"' + ((sr ? sr.k === 'tv' : guessTv) ? ' selected' : '') + '>Show</option></select>' +
               '<button is="emby-button" type="submit" class="raised button-alt"><span>Search</span></button></form></details>';
             html += '<div class="ingest-actions">' +
               '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>' + (r.Chosen ? 'Clear choice and retry' : 'Retry') + '</span></button>' +
@@ -588,7 +607,9 @@
         function failed(xhr) {
           var p = xhr && xhr.text ? xhr.text() : Promise.resolve('');
           return p.then(function (t) {
-            Dashboard.alert(t && t.length < 300 ? t.replace(/^"|"$/g, '') : 'That review has changed or gone; refreshing.');
+            var msg = t && t.length < 300 ? t.replace(/^"|"$/g, '') : 'That review has changed or gone; refreshing.';
+            announce(msg);
+            Dashboard.alert(msg);
             return loadStatus();
           }, loadStatus);
         }
@@ -596,7 +617,7 @@
         function post(path, body) {
           var req = { type: 'POST', url: ApiClient.getUrl(path) };
           if (body) { req.data = JSON.stringify(body); req.contentType = 'application/json'; }
-          return ApiClient.ajax(req).then(loadStatus, failed);
+          return ApiClient.ajax(req).then(function () { announce('Done. The page is being refreshed.'); return loadStatus(); }, failed);
         }
 
         // Same as ReviewChoice.KeyOf on the server: name|year|provider ids sorted by name
@@ -696,6 +717,7 @@
           Dashboard.showLoadingMsg();
           ApiClient.getJSON(ApiClient.getUrl('Ingest/Search', params)).then(function () {
             searchResults[id] = { q: q, y: f.y.value, k: f.k.value };
+            announce('Search finished for ' + q + '.');
             if (document.activeElement) { document.activeElement.blur(); }
             return loadStatus();
           }, function () { Dashboard.alert('Search failed; check the Jellyfin log.'); }).then(function () { busyCard = null; Dashboard.hideLoadingMsg(); });
@@ -719,6 +741,7 @@
 
         // ---- load / save ----
         page.addEventListener('pageshow', function () {
+          syncTheme();
           Dashboard.showLoadingMsg();
           Promise.all([ApiClient.getVirtualFolders(), ApiClient.getPluginConfiguration(pluginId)]).then(function (res) {
             libraries = res[0] || [];
@@ -837,6 +860,7 @@
             config = current;
             return ApiClient.updatePluginConfiguration(pluginId, current).then(function (r) {
               Dashboard.processPluginConfigurationUpdateResult(r);
+              announce('Settings saved.');
               syncBanner();
               renderReviews();
             });

@@ -29,6 +29,15 @@ All notable changes to this project are documented here. The format follows
   - Upgrading changes nothing: each saved folder takes the old global setting when the plugin loads.
   - The banner says how many watch folders are in dry run.
 
+### Fixed
+
+- **FAM-07 (Ingest page): Light theme and accessibility.**
+  - The "File into" choices and the page's other drop-downs were dark text on a dark background in the Light theme.
+    Field, option and error colours now follow the theme.
+  - Labels in generated rows are linked to their fields, and the title, year and kind fields of a review search have
+    labels for screen readers.
+  - Results of actions (a decision sent, a search finished, settings saved, an error) are announced to screen readers.
+
 ## [0.7.0-alpha] - 2026-09-26
 
 ### Added
