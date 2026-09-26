@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0-alpha] - 2026-09-26
+
 ### Added
 
 - **ING-30: Replace existing copies** in review. A release held back only because its episodes or films are already

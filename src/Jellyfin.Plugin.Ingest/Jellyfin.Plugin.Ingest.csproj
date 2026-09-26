@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <RootNamespace>Jellyfin.Plugin.Ingest</RootNamespace>
-    <AssemblyVersion>0.3.0.0</AssemblyVersion>
-    <FileVersion>0.3.0.0</FileVersion>
+    <AssemblyVersion>0.4.0.0</AssemblyVersion>
+    <FileVersion>0.4.0.0</FileVersion>
     <!-- The shared source is compiled in whole but Ingest uses only part of it (the AI entry point client); its own
          .editorconfig stops per-folder rules, so the "internal class never instantiated" check is off for this project -->
     <NoWarn>$(NoWarn);CA1812</NoWarn>
