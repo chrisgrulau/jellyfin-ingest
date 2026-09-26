@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0-alpha] - 2026-09-26
+
 ### Changed
 
 - **FAM-06: Shared JSON file store.** The state file and the search cache are read and written through common's
