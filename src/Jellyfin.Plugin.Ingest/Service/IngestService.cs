@@ -495,7 +495,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
         try
         {
-            var results = new PlanExecutor(new PhysicalFileOperations(), _clock).Recover([.. File.ReadLines(log)], log);
+            // Only inside today's library and quarantine folders
+            var config = IngestPlugin.Instance?.Configuration ?? new PluginConfiguration();
+            var roots = Libraries(_libraryManager.GetVirtualFolders()).SelectMany(l => l.Locations)
+                .Concat(config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path)).Select(w => QuarantineFor(config, w)))
+                .ToList();
+            var results = new PlanExecutor(new PhysicalFileOperations(), _clock).Recover([.. File.ReadLines(log)], log, roots);
             foreach (var result in results)
             {
                 LogRecovery(_logger, result);
@@ -552,12 +557,24 @@ public sealed partial class IngestService : IHostedService, IDisposable
             .ToList();
         try
         {
+            IReadOnlySet<string>? logged = null;
             foreach (var (root, dated) in QuarantineMarkers.FromActionLog(File.ReadLines(log), roots))
             {
-                if (Directory.Exists(dated) && !QuarantineMarkers.IsMarked(dated))
+                if (!Directory.Exists(dated) || QuarantineMarkers.IsMarked(dated))
                 {
-                    QuarantineMarkers.Mark(root, dated);
+                    continue;
+                }
+
+                // Only a folder holding nothing but files Ingest logged moving there: marking it lets the purge delete it
+                logged ??= QuarantineMarkers.QuarantinedFiles(File.ReadLines(log));
+                if (QuarantineMarkers.HoldsOnlyLoggedFiles(dated, logged))
+                {
+                    File.WriteAllText(Path.Combine(dated, QuarantineMarkers.DatedMarker), "Created by the Jellyfin Ingest plugin (marked from its action log).\n");
                     LogMarkedQuarantine(_logger, dated);
+                }
+                else
+                {
+                    LogNotMarkedQuarantine(_logger, dated);
                 }
             }
         }
@@ -832,53 +849,65 @@ public sealed partial class IngestService : IHostedService, IDisposable
         seenVersion);
     }
 
+    // A whole release quarantined from the review screen goes through the same crash-safe executor as filing: hidden
+    // temporary name then rename, write-ahead action log, rollback on failure, best-effort tidy-up
     private void QuarantineRelease(PluginConfiguration config, WatchFolder watch, PendingReview review, IReadOnlyList<ReleaseFile> files, string quarantine)
     {
-        var dated = Path.Combine(quarantine, _clock.GetLocalNow().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        var dated = QuarantineMarkers.DatedFolderFor(quarantine, DateOnly.FromDateTime(_clock.GetLocalNow().DateTime));
         var fs = new PhysicalFileOperations();
-        var moved = new List<string>();
-        string? error = null;
-        if (!config.DryRun)
+        var taken = new HashSet<string>(PathGuard.Comparer);
+        var ops = new List<PlannedOperation>();
+        foreach (var file in files)
         {
-            QuarantineMarkers.Mark(quarantine, dated);
-            foreach (var file in files)
+            var source = Path.Combine(watch.Path, file.RelativePath);
+            var destination = Path.Combine(dated, file.RelativePath);
+            for (var n = 2; fs.Exists(destination) || taken.Contains(destination); n++)
             {
-                var destination = Path.Combine(dated, file.RelativePath);
-                for (var n = 2; fs.Exists(destination); n++)
-                {
-                    destination = Path.Combine(dated, string.Create(CultureInfo.InvariantCulture, $"{file.RelativePath} ({n})"));
-                }
-
-                if (!PathGuard.IsUnder(destination, dated) || !PathGuard.IsUnder(Path.Combine(watch.Path, file.RelativePath), watch.Path))
-                {
-                    error = "Refused: a file would leave the watch folder or the quarantine folder.";
-                    break;
-                }
-
-                try
-                {
-                    fs.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    fs.Move(Path.Combine(watch.Path, file.RelativePath), destination);
-                    moved.Add($"{file.RelativePath} → {destination}");
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    error = ex.Message;
-                    break;
-                }
+                destination = Path.Combine(dated, string.Create(CultureInfo.InvariantCulture, $"{file.RelativePath} ({n})"));
             }
 
-            var root = Path.Combine(watch.Path, review.Release);
-            if (error is null && Directory.Exists(root))
+            if (!PathGuard.IsUnder(destination, dated) || !PathGuard.IsUnder(source, watch.Path))
             {
-                fs.DeleteEmptyDirectories(root);
+                ReportFailure(watch, review.Release, "Refused: a file would leave the watch folder or the quarantine folder.", [], review.RequestVersion);
+                return;
             }
+
+            taken.Add(destination);
+            ops.Add(new PlannedOperation(OperationKind.Quarantine, source, destination));
         }
 
-        if (error is not null)
+        var plan = new IngestPlan { ReleaseName = review.Release, Operations = ops, AllowedRoots = [dated], WholeReleaseQuarantine = true };
+        ExecutionReport report;
+        try
         {
+            if (!config.DryRun)
+            {
+                QuarantineMarkers.Mark(quarantine, dated);
+            }
+
+            var dataFolder = IngestPlugin.Instance?.DataFolderPath ?? throw new InvalidOperationException("The plugin isn't loaded.");
+            report = new PlanExecutor(fs, _clock).Execute(plan, Path.Combine(watch.Path, review.Release), Path.Combine(dataFolder, "actions.jsonl"), config.DryRun);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            LogExecutionFailed(_logger, review.Release, ex.Message);
+            ReportFailure(watch, review.Release, "Quarantine failed: " + ex.Message, [], review.RequestVersion);
+            return;
+        }
+
+        if (report.Warning is not null)
+        {
+            LogTidyWarning(_logger, review.Release, report.Warning);
+        }
+
+        if (!report.Succeeded)
+        {
+            var error = report.Error ?? "unknown error";
             LogExecutionFailed(_logger, review.Release, error);
-            ReportFailure(watch, review.Release, $"Quarantine stopped after {moved.Count} of {files.Count} files: {error}", [], review.RequestVersion);
+            var summary = report.RollbackProblems.Count == 0
+                ? string.Create(CultureInfo.InvariantCulture, $"Nothing was quarantined: {error} ({report.RolledBack.Count} completed move(s) were undone.)")
+                : string.Create(CultureInfo.InvariantCulture, $"Quarantine failed and couldn't be fully undone: {error}. Needs attention: {string.Join("; ", report.RollbackProblems)}");
+            ReportFailure(watch, review.Release, summary, report.Completed, review.RequestVersion);
             return;
         }
 
@@ -891,7 +920,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
             Summary = string.Create(
                 CultureInfo.InvariantCulture,
                 $"{(config.DryRun ? "Would quarantine" : "Quarantined")} the whole release ({files.Count} file{(files.Count == 1 ? string.Empty : "s")}) to {dated}."),
-            Details = moved,
+            Details = Describe(watch.Path, report.Completed),
         });
         if (config.DryRun)
         {
@@ -918,6 +947,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
             return null;
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest quarantine: {Path} holds files Ingest didn't put there, so it isn't marked and will never be purged")]
+    private static partial void LogNotMarkedQuarantine(ILogger logger, string path);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest: the last {Count} title searches found nothing; pausing identification for {Minutes} minutes")]
     private static partial void LogProvidersPaused(ILogger logger, int count, double minutes);

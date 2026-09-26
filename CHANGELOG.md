@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **ING-18:** Ingest never quarantines into, marks or purges a date-named folder it didn't create.
+  - If a custom quarantine already holds a folder named for today that isn't Ingest's (daily backups, camera imports),
+    Ingest uses `yyyy-MM-dd (Ingest)` beside it.
+  - Folders from before markers existed are marked only if every file in them is one the action log says Ingest put
+    there.
+- **ING-22:** **Quarantine release** on the review screen now goes through the same crash-safe mover as filing:
+  - each file moves through a hidden temporary name and is recorded in the action log;
+  - a failure part-way moves everything back;
+  - a tidy-up problem after every file has moved is only a warning.
+- **ING-23:** recovery after a crash only acts on files that carry Ingest's own temporary name, sit beside their
+  destination, and are inside a current library or quarantine folder. Anything else is reported as needing attention.
+
 ## [0.1.7-alpha] - 2026-09-25
 
 ### Added

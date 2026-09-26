@@ -22,17 +22,69 @@ public static class QuarantineMarkers
 
     private const string MarkerText = "Created by the Jellyfin Ingest plugin. Folders marked like this are deleted after the quarantine retention period.\n";
 
+    /// <summary>The suffix of a dated folder Ingest created beside a same-dated folder that isn't its own.</summary>
+    private const string OwnSuffix = " (Ingest";
+
     /// <summary>
-    /// Creates a dated folder (if needed) and marks it, and the quarantine folder, as Ingest's own. Done before anything
-    /// is moved in, so a folder that holds quarantined files is always marked.
+    /// The dated folder to quarantine into on a day: <c>yyyy-MM-dd</c>, unless a folder of that name exists that Ingest
+    /// didn't create (a custom quarantine can hold date-named folders from other tools), in which case
+    /// <c>yyyy-MM-dd (Ingest)</c>, <c>yyyy-MM-dd (Ingest 2)</c> … so a folder that isn't Ingest's is never used or purged.
+    /// </summary>
+    /// <param name="quarantineRoot">The quarantine folder.</param>
+    /// <param name="day">The day.</param>
+    /// <returns>The dated folder's path.</returns>
+    public static string DatedFolderFor(string quarantineRoot, DateOnly day)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(quarantineRoot);
+        var name = day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        for (var n = 1; ; n++)
+        {
+            var candidate = Path.Combine(quarantineRoot, n == 1 ? name : n == 2 ? name + OwnSuffix + ")" : string.Create(CultureInfo.InvariantCulture, $"{name}{OwnSuffix} {n - 1})"));
+            if (!Directory.Exists(candidate) || IsMarked(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The date of a dated folder's name (<c>yyyy-MM-dd</c>, optionally followed by Ingest's own suffix).
+    /// </summary>
+    /// <param name="name">The folder name.</param>
+    /// <returns>The date, or <c>null</c> if the name isn't a dated folder's.</returns>
+    public static DateOnly? DateOf(string? name)
+    {
+        if (name is null || name.Length < 10
+            || !DateOnly.TryParseExact(name.AsSpan(0, 10), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+        {
+            return null;
+        }
+
+        var rest = name[10..];
+        return rest.Length == 0 || (rest.StartsWith(OwnSuffix, StringComparison.Ordinal) && rest.EndsWith(')')
+            && (rest.Length == OwnSuffix.Length + 1 || int.TryParse(rest.AsSpan(OwnSuffix.Length + 1, rest.Length - OwnSuffix.Length - 2), NumberStyles.None, CultureInfo.InvariantCulture, out _)))
+            ? d
+            : null;
+    }
+
+    /// <summary>
+    /// Creates a dated folder and marks it, and the quarantine folder, as Ingest's own. Done before anything is moved in,
+    /// so a folder that holds quarantined files is always marked. A folder that already exists without the marker isn't
+    /// Ingest's and is refused (see <see cref="DatedFolderFor"/>).
     /// </summary>
     /// <param name="quarantineRoot">The quarantine folder.</param>
     /// <param name="datedFolder">The dated folder inside it.</param>
+    /// <exception cref="IOException">The folder exists and isn't Ingest's.</exception>
     public static void Mark(string quarantineRoot, string datedFolder)
     {
         if (!PathGuard.IsUnder(datedFolder, quarantineRoot))
         {
             throw new ArgumentException("The dated folder must be inside the quarantine folder.", nameof(datedFolder));
+        }
+
+        if (Directory.Exists(datedFolder) && !IsMarked(datedFolder))
+        {
+            throw new IOException("Refused: " + datedFolder + " wasn't created by Ingest, so nothing is quarantined into it.");
         }
 
         Directory.CreateDirectory(datedFolder);
@@ -87,7 +139,7 @@ public static class QuarantineMarkers
                 }
 
                 var first = Path.GetRelativePath(PathGuard.Normalise(root), PathGuard.Normalise(destination)).Split(Path.DirectorySeparatorChar)[0];
-                if (DateOnly.TryParseExact(first, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+                if (DateOf(first) is not null)
                 {
                     found.Add((PathGuard.Normalise(root), Path.Combine(PathGuard.Normalise(root), first)));
                 }
@@ -95,6 +147,49 @@ public static class QuarantineMarkers
         }
 
         return [.. found.OrderBy(f => f.Item2, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Whether every file in an unmarked dated folder is one the action log says Ingest quarantined there, so marking it
+    /// (for folders from before markers existed) can never let the purge delete someone else's files.
+    /// </summary>
+    /// <param name="datedFolder">The folder.</param>
+    /// <param name="quarantinedFiles">Every quarantine destination in the action log.</param>
+    /// <returns><c>true</c> if nothing in it is unaccounted for.</returns>
+    public static bool HoldsOnlyLoggedFiles(string datedFolder, IReadOnlySet<string> quarantinedFiles)
+    {
+        ArgumentNullException.ThrowIfNull(quarantinedFiles);
+        var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = false, AttributesToSkip = 0 };
+        return Directory.EnumerateFiles(datedFolder, "*", options).All(f => quarantinedFiles.Contains(PathGuard.Normalise(f)));
+    }
+
+    /// <summary>
+    /// Every quarantine destination in the action log.
+    /// </summary>
+    /// <param name="actionLogLines">Lines of <c>actions.jsonl</c>.</param>
+    /// <returns>The destinations, normalised.</returns>
+    public static IReadOnlySet<string> QuarantinedFiles(IEnumerable<string> actionLogLines)
+    {
+        ArgumentNullException.ThrowIfNull(actionLogLines);
+        var files = new HashSet<string>(PathGuard.Comparer);
+        foreach (var line in actionLogLines)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                if (doc.RootElement.TryGetProperty("kind", out var k) && k.GetString() == "Quarantine"
+                    && doc.RootElement.TryGetProperty("destination", out var d) && d.GetString() is { Length: > 0 } destination)
+                {
+                    files.Add(PathGuard.Normalise(destination));
+                }
+            }
+            catch (JsonException)
+            {
+                // Unreadable lines account for nothing
+            }
+        }
+
+        return files;
     }
 
     private static void WriteIfMissing(string path)
