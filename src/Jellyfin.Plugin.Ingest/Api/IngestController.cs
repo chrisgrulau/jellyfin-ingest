@@ -36,6 +36,7 @@ public class IngestController : ControllerBase
     private readonly IProviderManager _providerManager;
     private readonly IApplicationPaths _paths;
     private readonly IConfigurationManager _configuration;
+    private readonly IngestPaths _ingestPaths;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IngestController"/> class.
@@ -46,8 +47,10 @@ public class IngestController : ControllerBase
     /// <param name="providerManager">Jellyfin provider manager.</param>
     /// <param name="paths">Jellyfin's own folders (never usable as watch or quarantine folders).</param>
     /// <param name="configuration">Jellyfin's configuration (for the transcode folder).</param>
-    public IngestController(IngestStateStore state, IngestProgress progress, ILibraryManager libraryManager, IProviderManager providerManager, IApplicationPaths paths, IConfigurationManager configuration)
+    /// <param name="ingestPaths">Where Ingest keeps its own files (the action log).</param>
+    public IngestController(IngestStateStore state, IngestProgress progress, ILibraryManager libraryManager, IProviderManager providerManager, IApplicationPaths paths, IConfigurationManager configuration, IngestPaths ingestPaths)
     {
+        _ingestPaths = ingestPaths ?? throw new ArgumentNullException(nameof(ingestPaths));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _state = state ?? throw new ArgumentNullException(nameof(state));
@@ -72,7 +75,38 @@ public class IngestController : ControllerBase
             Activity = [.. s.Activity.Take(Math.Clamp(limit, 1, IngestStateStore.MaxActivity))],
             Waiting = _progress.Waiting(),
             Working = _progress.Working,
+            Queued = _progress.Queued(),
         };
+    }
+
+    /// <summary>
+    /// Undoes a filing from Recent activity on the next sweep (which starts now): its files go back to where they came
+    /// from (for a copy or hard-link watch folder, the library copies are deleted instead), copies it replaced return
+    /// to the library, and the release then waits for review. It is checked now and again when it runs; nothing is done
+    /// if any file has changed or gone since it was filed, or a place it goes back to is taken.
+    /// </summary>
+    /// <param name="run">The filing's run (<see cref="ActivityEntry.Run"/>).</param>
+    /// <returns>Accepted, or why it can't be undone.</returns>
+    [HttpPost("Activity/{run}/Undo")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult Undo([FromRoute] string run)
+    {
+        var filing = _state.FindFiling(run);
+        if (filing is null)
+        {
+            return NotFound("That filing isn't in Recent activity any more.");
+        }
+
+        var refusal = new ReleaseUndo(_state, new PhysicalFileOperations(), TimeProvider.System).Check(run, ReturnScope(), ActionLogLines());
+        if (refusal is not null)
+        {
+            return Conflict(refusal);
+        }
+
+        _progress.Queue(new QueuedAction { Kind = QueuedActionKind.Undo, Run = run });
+        return Accepted();
     }
 
     /// <summary>
@@ -396,6 +430,30 @@ public class IngestController : ControllerBase
         var numbered = episodes.Values.Count(n => n is not null);
         RecordDecision(review, string.Create(CultureInfo.InvariantCulture, $"Chose file by file: {replace} to replace what's on the server, {quarantine} to quarantine, {numbered} given a season and episode."));
         return NoContent();
+    }
+
+    private ReturnScope ReturnScope()
+    {
+        var config = IngestPlugin.Instance?.Configuration;
+        if (config is null)
+        {
+            return new ReturnScope([], [], []);
+        }
+
+        var libraries = FolderPolicy.Libraries(_libraryManager.GetVirtualFolders());
+        return FolderPolicy.ReturnScopeOf(config, libraries, FolderPolicy.FolderProblems(config, libraries, _paths, _configuration));
+    }
+
+    private string[] ActionLogLines()
+    {
+        try
+        {
+            return System.IO.File.Exists(_ingestPaths.ActionLog) ? System.IO.File.ReadAllLines(_ingestPaths.ActionLog) : [];
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 
     /// <summary>

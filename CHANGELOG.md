@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **FEAT-01: Undo a filed release** from *Recent activity* (**Undo**, then confirm), for filings made from this
+  version on and while the action log still holds them (90 days). The undo is carried out by the next sweep, which
+  starts straight away, through the same crash-safe executor as filing (hidden temporary names, size checks, a
+  write-ahead log, rollback on failure):
+  - filed files go back to where they were in the watch folder, clutter comes back out of quarantine, and copies the
+    filing replaced go back into the library; folders the filing created are removed if left empty;
+  - for a copy or hard-link watch folder the library copies are deleted instead, after checking the originals are
+    still there at the same size (each is first set aside under a hidden name, so a failure can still put it back);
+  - all or nothing: it is refused, with the reason, if any file has changed (size or modified time) or gone since
+    filing, or a place it would go back to is taken, or the watch folder is no longer set up;
+  - the release then waits under *Needs review* ("Undone by an administrator — choose what to do") and is not filed
+    again by itself; a copied release's "already filed" record is cleared so the review sees it;
+  - the filing shows **Undone**, and the undo is recorded in *Recent activity*, Jellyfin's Activity log and the action
+    log. API: `POST Ingest/Activity/{run}/Undo` (409 with the reason when it can't be undone).
+
+  Each action-log line now also records its run, the destination's modified time and whether the source was kept.
+
 ## [0.10.0-alpha] - 2026-09-27
 
 ### Fixed

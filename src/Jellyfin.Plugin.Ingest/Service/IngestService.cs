@@ -182,6 +182,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var problems = FolderPolicy.FolderProblems(config, libraries, _paths, _configuration);
         _maintenance.RunDue(config, libraries, problems);
 
+        // Undos asked for on the page, between releases so they never race a filing or a scan
+        RunQueued(config, libraries, problems);
+
         // Reviews of a watch folder that has been removed from the settings can never be acted on
         _state.PruneWatchFolders([.. config.WatchFolders.Select(w => w.Path)]);
         _progress.KeepOnly([.. config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)).Select(w => w.Path)]);
@@ -302,7 +305,10 @@ public sealed partial class IngestService : IHostedService, IDisposable
             {
                 try
                 {
-                    _quarantineRelease.Run(config, watch, review, releaseFiles, quarantine);
+                    lock (_progress.FileGate)
+                    {
+                        _quarantineRelease.Run(config, watch, review, releaseFiles, quarantine);
+                    }
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -332,6 +338,13 @@ public sealed partial class IngestService : IHostedService, IDisposable
             // Providers look down: leave the release unhandled so it is planned once the pause ends
             if (_breaker.IsPaused)
             {
+                continue;
+            }
+
+            // Undone or restored by an administrator: it waits for a decision, however confidently it could be filed
+            if (IsHeld(_state.GetReview(IngestStateStore.ReviewId(watch.Path, release))))
+            {
+                tracker.MarkHandled(release);
                 continue;
             }
 
@@ -499,18 +512,23 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
         _retries.Clear(id);
 
-        // Mark the dated quarantine folder as Ingest's own before anything is moved into it (the purge only deletes marked folders)
-        if (!dryRun)
+        var working = new WorkInProgress { Id = id, WatchFolder = watch.Path, Release = release, Stage = "Filing", Since = _clock.GetUtcNow() };
+        ExecutionReport report;
+        lock (_progress.FileGate)
         {
-            foreach (var dated in plan.Operations.Where(o => o.Kind == OperationKind.Quarantine).Select(o => QuarantineMarkers.DatedFolderOf(quarantine, o.Destination)).OfType<string>().Distinct(StringComparer.Ordinal))
+            // Mark the dated quarantine folder as Ingest's own before anything is moved into it (the purge only deletes marked folders)
+            if (!dryRun)
             {
-                QuarantineMarkers.Mark(quarantine, dated);
+                foreach (var dated in plan.Operations.Where(o => o.Kind == OperationKind.Quarantine).Select(o => QuarantineMarkers.DatedFolderOf(quarantine, o.Destination)).OfType<string>().Distinct(StringComparer.Ordinal))
+                {
+                    QuarantineMarkers.Mark(quarantine, dated);
+                }
             }
+
+            report = new PlanExecutor(new PhysicalFileOperations(), _clock) { Filing = (file, count) => _progress.SetWorking(working with { File = file, Files = count }) }
+                .Execute(plan, Path.Combine(watch.Path, release), _ingestPaths.ActionLog, dryRun, ct);
         }
 
-        var working = new WorkInProgress { Id = id, WatchFolder = watch.Path, Release = release, Stage = "Filing", Since = _clock.GetUtcNow() };
-        var report = new PlanExecutor(new PhysicalFileOperations(), _clock) { Filing = (file, count) => _progress.SetWorking(working with { File = file, Files = count }) }
-            .Execute(plan, Path.Combine(watch.Path, release), _ingestPaths.ActionLog, dryRun, ct);
         var prefix = dryRun ? "[dry run] would" : "Did";
         // Per-file detail (paths can hold user and share names) only at Debug; one line per release at Information
         if (_logger.IsEnabled(LogLevel.Debug))
@@ -541,7 +559,8 @@ public sealed partial class IngestService : IHostedService, IDisposable
             return;
         }
 
-        _state.RecordUnlessRepeat(_activity.Filed(watch.Path, release, plan, report.Completed, summaryLine, dryRun));
+        // A real filing carries its run, so it can be undone from Recent activity
+        _state.RecordUnlessRepeat(_activity.Filed(watch.Path, release, plan, report.Completed, summaryLine, dryRun) with { Run = dryRun ? null : report.Run });
 
         // A release filed by copy or hard link stays in the watch folder: remember it so it isn't filed again
         if (!dryRun && watch.Transfer != TransferMode.Move)
@@ -570,6 +589,51 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
     }
 
+    // Carries out the undos asked for on the page (each checked again now), and refreshes what changed
+    private void RunQueued(PluginConfiguration config, IReadOnlyList<MediaLibrary> libraries, IReadOnlyList<FolderProblem> problems)
+    {
+        var queued = _progress.Queued();
+        if (queued.Count == 0)
+        {
+            return;
+        }
+
+        var scope = FolderPolicy.ReturnScopeOf(config, libraries, problems);
+        var fs = new PhysicalFileOperations();
+        foreach (var action in queued)
+        {
+            try
+            {
+                Directory.CreateDirectory(_ingestPaths.DataFolder);
+                var lines = File.Exists(_ingestPaths.ActionLog) ? File.ReadAllLines(_ingestPaths.ActionLog) : [];
+                ReturnOutcome outcome;
+                lock (_progress.FileGate)
+                {
+                    outcome = new ReleaseUndo(_state, fs, _clock).Undo(action.Run ?? string.Empty, scope, lines, _ingestPaths.ActionLog);
+                }
+
+                LogReturned(_logger, action.Kind, outcome.Succeeded ? "carried out" : "not carried out (see Recent activity)");
+                LogReturnedDetail(_logger, action.Kind, outcome.Message);
+                if (outcome.Succeeded && config.ScanLibraryAfterIngest)
+                {
+                    foreach (var folder in outcome.Refresh)
+                    {
+                        _libraryMonitor.ReportFileSystemChanged(folder);
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                LogReturnFailed(_logger, action.Kind, ex);
+                _state.Record(new ActivityEntry { Time = _clock.GetUtcNow(), Status = ActivityStatus.Failed, Release = action.Run ?? string.Empty, Summary = "The undo couldn't be carried out: " + ex.Message });
+            }
+            finally
+            {
+                _progress.Complete(action);
+            }
+        }
+    }
+
     // The files in a folder (for the subtitle files of a copy being replaced); an unreadable folder has none
     private static List<string> FilesIn(string folder)
     {
@@ -582,6 +646,14 @@ public sealed partial class IngestService : IHostedService, IDisposable
             return [];
         }
     }
+
+    /// <summary>
+    /// Whether a release is held for a person (undone or restored by an administrator) and so isn't planned by the
+    /// sweep: until someone chooses, retries, decides file by file or asks for quarantine.
+    /// </summary>
+    /// <param name="review">The release's review, if any.</param>
+    /// <returns><c>true</c> to leave it alone.</returns>
+    public static bool IsHeld(PendingReview? review) => review is { Held: true, Request: ReviewRequest.None };
 
     /// <summary>
     /// The film and show folders a plan files into (not the quarantine), for refreshing just those.
@@ -632,6 +704,15 @@ public sealed partial class IngestService : IHostedService, IDisposable
             return null;
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Ingest {Kind}: {Result}")]
+    private static partial void LogReturned(ILogger logger, QueuedActionKind kind, string result);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Ingest {Kind}: {Message}")]
+    private static partial void LogReturnedDetail(ILogger logger, QueuedActionKind kind, string message);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Ingest {Kind} failed")]
+    private static partial void LogReturnFailed(ILogger logger, QueuedActionKind kind, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Ingest watch folder {Path}: settings changed, planning waiting releases again")]
     private static partial void LogReplanning(ILogger logger, string path);

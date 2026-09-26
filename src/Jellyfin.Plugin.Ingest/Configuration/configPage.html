@@ -77,6 +77,8 @@
       #IngestConfigPage .badge.Decision { background: rgba(150,110,220,.28); }
       #IngestConfigPage .badge.Failed { background: rgba(220,53,69,.30); }
       #IngestConfigPage .badge.Quarantined, #IngestConfigPage .badge.Purged { background: rgba(128,128,128,.30); }
+      #IngestConfigPage .badge.Undone { background: rgba(150,110,220,.28); }
+      #IngestConfigPage .ingest-activity .ingest-undo { margin: .4em 0 0; }
       #IngestConfigPage .ingest-q { padding: .75em 1em; margin: .75em 0; border-radius: 6px; background: rgba(128,128,128,.10); }
       #IngestConfigPage .ingest-q h4 { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .25em 1em; }
       #IngestConfigPage .ingest-q details { margin: .4em 0 0; }
@@ -328,6 +330,8 @@
         var reviews = [];
         var filter = 'All';
         var confirmQuarantine = {};
+        var confirmUndo = {};
+        var queued = [];
         var confirmReplace = {};
         // File-by-file choices for a release with several files waiting: kept here until applied, so a refresh doesn't lose them
         var fileChoices = {}, filesOpen = {};
@@ -398,7 +402,7 @@
 
         // The library picked in a card, kept across the automatic refresh (ING-27)
         var libChoice = {};
-        var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Decision', 'Decisions'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged']];
+        var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Decision', 'Decisions'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged'], ['Undone', 'Undone']];
         var labels = {}; filters.forEach(function (f) { labels[f[0]] = f[1]; });
         var SHOWN = 5;
 
@@ -549,11 +553,18 @@
           list.innerHTML = shown.map(function (a, i) {
             var details = (a.Details || []);
             return '<li data-k="' + esc(a.Time + a.Release) + '"><span class="when">' + when(a.Time) + '</span><div class="what">' +
-              '<span class="badge ' + esc(a.Status) + '">' + esc(labels[a.Status] || a.Status) + '</span><strong>' + esc(a.Release) + '</strong>' +
-              '<div>' + esc(a.Summary) + '</div>' +
+              '<span class="badge ' + esc(a.Status) + '">' + esc(labels[a.Status] || a.Status) + '</span>' + (a.UndoneAt ? '<span class="badge Undone">Undone</span>' : '') + '<strong>' + esc(a.Release) + '</strong>' +
+              '<div>' + esc(a.Summary) + '</div>' + undoButton(a) +
               (details.length ? '<details><summary>' + details.length + ' detail' + (details.length === 1 ? '' : 's') + '</summary><ul>' + details.map(function (d) { return '<li>' + esc(d) + '</li>'; }).join('') + '</ul></details>' : '') +
               '</div></li>';
           }).join('');
+        }
+
+        // A filing can be undone while the action log still holds its moves (90 days)
+        function undoButton(a) {
+          if (a.Status !== 'Filed' || !a.Run || a.UndoneAt || new Date() - new Date(a.Time) > 90 * 86400000) { return ''; }
+          if (queued.some(function (q) { return q.Kind === 'Undo' && q.Run === a.Run; })) { return '<div class="ingest-muted">Undoing on the next sweep…</div>'; }
+          return '<button is="emby-button" type="button" class="raised button-cancel ingest-undo" data-run="' + esc(a.Run) + '"><span>' + (confirmUndo[a.Run] ? 'Confirm: undo this filing' : 'Undo') + '</span></button>';
         }
 
         function loadStatus() {
@@ -566,6 +577,7 @@
             reviews = s.Reviews || [];
             waiting = s.Waiting || [];
             working = s.Working || null;
+            queued = s.Queued || [];
             renderWaiting();
             renderReviews();
             renderActivity();
@@ -745,6 +757,17 @@
           b.disabled = true;
           // Starts a sweep now; refresh again once it has had a moment to pick the release up
           post('Ingest/Waiting/' + encodeURIComponent(b.getAttribute('data-id')) + '/ProcessNow').then(function () { setTimeout(loadStatus, 5000); });
+        });
+
+        page.querySelector('#Activity').addEventListener('click', function (e) {
+          var b = e.target.closest('.ingest-undo');
+          if (!b) { return; }
+          var run = b.getAttribute('data-run');
+          // Two clicks: the files go back to the watch folder (or the library copies are deleted, for a copied release)
+          if (!confirmUndo[run]) { confirmUndo[run] = true; b.querySelector('span').textContent = 'Confirm: undo this filing'; return; }
+          delete confirmUndo[run];
+          b.disabled = true;
+          post('Ingest/Activity/' + encodeURIComponent(run) + '/Undo').then(function () { setTimeout(loadStatus, 5000); });
         });
 
         page.querySelector('#ActivityFilters').addEventListener('click', function (e) {

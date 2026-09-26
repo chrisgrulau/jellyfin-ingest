@@ -40,6 +40,9 @@ public enum ActivityStatus
 
     /// <summary>A person made a review decision (chose a title, asked for a retry or quarantine).</summary>
     Decision,
+
+    /// <summary>A filed release was undone by an administrator: its files went back to where they came from.</summary>
+    Undone,
 }
 
 /// <summary>
@@ -83,6 +86,17 @@ public sealed record ActivityEntry
 
     /// <summary>Gets detail lines (what went where, or why not).</summary>
     public IReadOnlyList<string> Details { get; init; } = [];
+
+    /// <summary>
+    /// Gets the id the filing's moves carry in the action log, so it can be undone; <c>null</c> for anything that
+    /// isn't a filing (or one made before undo existed).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Run { get; init; }
+
+    /// <summary>Gets when this filing was undone, if it was.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? UndoneAt { get; init; }
 }
 
 /// <summary>
@@ -140,6 +154,13 @@ public sealed record PendingReview
     /// started from and never one made while it was running.
     /// </summary>
     public int RequestVersion { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the release waits for a person even if it could now be filed by itself: it was
+    /// undone, or restored from quarantine, by an administrator. The sweep doesn't plan it until a decision is made
+    /// (choose, retry, file by file or quarantine); planning it again clears this.
+    /// </summary>
+    public bool Held { get; init; }
 }
 
 /// <summary>
@@ -263,6 +284,10 @@ public sealed record IngestState
     /// <summary>Gets the release being identified or filed right now (only in the Status API; never saved).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public WorkInProgress? Working { get; init; }
+
+    /// <summary>Gets the undos asked for and not yet carried out (only in the Status API; never saved).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<QueuedAction>? Queued { get; init; }
 }
 
 /// <summary>
@@ -551,6 +576,64 @@ public sealed partial class IngestStateStore
             {
                 Save(s);
             }
+        }
+    }
+
+    /// <summary>
+    /// Finds the activity entry of a filing by its run (see <see cref="ActivityEntry.Run"/>).
+    /// </summary>
+    /// <param name="run">The run's id.</param>
+    /// <returns>The entry, or <c>null</c>.</returns>
+    public ActivityEntry? FindFiling(string run)
+    {
+        lock (_lock)
+        {
+            return string.IsNullOrEmpty(run) ? null : Load().Activity.FirstOrDefault(a => a.Status == ActivityStatus.Filed && string.Equals(a.Run, run, StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// Marks a filing as undone, so it shows as such and can't be undone twice.
+    /// </summary>
+    /// <param name="run">The run's id.</param>
+    /// <param name="time">When it was undone.</param>
+    /// <returns>Whether the entry was found.</returns>
+    public bool MarkUndone(string run, DateTimeOffset time)
+    {
+        lock (_lock)
+        {
+            var s = Load();
+            var i = s.Activity.FindIndex(a => a.Status == ActivityStatus.Filed && string.Equals(a.Run, run, StringComparison.Ordinal));
+            if (i < 0)
+            {
+                return false;
+            }
+
+            s.Activity[i] = s.Activity[i] with { UndoneAt = time };
+            Save(s);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Forgets that a release was filed by copy or hard link (after an undo, so the review sees it).
+    /// </summary>
+    /// <param name="watchFolder">The watch folder.</param>
+    /// <param name="release">The release.</param>
+    /// <returns>What was remembered, so it can be put back if the undo fails; or <c>null</c>.</returns>
+    public CopiedRelease? ForgetCopied(string watchFolder, string release)
+    {
+        lock (_lock)
+        {
+            var s = Load();
+            var found = s.Copied.FirstOrDefault(c => PathGuard.SamePath(c.WatchFolder, watchFolder) && c.Release == release);
+            if (found is not null)
+            {
+                s.Copied.Remove(found);
+                Save(s);
+            }
+
+            return found;
         }
     }
 

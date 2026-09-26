@@ -68,6 +68,7 @@ plugin page, where you pick the right title (and library) with one click or sear
 | Waiting | *Waiting* on the plugin page: releases that are still arriving, when each will settle, and the release being identified or filed ("Filing file 2 of 5"). **Process now** skips the rest of a release's settle wait. |
 | Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. *Choose file by file* replaces or quarantines single files, and gives a video of a show a season and episode when its name has none it can read. |
 | Activity | *Recent activity* on the plugin page: filed, dry run, needs review, decisions, failures, quarantine and purges, with what went where. |
+| Undo | **Undo** on a filed release in *Recent activity* (for 90 days, while the action log holds it) puts everything back: the files return to the watch folder (for a copy or hard-link folder, the library copies are deleted instead), clutter leaves quarantine, and copies it replaced return to the library. All or nothing: refused, with the reason, if anything has changed or gone since filing or a place is taken. The release then waits under *Needs review* instead of being filed again. |
 | Safety | Dry-run mode per watch folder (on for a new folder), never overwrites, never files a second copy of an episode or film already on the server, crash-safe moves (hidden temporary name, size check, then rename; interrupted moves are finished or discarded at the next start), all-or-nothing per release (a failure undoes the moves already made), a JSON-lines action log. |
 | Library refresh | Asks Jellyfin to refresh just the film or show folders filed into after a real ingest. |
 
@@ -139,7 +140,7 @@ Everything stays on your server, in Jellyfin's plugin data folder (`<jellyfin da
 | File | What's in it | Kept |
 |---|---|---|
 | `state.json` | Releases waiting for review and the recent activity shown on the Ingest page (release names, paths, chosen titles). Who made a decision is not recorded. | The latest 300 activity entries |
-| `actions.jsonl` | One line per file moved: time, release, source and destination. Used to finish or undo moves interrupted by a restart. | 90 days, at most 5 MB |
+| `actions.jsonl` | One line per file moved: time, release, source and destination, size and modified time. Used to finish or undo moves interrupted by a restart, and for **Undo**. | 90 days, at most 5 MB |
 | `search-cache.json` | Recent title searches and their provider ids, so the same title isn't searched again. | 24 hours |
 
 Jellyfin's log gets one line per release at Information level. Per-file moves and review reasons, which include full
@@ -197,6 +198,7 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Optional AI tie-breaker for close calls (Shoal AI plugin)
 - [x] Episodes named by title only (specials), with the AI plugin as a fallback
 - [x] Episodes with no usable name: a short transcript compared with episode synopses
+- [x] Undo a filed release from *Recent activity*
 
 Design notes live in [`docs/DESIGN.md`](docs/DESIGN.md).
 

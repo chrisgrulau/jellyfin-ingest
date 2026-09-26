@@ -58,6 +58,7 @@ public sealed class ActivityNotifier
             ActivityStatus.Failed => ("Ingest couldn't file: ", LogLevel.Error),
             ActivityStatus.Filed => ("Ingest filed ", LogLevel.Information),
             ActivityStatus.Quarantined => ("Ingest quarantined ", LogLevel.Information),
+            ActivityStatus.Undone => ("Ingest undid the filing of ", LogLevel.Information),
             _ => ((string?)null, LogLevel.None),
         };
         if (headline is null)

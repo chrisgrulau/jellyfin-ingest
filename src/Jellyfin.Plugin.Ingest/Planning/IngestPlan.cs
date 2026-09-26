@@ -117,6 +117,7 @@ public sealed record IngestPlan
     /// <summary>Gets a value indicating whether the plan can be executed as is.</summary>
     public bool IsReady => Review.Count == 0
         && (Operations.Any(o => o.Kind is OperationKind.Video)
+            || (Returning.Count > 0 && Operations.Count > 0)
             || (WholeReleaseQuarantine && Operations.Count > 0 && Operations.All(o => o.Kind is OperationKind.Quarantine)));
 
     /// <summary>
@@ -157,6 +158,13 @@ public sealed record IngestPlan
     /// is removed if it is then truly empty (listed deepest first), and never unless it is inside its library folder.
     /// </summary>
     public IReadOnlyList<EmptiedFolder> TidyIfEmpty { get; init; } = [];
+
+    /// <summary>
+    /// Gets, for an undo or a restore from quarantine, the files it moves back (absolute paths, in the library or the
+    /// quarantine). When set, these exact paths are the only sources the executor accepts, and the release folder isn't
+    /// tidied afterwards (only <see cref="TidyIfEmpty"/> is).
+    /// </summary>
+    public IReadOnlyList<string> Returning { get; init; } = [];
 
     /// <summary>Gets the release's videos quarantined by a person's choice instead of being filed (absolute paths).</summary>
     public IReadOnlyList<string> Skipped { get; init; } = [];

@@ -142,6 +142,41 @@ Subtitles plugin's `SpeechBridge`) and a tie-breaker that is also an `IEpisodePi
 
 Anything else leaves the release in review, with the reason.
 
+## Undo
+
+Every real execution gets a run id, written on each of its action-log lines together with the destination's modified
+time after the move (`modified`) and whether the source stayed (`kept`, copy and hard-link folders). A filing's
+activity entry carries its run (`ActivityEntry.Run`), and **Undo** (`POST Ingest/Activity/{run}/Undo`) works from
+exactly those lines (`ActionLogLine.CompletedMoves`: done or recovered, not rolled back).
+
+`ReleaseUndo.Plan` checks everything before anything moves, and refuses the whole undo with a plain reason if:
+
+- the entry isn't a filing with a run, was already undone, or is older than the action log keeps (90 days);
+- the watch folder it came from is no longer configured (or fails the folder rules), or isn't there;
+- a source is outside that watch folder, other than a replaced copy inside one of the server's library folders;
+- a filed file (or quarantined clutter or replaced copy) is missing, or its size or modified time differ from the log;
+- a place a file goes back to is taken, unless an earlier step of the same undo frees it (a replaced copy goes back
+  where its replacement was, after the replacement has left);
+- for a kept source (copy or hard link), the original in the watch folder has gone or changed size.
+
+The undo is a plan for the ordinary executor: its moves are the filing's in reverse order, destination back to source,
+and `IngestPlan.Returning` lists the exact files it may take (so the "source must be inside the release" guard becomes
+"source must be one of these"). A kept source's library copy is instead moved to a hidden `.ingest-<id>.undone` name
+beside it, and deleted (logged `deleted`) only once every move has succeeded, so a failure still rolls everything back.
+A set-aside copy left by a crash is deleted at the next start (`PlanExecutor.FinishDeletes`, after `Recover`).
+Afterwards the folders the filing's files were in are removed if truly empty, up to but never including a library,
+quarantine or watch folder (a marked dated quarantine folder is never empty).
+
+The page asks; the sweep does it (`IngestProgress.Queue`, carried out at the start of the next sweep, which is woken),
+so an undo never races a filing or the watch-folder scan. Moves take `IngestProgress.FileGate`, as filing does. Before
+the first move the release is put into review, **held** (`PendingReview.Held`, "Undone by an administrator — choose
+what to do"), and a copy folder's `CopiedRelease` record is cleared; if the undo then fails and is rolled back, both
+are put back. A held review with no request is never planned by the sweep, even after a restart; any decision (choose,
+retry, file by file, quarantine) plans it as usual, and planning replaces the review without the hold. On success the
+filing's entry gets `UndoneAt` (the page shows **Undone**), and an `Undone` entry is recorded (and copied to Jellyfin's
+Activity log). A crash part-way leaves each file whole (the executor's recovery finishes or discards the interrupted
+move) and the release held for review, possibly partly returned; nothing is filed again by itself.
+
 ## Subtitle pairing
 
 For each video in a release, in order:
@@ -165,7 +200,8 @@ Samples (`sample` in the name and under ~300 MB) are clutter too.
 - Dry run is set per watch folder, and is on for a new one. A folder saved before it was per folder takes the old
   global setting when the plugin loads, so upgrading changes nothing.
 - Never overwrite; on collision, leave the release in place and report.
-- Never delete except the retention purge of the quarantine folder.
+- Never delete except the retention purge of the quarantine folder, and a library copy whose original is still in a
+  copy or hard-link watch folder when a filing is undone.
 - Every operation is logged with source and destination so it can be reversed.
 
 ## Stored files
