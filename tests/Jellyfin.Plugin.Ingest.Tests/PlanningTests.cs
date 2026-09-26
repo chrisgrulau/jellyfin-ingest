@@ -700,4 +700,24 @@ public class PlanningTests
         Assert.True(plan.IsReady);
         Assert.All(plan.Operations, o => Assert.Equal(OperationKind.Quarantine, o.Kind));
     }
+
+    // ING-28: with copy or hard link the release stays, clutter included
+    [Fact]
+    public async Task Copy_mode_files_the_video_and_leaves_the_clutter()
+    {
+        var planner = new IngestPlanner(
+            new MediaIdentifier(new Lookup()),
+            p => !Path.HasExtension(p),
+            _ => null,
+            new FixedClock(new DateTimeOffset(2026, 9, 24, 10, 0, 0, TimeSpan.Zero)))
+        {
+            Transfer = Jellyfin.Plugin.Ingest.Configuration.TransferMode.HardLink,
+        };
+
+        var plan = await planner.PlanAsync(Watch, "n00b-Lantern1E4", [F("n00b-Lantern1E4/n00b-Lantern1E4.mp4"), F("n00b-Lantern1E4/README.txt", 900), F("n00b-Lantern1E4/sample.mkv", 12_000_000)], LibraryTargets.Of(Tv), Quarantine, null, CancellationToken.None);
+
+        Assert.True(plan.IsReady);
+        Assert.DoesNotContain(plan.Operations, o => o.Kind == OperationKind.Quarantine);
+        Assert.Equal(Jellyfin.Plugin.Ingest.Configuration.TransferMode.HardLink, plan.Transfer);
+    }
 }

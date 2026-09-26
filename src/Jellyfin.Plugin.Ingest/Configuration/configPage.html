@@ -41,6 +41,8 @@
       #IngestConfigPage .ingest-more { background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; padding: .4em .5em; font: inherit; opacity: .8; }
       #IngestConfigPage .ingest-actions { display: flex; flex-wrap: wrap; gap: .5em; margin-top: .75em; }
       #IngestConfigPage .ingest-files { margin-top: .75em; }
+      #IngestConfigPage .wf-transfer { margin: .5em 0; }
+      #IngestConfigPage .wf-transfer select { padding: .3em .45em; background: rgba(128,128,128,.15); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; max-width: 100%; }
       #IngestConfigPage .ingest-files > summary { cursor: pointer; }
       #IngestConfigPage .ingest-files table { width: 100%; border-collapse: collapse; margin: .5em 0; }
       #IngestConfigPage .ingest-files td { padding: .3em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; word-break: break-word; }
@@ -264,6 +266,11 @@
             '<input is="emby-input" type="text" id="wf-path-' + n + '" class="wf-path" value="' + esc(w.Path) + '" placeholder="/media/incoming" /></div>' +
             '<label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" id="wf-on-' + n + '" class="wf-on"' + (w.Enabled ? ' checked' : '') + ' /><span>On</span></label>' +
             '<button is="emby-button" type="button" class="raised button-cancel wf-remove"><span>Remove folder</span></button></div>' +
+            '<div class="wf-transfer"><label>Files are <select class="wf-mode">' +
+            '<option value="Move"' + (!w.Transfer || w.Transfer === 'Move' ? ' selected' : '') + '>moved (Usenet, or downloads nothing else needs)</option>' +
+            '<option value="HardLink"' + (w.Transfer === 'HardLink' ? ' selected' : '') + '>hard-linked (torrents keep seeding; no extra space, same drive)</option>' +
+            '<option value="Copy"' + (w.Transfer === 'Copy' ? ' selected' : '') + '>copied (torrents keep seeding; uses the space twice)</option>' +
+            '</select></label></div>' +
             '<div class="wf-dests"></div>' +
             '<button is="emby-button" type="button" class="raised button-alt wf-add-dest"><span>Add destination</span></button>' +
             '<p class="ingest-muted wf-hint"></p><p class="wf-error"></p>';
@@ -660,7 +667,7 @@
             row.querySelector('.wf-error').textContent = error;
             row.classList.toggle('invalid', !!error);
             if (error) { ok = false; }
-            return { Path: path, Destinations: dests, TargetLibraryId: '', TargetPath: '', Enabled: row.querySelector('.wf-on').checked };
+            return { Path: path, Destinations: dests, TargetLibraryId: '', TargetPath: '', Enabled: row.querySelector('.wf-on').checked, Transfer: row.querySelector('.wf-mode').value };
           }).filter(Boolean);
           if (!ok) { return null; }
           if (!folders.length) { addRow(); return null; }

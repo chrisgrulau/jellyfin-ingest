@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **ING-28: Copy or hard link, per watch folder**, so torrents keep seeding. Before, files were always moved, which
+  broke seeding. Files can now be **moved** (the default, for Usenet), **hard-linked** (no extra space; copied instead
+  when the library is on another drive) or **copied**.
+  - With hard link or copy, the release stays in the watch folder, clutter included.
+  - Ingest remembers what it filed from there, so it isn't filed again until the release changes. It forgets once
+    the release is removed.
+  - Filing stays crash-safe and all-or-nothing. A failure removes only the copies it made.
+
 ## [0.6.0-alpha] - 2026-09-26
 
 ### Added

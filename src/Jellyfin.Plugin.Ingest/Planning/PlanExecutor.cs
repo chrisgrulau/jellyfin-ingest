@@ -6,6 +6,8 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 
+using Jellyfin.Plugin.Ingest.Configuration;
+
 namespace Jellyfin.Plugin.Ingest.Planning;
 
 /// <summary>
@@ -35,6 +37,21 @@ public interface IFileOperations
     /// <summary>Deletes a file.</summary>
     /// <param name="path">Absolute path.</param>
     void Delete(string path);
+
+    /// <summary>
+    /// Copies a file (never over an existing one).
+    /// </summary>
+    /// <param name="source">From.</param>
+    /// <param name="destination">To.</param>
+    void Copy(string source, string destination) => throw new NotSupportedException();
+
+    /// <summary>
+    /// Makes a hard link (a second name for the same file), if the file system allows it.
+    /// </summary>
+    /// <param name="source">The existing file.</param>
+    /// <param name="destination">The new name.</param>
+    /// <returns>Whether the link was made (<c>false</c>: another drive, or no hard links; copy instead).</returns>
+    bool TryHardLink(string source, string destination) => false;
 
     /// <summary>Removes empty directories under (and including) a directory.</summary>
     /// <param name="path">Absolute path.</param>
@@ -214,9 +231,19 @@ public sealed class PlanExecutor
 
                 Log(actionLogPath, plan.ReleaseName, op, size, "intent", temp);
 
-                // 1. into a hidden name (a rename, or a copy across file systems); 2. verify; 3. rename into place
-                _fs.Move(op.Source, temp);
-                if (!_fs.Exists(temp) || _fs.Length(temp) != size || _fs.Exists(op.Source))
+                // 1. into a hidden name (a rename, or a copy across file systems; or, when the release stays for seeding, a
+                //    copy or hard link); 2. verify; 3. rename into place
+                var keeps = KeepsSource(plan, op);
+                if (!keeps)
+                {
+                    _fs.Move(op.Source, temp);
+                }
+                else if (plan.Transfer != TransferMode.HardLink || !_fs.TryHardLink(op.Source, temp))
+                {
+                    _fs.Copy(op.Source, temp);
+                }
+
+                if (!_fs.Exists(temp) || _fs.Length(temp) != size || _fs.Exists(op.Source) != keeps)
                 {
                     throw new IOException($"Move could not be verified: {op.Source} -> {temp}");
                 }
@@ -365,6 +392,10 @@ public sealed class PlanExecutor
             && PathGuard.IsUnderAny(destination, allowedRoots);
     }
 
+    // With copy or hard link the release's own files stay (only library copies being replaced are moved)
+    private static bool KeepsSource(IngestPlan plan, PlannedOperation op)
+        => plan.Transfer != TransferMode.Move && op.Kind != OperationKind.Quarantine;
+
     private (IReadOnlyList<PlannedOperation> RolledBack, IReadOnlyList<string> Problems) RollBack(
         string logPath, IngestPlan plan, PlannedOperation failed, long size, string temp, List<(PlannedOperation Op, long Bytes, string Temp)> done, List<string> created)
     {
@@ -393,11 +424,23 @@ public sealed class PlanExecutor
             problems.Add($"{failed.Source}: {ex.Message} (left at {temp})");
         }
 
-        // Then everything already filed, newest first
+        // Then everything already filed, newest first (a copy or link of a file that stayed is simply removed)
         foreach (var (op, bytes, opTemp) in Enumerable.Reverse(done))
         {
             try
             {
+                if (KeepsSource(plan, op) && _fs.Exists(op.Source))
+                {
+                    if (_fs.Exists(op.Destination))
+                    {
+                        _fs.Delete(op.Destination);
+                    }
+
+                    Log(logPath, plan.ReleaseName, op, bytes, "rolled-back", opTemp);
+                    rolledBack.Add(op);
+                    continue;
+                }
+
                 if (!_fs.Exists(op.Destination) || _fs.Exists(op.Source))
                 {
                     problems.Add($"{op.Destination}: can't be moved back to {op.Source}.");
@@ -507,6 +550,12 @@ public sealed class PhysicalFileOperations : IFileOperations
 
     /// <inheritdoc />
     public void Delete(string path) => File.Delete(path);
+
+    /// <inheritdoc />
+    public void Copy(string source, string destination) => File.Copy(source, destination, overwrite: false);
+
+    /// <inheritdoc />
+    public bool TryHardLink(string source, string destination) => NativeMethods.TryHardLink(source, destination);
 
     /// <inheritdoc />
     public void AppendLine(string path, string line) => File.AppendAllLines(path, [line]);

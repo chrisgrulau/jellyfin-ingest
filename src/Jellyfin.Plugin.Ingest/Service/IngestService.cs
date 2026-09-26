@@ -442,6 +442,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
 
         _state.PruneReviews(watch.Path, [.. snapshot.Keys, .. scan.Links, .. scan.Unsettled, .. scan.Unreadable]);
+        _state.PruneCopied(watch.Path, [.. snapshot.Keys, .. scan.Unsettled, .. scan.Unreadable]);
         ReviewLinks(watch, scan.Links);
         ReviewUnreadable(watch, scan.Unreadable);
         foreach (var review in _state.Snapshot().Reviews.Where(r => r.WatchFolder == watch.Path && r.Request != ReviewRequest.None))
@@ -471,6 +472,13 @@ public sealed partial class IngestService : IHostedService, IDisposable
             // Providers look down: leave the release unhandled so it is planned once the pause ends
             if (_clock.GetUtcNow() < _identificationPausedUntil)
             {
+                continue;
+            }
+
+            // Filed earlier by copy or hard link and unchanged since: it stays for seeding, and isn't filed again
+            if (watch.Transfer != TransferMode.Move && _state.WasCopied(watch.Path, release, IngestStateStore.CopySignature(snapshot[release])))
+            {
+                tracker.MarkHandled(release);
                 continue;
             }
 
@@ -705,6 +713,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         {
             ReplaceExisting = previous?.Request == ReviewRequest.Replace,
             FileDecisions = previous?.FileDecisions ?? new Dictionary<string, FileDecision>(StringComparer.Ordinal),
+            Transfer = watch.Transfer,
         };
         var plan = await planner.PlanAsync(watch.Path, release, files, targets, quarantine, previous?.Chosen, ct).ConfigureAwait(false);
 
@@ -807,6 +816,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 + (plan.Notes.Count > 0 ? " The AI plugin decided part of this (see the details)." : string.Empty),
             Details = [.. plan.Notes, .. plan.Replacing.Select(p => "Replaced (moved to quarantine): " + p), .. plan.Skipped.Select(p => "Quarantined as chosen: " + Path.GetRelativePath(watch.Path, p)), .. Describe(watch.Path, report.Completed)],
         });
+
+        // A release filed by copy or hard link stays in the watch folder: remember it so it isn't filed again
+        if (!config.DryRun && watch.Transfer != TransferMode.Move)
+        {
+            _state.MarkCopied(new CopiedRelease(watch.Path, release, IngestStateStore.CopySignature(files)));
+        }
 
         if (config.DryRun && previous?.Chosen is { } chosen)
         {
