@@ -41,4 +41,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// those folders, not whole libraries).
     /// </summary>
     public bool ScanLibraryAfterIngest { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether close matches are settled by the family's AI plugin, when it is installed
+    /// and allowed to help Ingest (its own settings page decides that, and its spending limits apply). Its pick must be
+    /// one of the candidates found; otherwise the release waits for review as before.
+    /// </summary>
+    public bool UseAiTiebreak { get; set; } = true;
 }

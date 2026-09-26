@@ -87,6 +87,9 @@ public sealed record IngestPlan
     /// </summary>
     public IReadOnlyList<string> RequiredFolders { get; init; } = [];
 
+    /// <summary>Gets notes for the activity panel (for example that a close match was settled by the AI plugin, and why).</summary>
+    public IReadOnlyList<string> Notes { get; init; } = [];
+
     /// <summary>Gets the items that need a decision; when non-empty nothing is moved.</summary>
     public IReadOnlyList<ReviewItem> Review { get; init; } = [];
 
