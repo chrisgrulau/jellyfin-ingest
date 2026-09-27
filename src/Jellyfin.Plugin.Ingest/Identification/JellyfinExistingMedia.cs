@@ -108,6 +108,55 @@ public sealed class JellyfinExistingMedia : IExistingMedia
     public string? FindSeasonFolder(string seriesFolder, int season)
         => ExistingFiles.FindSeasonFolder(seriesFolder, season, Subdirectories, Files);
 
+    /// <inheritdoc />
+    public IReadOnlyList<ExistingEpisode> FindEpisodesTitled(IReadOnlyCollection<string> titles)
+    {
+        ArgumentNullException.ThrowIfNull(titles);
+        if (titles.Count == 0)
+        {
+            return [];
+        }
+
+        // Shows whose name starts one of the titles (on a word boundary), then their episodes titled as the rest
+        var series = _library.GetItemList(new InternalItemsQuery
+            {
+                IncludeItemTypes = [BaseItemKind.Series],
+                Recursive = true,
+                IsVirtualItem = false,
+            })
+            .OfType<Series>()
+            .Where(s => !string.IsNullOrWhiteSpace(s.Name) && titles.Any(t => FilmAsEpisode.Rest(t, s.Name) is not null))
+            .ToDictionary(s => s.Id);
+        if (series.Count == 0)
+        {
+            return [];
+        }
+
+        return [.. _library.GetItemList(new InternalItemsQuery
+            {
+                IncludeItemTypes = [BaseItemKind.Episode],
+                Recursive = true,
+                IsVirtualItem = false,
+                AncestorIds = [.. series.Keys],
+            })
+            .OfType<Episode>()
+            .Where(e => e.ParentIndexNumber is not null && e.IndexNumber is not null && series.ContainsKey(e.SeriesId)
+                && FilmAsEpisode.TitleFits(titles, series[e.SeriesId].Name, e.Name ?? string.Empty)
+                && !string.IsNullOrWhiteSpace(e.Path) && File.Exists(e.Path))
+            .Select(e => new ExistingEpisode
+            {
+                Path = e.Path,
+                SeriesName = series[e.SeriesId].Name,
+                SeriesYear = series[e.SeriesId].ProductionYear,
+                SeriesProviderIds = new Dictionary<string, string>(series[e.SeriesId].ProviderIds, StringComparer.OrdinalIgnoreCase),
+                Season = e.ParentIndexNumber!.Value,
+                Episode = e.IndexNumber!.Value,
+                Title = e.Name!,
+                Year = e.PremiereDate?.Year ?? e.ProductionYear,
+                ProviderIds = new Dictionary<string, string>(e.ProviderIds, StringComparer.OrdinalIgnoreCase),
+            })];
+    }
+
     // Same edition when the existing file's edition can't be told from its name either: better a review than a duplicate
     private static bool SameEdition(string path, string? edition)
     {

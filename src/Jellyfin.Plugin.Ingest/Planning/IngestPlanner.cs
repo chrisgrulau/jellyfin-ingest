@@ -272,6 +272,16 @@ public sealed class IngestPlanner
                 : chosen is null
                 ? await _identifier.IdentifyAsync(parsed[video], preferTv, cancellationToken, Abs(video)).ConfigureAwait(false)
                 : await _identifier.IdentifyAsChosenAsync(parsed[video], chosen.Candidate, chosen.Target.IsTv, cancellationToken, Abs(video)).ConfigureAwait(false);
+
+            // A film that is an episode already on the server (a TV film or special kept as, say, 24 S00E09
+            // 'Redemption') is that episode: it replaces the copy there, when asked to, instead of becoming a second copy
+            // in the film library. A film chosen or approved in review stays a film
+            var special = approved is null ? AsExistingEpisode(parsed[video], result, chosen) : null;
+            if (special is not null)
+            {
+                result = special.Value.Result;
+            }
+
             if (approved is not null)
             {
                 approvedCount++;
@@ -323,6 +333,11 @@ public sealed class IngestPlanner
                 // The same episode already on the server (any library, any name or container) or twice in this release
                 var keys = Enumerable.Range(ep.Episode, (ep.EndingEpisode ?? ep.Episode) - ep.Episode + 1).Select(n => (owner, ep.Season, n)).ToList();
                 var duplicates = keys.Select(k => _existing?.FindEpisode(ProviderIds(ep.Series), owner, ep.Season, k.n)).OfType<string>().Distinct(StringComparer.Ordinal).ToList();
+                if (special is { Episode.Path: var specialPath } && !duplicates.Contains(specialPath, StringComparer.Ordinal))
+                {
+                    duplicates.Add(specialPath);
+                }
+
                 var code = MediaNamer.EpisodeCode(ep.Season, ep.Episode, ep.EndingEpisode);
                 if (keys.Any(plannedEpisodes.Contains))
                 {
@@ -330,9 +345,12 @@ public sealed class IngestPlanner
                     continue;
                 }
 
+                // Replacing is asked for in review, as for any copy already on the server; for a film that is an episode,
+                // the review also offers the film (its candidates) to file it as a film instead
                 if (duplicates.Count > 0 && !Replace(duplicates, video))
                 {
-                    review.Add(new ReviewItem(Abs(video), $"{ep.Series.Title} {code} is already on the server: {string.Join(", ", duplicates)}") { Matched = matched, Candidates = result.Candidates, Existing = string.Join('\n', duplicates) });
+                    var why = special?.Reason ?? $"{ep.Series.Title} {code} is already on the server: {string.Join(", ", duplicates)}";
+                    review.Add(new ReviewItem(Abs(video), why) { Matched = matched, Candidates = result.Candidates, Existing = string.Join('\n', duplicates) });
                     continue;
                 }
 
@@ -565,6 +583,84 @@ public sealed class IngestPlanner
         var result = await _identifier.IdentifyAsChosenAsync(release, title, approved.Title.IsSeries, ct, path).ConfigureAwait(false);
         var why = string.Join(" ", approved.Decisions.Select(d => d.Reason).Where(r => r.Length > 0));
         return result with { Reason = $"Approved AI suggestion: {approved.Describe()}." + (why.Length > 0 ? " " + why : string.Empty) };
+    }
+
+    /// <summary>
+    /// Whether a video identified as a film is an episode already on the server (<see cref="FilmAsEpisode"/>), or, when a
+    /// show was chosen in review for a name without episode numbers, which of that show's episodes it is by its title.
+    /// </summary>
+    /// <param name="parsed">The parsed name.</param>
+    /// <param name="result">How it was identified.</param>
+    /// <param name="chosen">The title chosen in review, if any (a film chosen there is never turned into an episode).</param>
+    /// <returns>The video identified as that episode, the episode, and why (the reason a review gives); <c>null</c> when
+    /// it isn't one.</returns>
+    internal (IdentificationResult Result, ExistingEpisode Episode, string Reason)? AsExistingEpisode(ParsedRelease parsed, IdentificationResult result, ChosenMatch? chosen)
+    {
+        ArgumentNullException.ThrowIfNull(parsed);
+        ArgumentNullException.ThrowIfNull(result);
+        if (_existing is null)
+        {
+            return null;
+        }
+
+        ExistingEpisode episode;
+        string reason;
+        if (chosen is null && result.Status == IdentificationStatus.Identified && result.Movie is { } film)
+        {
+            List<string> titles = [.. new[] { film.Title, parsed.Title }.Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.Ordinal)];
+            List<int> years = [.. new[] { film.Year, parsed.Year }.OfType<int>().Distinct()];
+            if (FilmAsEpisode.Best(titles, years, film.ImdbId, _existing.FindEpisodesTitled(titles)) is not { } best)
+            {
+                return null;
+            }
+
+            episode = best.Episode;
+            var named = film.Year is { } y ? string.Create(CultureInfo.InvariantCulture, $"'{film.Title}' ({y})") : $"'{film.Title}'";
+            var sameId = !string.IsNullOrWhiteSpace(film.ImdbId) && episode.ProviderIds.TryGetValue("Imdb", out var imdb) && string.Equals(imdb, film.ImdbId, StringComparison.OrdinalIgnoreCase);
+            reason = best.Strength == EpisodeMatchStrength.Confident
+                ? $"Identified as the film {named}, but it is {Describe(episode)} ({(sameId ? "the same IMDb id" : "same title and year")}), which is already on the server: {episode.Path}."
+                : $"Identified as the film {named}, but it may be {Describe(episode)} (the show's name and the episode's title make up the film's title, but {(episode.Year is null || years.Count == 0 ? "there is no year to compare" : "the year doesn't agree")}), which is already on the server: {episode.Path}.";
+            reason += " Replace it to file this as that episode in its place (the old copy goes to quarantine), or use the film to file it as a film.";
+        }
+        else if (chosen is { Candidate.IsSeries: true } && result.Status != IdentificationStatus.Identified && parsed.Season is null && parsed.Episode is null)
+        {
+            // A show chosen in review for a name without episode numbers: its episode of that title, if it has exactly one
+            List<ExistingEpisode> found = [.. _existing.FindEpisodesTitled([parsed.Title])
+                .Where(e => chosen.Candidate.ProviderIds.Any(id => e.SeriesProviderIds.TryGetValue(id.Key, out var v) && string.Equals(v, id.Value, StringComparison.OrdinalIgnoreCase)))
+                .DistinctBy(e => e.Path, StringComparer.Ordinal)];
+            if (found.Count != 1)
+            {
+                return null;
+            }
+
+            episode = found[0];
+            reason = $"'{chosen.Candidate.Name}' was chosen in review, and its {Describe(episode)} is already on the server: {episode.Path}. Replace it to file this in its place (the old copy goes to quarantine).";
+        }
+        else
+        {
+            return null;
+        }
+
+        var ids = episode.SeriesProviderIds;
+        var series = new SeriesIdentity
+        {
+            Title = episode.SeriesName,
+            Year = episode.SeriesYear,
+            TvdbId = ids.TryGetValue("Tvdb", out var tvdb) ? tvdb : null,
+            TmdbId = ids.TryGetValue("Tmdb", out var tmdb) ? tmdb : null,
+        };
+        var identified = result with
+        {
+            Status = IdentificationStatus.Identified,
+            Movie = null,
+            Episode = new EpisodeIdentity { Series = series, Season = episode.Season, Episode = episode.Episode, Title = episode.Title },
+            Reason = reason,
+            DecidedBy = null,
+            AiDecisions = [],
+        };
+        return (identified, episode, reason);
+
+        static string Describe(ExistingEpisode e) => $"{e.SeriesName} {MediaNamer.EpisodeCode(e.Season, e.Episode, null)} '{e.Title}'";
     }
 
     /// <summary>
