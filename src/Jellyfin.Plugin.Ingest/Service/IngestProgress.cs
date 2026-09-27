@@ -71,6 +71,9 @@ public enum QueuedActionKind
 
     /// <summary>Move a filing (<see cref="QueuedAction.Run"/>) to another library (<see cref="QueuedAction.LibraryId"/>).</summary>
     Move,
+
+    /// <summary>Approve the AI suggestions of many reviews (<see cref="QueuedAction.Approvals"/>): Approve all.</summary>
+    ApproveAll,
 }
 
 /// <summary>
@@ -96,6 +99,13 @@ public sealed record QueuedAction
 
     /// <summary>Gets the library to move a filing to, for a move.</summary>
     public string? LibraryId { get; init; }
+
+    /// <summary>Gets the reviews and the suggestion keys the page showed, for Approve all (not sent to the page).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<ReviewApproval> Approvals { get; init; } = [];
+
+    /// <summary>Gets how many reviews Approve all was asked for.</summary>
+    public int Count => Approvals.Count;
 }
 
 /// <summary>

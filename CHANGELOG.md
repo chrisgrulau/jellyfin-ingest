@@ -5,6 +5,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **AI suggests, you approve.** Each watch folder has a new setting, *When the AI decides*: **file automatically** (the
+  default, and what every existing folder keeps: today's behaviour) or **ask me first**. Asking first, a release whose
+  title the AI settled from close candidates, or whose episode it picked (by its title, or from a transcript), is not
+  filed: it waits under *Needs review* with the AI's choice in use, marked *Suggested by the AI*, with its one-sentence
+  reason, what it chose from ("Picked … from 3 close candidates", or how many characters of transcript were heard and
+  from where) and how closely the name matched (the AI plugin gives no confidence of its own; a transcript pick says
+  the name told it nothing). The card's details keep a short snippet of the transcript at most, never the transcript.
+  **Approve** files exactly that suggestion on the next sweep, without asking the AI again (the title, season and
+  episode are stored with the review and used as a choice made in review is); **Wrong? Pick another** leads to the
+  candidate list ("Use this instead"), and for an episode pick **Wrong episode? Give the right one** opens *Choose file
+  by file*. The duplicate guard still runs: a suggestion that is already on the server offers **Approve and replace
+  existing copies** (two clicks). An approval from a page drawn before the suggestion changed is refused (409), as a
+  decision already waiting for the next sweep is. **Approve all AI suggestions (N)** above *Needs review* (confirm
+  states N) approves every release that waits for nothing but its AI suggestion, as the page showed it, on the next
+  sweep; releases with a duplicate or another problem are left for you. Decisions are recorded as "Approved AI
+  suggestion" in *Recent activity*, and the filing records `ChosenBy: AiApproved`: the admin approved the title, but
+  Ingest still chose the library, so *Move to another library* is offered as for an automatic filing, and Undo works
+  as usual. API: `POST Ingest/Reviews/{id}/Approve` (`{ "Key", "Replace", "Existing" }`), `POST
+  Ingest/Reviews/ApproveAll` (`{ "Reviews": [{ "Id", "Key" }] }`, 202, queued for the next sweep). The Status API's
+  review views carry `Match.Ai` (key, reason, basis, confidence, whether Approve all takes it).
+
 ## [0.13.0-alpha] - 2026-09-27
 
 ### Added

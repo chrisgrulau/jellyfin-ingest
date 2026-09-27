@@ -103,6 +103,20 @@ public sealed class IngestPlanner
     public IReadOnlyList<MediaLibrary> Libraries { get; init; } = [];
 
     /// <summary>
+    /// Gets a value indicating whether a video the AI plugin identified (a close match it settled, or an episode it
+    /// picked by title or from a transcript) waits for approval instead of being filed: the plan holds the release for
+    /// review with the AI's choice as the video's <see cref="ReviewItem.Suggestion"/>.
+    /// </summary>
+    public bool AskBeforeAiFiling { get; init; }
+
+    /// <summary>
+    /// Gets AI suggestions approved in review (by video, relative to the watch folder): such a video is identified as
+    /// the suggestion says, as a choice made in review is, and the AI isn't asked again. A season and episode given in
+    /// review for the same video win.
+    /// </summary>
+    public IReadOnlyDictionary<string, AiSuggestion> ApprovedSuggestions { get; init; } = new Dictionary<string, AiSuggestion>(StringComparer.Ordinal);
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="IngestPlanner"/> class.
     /// </summary>
     /// <param name="identifier">Identifies main videos.</param>
@@ -238,19 +252,40 @@ public sealed class IngestPlanner
             replacementNotes.Add(line + ".");
         }
 
+        // Videos the AI identified, held for approval (the watch folder asks first), with what the review shows for them
+        var held = new Dictionary<string, (AiSuggestion Suggestion, MetadataCandidate? Matched, IReadOnlyList<ScoredCandidate> Candidates)>(StringComparer.Ordinal);
+        var approvedCount = 0;
+
         // Files a person chose not to file are quarantined with the leftovers (their subtitles too, as unpaired)
         var skipped = mains.Where(v => FileDecisions.TryGetValue(v, out var d) && d == Service.FileDecision.Quarantine).ToList();
         foreach (var video in mains.Except(skipped))
         {
             // Only a TV library to file into: a name without an episode code is most likely a show; otherwise a film
             var preferTv = targets.Tv is not null && targets.Films is null;
+
+            // An approved AI suggestion is filed as it stands, without asking the AI again (numbers typed in review win)
+            var approved = !EpisodeNumbers.ContainsKey(video) && ApprovedSuggestions.TryGetValue(video, out var a) && a.IsComplete ? a : null;
+
             // The full path, so a video whose name doesn't say which episode it is can be transcribed
-            var result = chosen is null
+            var result = approved is not null
+                ? await IdentifyApprovedAsync(parsed[video], approved, Abs(video), cancellationToken).ConfigureAwait(false)
+                : chosen is null
                 ? await _identifier.IdentifyAsync(parsed[video], preferTv, cancellationToken, Abs(video)).ConfigureAwait(false)
                 : await _identifier.IdentifyAsChosenAsync(parsed[video], chosen.Candidate, chosen.Target.IsTv, cancellationToken, Abs(video)).ConfigureAwait(false);
-            if (result.DecidedBy is not null)
+            if (approved is not null)
+            {
+                approvedCount++;
+                notes.Add(Path.GetFileName(video) + ": " + result.Reason);
+            }
+            else if (result.DecidedBy is not null)
             {
                 notes.Add(Path.GetFileName(video) + ": " + result.Reason);
+            }
+
+            // Asking first: what the AI decided waits for approval (planned on, so anything else holding it back shows too)
+            if (AskBeforeAiFiling && approved is null && AiSuggestion.From(result, MatchedTitle(result, chosen)) is { } suggestion)
+            {
+                held[video] = (suggestion, MatchedTitle(result, chosen), result.Candidates);
             }
 
             if (result.Status != IdentificationStatus.Identified)
@@ -417,6 +452,21 @@ public sealed class IngestPlanner
             }
         }
 
+        // Suggestions waiting for approval: on the video's own review item when something else holds it back too,
+        // otherwise as an item of their own
+        foreach (var (video, h) in held)
+        {
+            var i = review.FindIndex(r => string.Equals(r.Source, Abs(video), StringComparison.Ordinal));
+            if (i >= 0)
+            {
+                review[i] = review[i] with { Suggestion = h.Suggestion };
+            }
+            else
+            {
+                review.Add(new ReviewItem(Abs(video), h.Suggestion.WaitingReason()) { Matched = h.Matched, Candidates = h.Candidates, Suggestion = h.Suggestion, ApprovalOnly = true });
+            }
+        }
+
         if (review.Count > 0)
         {
             return new IngestPlan { ReleaseName = releaseName, Review = review };
@@ -497,10 +547,24 @@ public sealed class IngestPlanner
             TidyIfEmpty = tidy,
             Skipped = [.. skipped.Select(Abs)],
             Transfer = Transfer,
+            ApprovedAi = approvedCount,
 
             // Every video set aside by choice: the release is quarantined as a whole
             WholeReleaseQuarantine = skipped.Count == mains.Count,
         };
+    }
+
+    // Identifies a video as an approved AI suggestion says, as a choice made in review is: the title as suggested, the
+    // season and episode as suggested. Nothing is asked of the AI (only the episode's title is looked up)
+    private async Task<IdentificationResult> IdentifyApprovedAsync(Parsing.ParsedRelease parsed, AiSuggestion approved, string path, CancellationToken ct)
+    {
+        var release = approved.Title.IsSeries
+            ? parsed with { Kind = MediaKind.Episode, Season = approved.Season, Episode = approved.Episode, EndingEpisode = approved.EndingEpisode, Extra = ExtraType.None }
+            : parsed;
+        var title = approved.Title with { ProviderIds = ProviderIdRules.Clean(approved.Title.ProviderIds) };
+        var result = await _identifier.IdentifyAsChosenAsync(release, title, approved.Title.IsSeries, ct, path).ConfigureAwait(false);
+        var why = string.Join(" ", approved.Decisions.Select(d => d.Reason).Where(r => r.Length > 0));
+        return result with { Reason = $"Approved AI suggestion: {approved.Describe()}." + (why.Length > 0 ? " " + why : string.Empty) };
     }
 
     /// <summary>

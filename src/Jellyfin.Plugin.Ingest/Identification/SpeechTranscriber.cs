@@ -124,7 +124,7 @@ public sealed class SpeechTranscriber : ITranscriber
         HeardText heard = new(null, string.Empty);
         foreach (var start in Starts)
         {
-            heard = Read(await _transcribe("ingest", Purpose, videoPath, start, Length, null, ct).ConfigureAwait(false));
+            heard = Read(await _transcribe("ingest", Purpose, videoPath, start, Length, null, ct).ConfigureAwait(false)) with { From = start };
             if (heard.Text is not null || !heard.Note.StartsWith(TooLittle, StringComparison.Ordinal))
             {
                 return heard;

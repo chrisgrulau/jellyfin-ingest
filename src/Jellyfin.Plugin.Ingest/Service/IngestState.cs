@@ -65,6 +65,13 @@ public enum FilingChoice
 
     /// <summary>An administrator chose the library in review.</summary>
     Review,
+
+    /// <summary>
+    /// An administrator approved what the AI plugin decided the release is (a watch folder that asks first); the library
+    /// was still chosen by Ingest (the watch folder's destinations, or where a replaced copy lives), so it can be moved
+    /// like an automatic filing.
+    /// </summary>
+    AiApproved,
 }
 
 /// <summary>
@@ -240,6 +247,12 @@ public sealed record PendingReview
     public IReadOnlyDictionary<string, EpisodeNumber> FileEpisodes { get; init; } = new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal);
 
     /// <summary>
+    /// Gets the AI suggestions approved in review (by video, relative to the watch folder), kept when the release is
+    /// planned again: such a video is filed as the suggestion says, without asking the AI again.
+    /// </summary>
+    public IReadOnlyDictionary<string, AiSuggestion> Approved { get; init; } = new Dictionary<string, AiSuggestion>(StringComparer.Ordinal);
+
+    /// <summary>
     /// Gets a counter that goes up with every request, so planning (which takes a while) only clears the request it
     /// started from and never one made while it was running.
     /// </summary>
@@ -341,6 +354,13 @@ public sealed record PendingReviewItem(string Source, string Reason)
 {
     /// <summary>Gets the copies already on the server that hold this file back (one per line), or empty.</summary>
     public string Existing { get; init; } = string.Empty;
+
+    /// <summary>Gets what the AI plugin decided this file is, waiting for approval (a watch folder that asks first).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AiSuggestion? Suggestion { get; init; }
+
+    /// <summary>Gets a value indicating whether the file waits only for its <see cref="Suggestion"/> to be approved.</summary>
+    public bool ApprovalOnly { get; init; }
 
     /// <summary>
     /// Gets a value indicating whether the file is a video, so it can be given a season and episode in review.
@@ -534,6 +554,7 @@ public sealed partial class IngestStateStore
                 Chosen = existing?.Chosen,
                 FileDecisions = existing?.FileDecisions ?? new Dictionary<string, FileDecision>(StringComparer.Ordinal),
                 FileEpisodes = existing?.FileEpisodes ?? new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal),
+                Approved = existing?.Approved ?? new Dictionary<string, AiSuggestion>(StringComparer.Ordinal),
                 SearchResults = existing?.SearchResults ?? [],
                 Request = newer ? existing!.Request : ReviewRequest.None,
                 RequestVersion = existing?.RequestVersion ?? 0,
@@ -582,9 +603,77 @@ public sealed partial class IngestStateStore
                 : ReviewChoice.SameTitle(chosen.Candidate, ReviewChoice.CurrentMatch(r)) ? r.FileDecisions
                 : r.FileDecisions.Where(d => d.Value != FileDecision.Replace).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal),
             FileEpisodes = chosen is null ? new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal) : r.FileEpisodes,
+
+            // Another title (or a clean retry) starts again from that choice: an approved AI suggestion no longer applies
+            Approved = new Dictionary<string, AiSuggestion>(StringComparer.Ordinal),
             Request = ReviewRequest.Retry,
             RequestVersion = r.RequestVersion + 1,
         });
+
+    /// <summary>
+    /// Approves the AI suggestions a review shows, as the page showed them (<see cref="AiApproval.KeyOf"/>), and plans
+    /// the release again on the next sweep, filing each video exactly as suggested (without asking the AI again).
+    /// </summary>
+    /// <param name="id">Review id.</param>
+    /// <param name="shownKey">The suggestions' key as the page showed it.</param>
+    /// <param name="replace">Whether to also replace the copies already on the server that hold the release back.</param>
+    /// <returns>Whether it was approved, or why not.</returns>
+    public AiApprovalOutcome RequestApprove(string id, string? shownKey, bool replace = false)
+    {
+        lock (_lock)
+        {
+            var s = Load();
+            var i = s.Reviews.FindIndex(r => r.Id == id);
+            if (i < 0)
+            {
+                return AiApprovalOutcome.NotFound;
+            }
+
+            var outcome = AiApproval.Check(s.Reviews[i], shownKey);
+            if (outcome != AiApprovalOutcome.Approved)
+            {
+                return outcome;
+            }
+
+            s.Reviews[i] = AiApproval.Approve(s.Reviews[i], replace);
+            Save(s);
+            return outcome;
+        }
+    }
+
+    /// <summary>
+    /// Approves many reviews' AI suggestions at once (Approve all), in one save: only reviews that wait for nothing but
+    /// an AI suggestion (<see cref="AiApproval.IsOnlyAi"/>), and only as the page showed them. Others are skipped.
+    /// </summary>
+    /// <param name="approvals">The reviews and the suggestion keys the page showed.</param>
+    /// <returns>The reviews approved.</returns>
+    public IReadOnlyList<PendingReview> ApproveAll(IEnumerable<ReviewApproval> approvals)
+    {
+        ArgumentNullException.ThrowIfNull(approvals);
+        lock (_lock)
+        {
+            var s = Load();
+            var done = new List<PendingReview>();
+            foreach (var approval in approvals.Where(a => a is not null).DistinctBy(a => a.Id))
+            {
+                var i = s.Reviews.FindIndex(r => r.Id == approval.Id);
+                if (i < 0 || !AiApproval.IsOnlyAi(s.Reviews[i]) || AiApproval.Check(s.Reviews[i], approval.Key) != AiApprovalOutcome.Approved)
+                {
+                    continue;
+                }
+
+                s.Reviews[i] = AiApproval.Approve(s.Reviews[i], replace: false);
+                done.Add(s.Reviews[i]);
+            }
+
+            if (done.Count > 0)
+            {
+                Save(s);
+            }
+
+            return done;
+        }
+    }
 
     /// <summary>
     /// Records decisions made file by file and plans the release again on the next sweep. A file given no decision
@@ -1004,13 +1093,17 @@ public sealed partial class IngestStateStore
             var r = _state.Reviews[i];
             _state.Reviews[i] = r with
             {
-                Items = r.Items ?? [],
+                // A suggestion saved without its title can't be shown or approved
+                Items = [.. (r.Items ?? []).Where(it => it is not null).Select(it => it.Suggestion is { } sg ? it with { Suggestion = sg.Title is null ? null : sg with { Decisions = sg.Decisions ?? [] } } : it)],
                 Candidates = r.Candidates ?? [],
                 SearchResults = r.SearchResults ?? [],
                 FileDecisions = r.FileDecisions ?? new Dictionary<string, FileDecision>(StringComparer.Ordinal),
                 FileEpisodes = r.FileEpisodes is null
                     ? new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal)
                     : r.FileEpisodes.Where(e => e.Value is { IsValid: true }).ToDictionary(e => e.Key, e => e.Value, StringComparer.Ordinal),
+                Approved = r.Approved is null
+                    ? new Dictionary<string, AiSuggestion>(StringComparer.Ordinal)
+                    : r.Approved.Where(a => a.Value is { Title: not null, IsComplete: true }).ToDictionary(a => a.Key, a => a.Value with { Decisions = a.Value.Decisions ?? [] }, StringComparer.Ordinal),
                 Chosen = r.Chosen is { Candidate: not null, Target: not null } c ? c : null,
             };
         }

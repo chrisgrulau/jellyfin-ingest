@@ -516,6 +516,10 @@ public sealed partial class IngestService : IHostedService, IDisposable
             EpisodeNumbers = previous?.FileEpisodes ?? new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal),
             Transfer = watch.Transfer,
 
+            // "Ask me first": what the AI decides waits for approval; approved suggestions are filed as they stand
+            AskBeforeAiFiling = watch.WhenAiDecides == AiDecisionMode.AskFirst,
+            ApprovedSuggestions = previous?.Approved ?? new Dictionary<string, AiSuggestion>(StringComparer.Ordinal),
+
             // A replacement is filed where the copy it replaces lives
             Libraries = sweep.Libraries,
         };
@@ -525,7 +529,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         if (!plan.IsReady)
         {
             var retryAt = _retries.Schedule(id, watch.Path, release, plan.Retry);
-            var items = plan.Review.Select(r => new PendingReviewItem(Path.GetRelativePath(watch.Path, r.Source), r.Reason) { Existing = r.Existing }).ToList();
+            var items = ItemsOf(watch.Path, plan);
             LogNeedsReview(_logger, release, items.Count);
             foreach (var item in items)
             {
@@ -533,7 +537,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
             }
 
             // Only report a review once per distinct set of reasons (restarts and retries plan the release again).
-            if (previous is null || previous.Request != ReviewRequest.None || !previous.Items.SequenceEqual(items))
+            if (previous is null || previous.Request != ReviewRequest.None || !previous.Items.Select(i => (i.Source, i.Reason, i.Existing)).SequenceEqual(items.Select(i => (i.Source, i.Reason, i.Existing))))
             {
                 _state.Record(_activity.NeedsReview(watch.Path, release, items));
             }
@@ -603,7 +607,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
 
         // A real filing carries its run, so it can be undone from Recent activity
-        _state.RecordUnlessRepeat(_activity.Filed(watch.Path, release, plan, report.Completed, summaryLine, dryRun) with { Run = dryRun ? null : report.Run, ChosenBy = previous?.Chosen is null ? FilingChoice.Automatic : FilingChoice.Review });
+        _state.RecordUnlessRepeat(_activity.Filed(watch.Path, release, plan, report.Completed, summaryLine, dryRun) with { Run = dryRun ? null : report.Run, ChosenBy = ChoiceOf(previous, plan) });
 
         // A release filed by copy or hard link stays in the watch folder: remember it so it isn't filed again
         if (!dryRun && watch.Transfer != TransferMode.Move)
@@ -615,6 +619,11 @@ public sealed partial class IngestService : IHostedService, IDisposable
         {
             // Keep the decision so the release files the same way once dry run is turned off.
             _state.MarkPlannedInDryRun(id, $"Dry run: planned as {chosen.Candidate.Name}{(chosen.Candidate.Year is { } y ? $" ({y})" : string.Empty)}; it will be filed once dry run is off.", seenVersion);
+        }
+        else if (dryRun && plan.ApprovedAi > 0)
+        {
+            // Likewise an approved AI suggestion: kept, so the AI isn't asked again once dry run is off
+            _state.MarkPlannedInDryRun(id, $"Dry run: planned as the approved AI suggestion ({previous!.Approved.Values.First().Describe()}); it will be filed once dry run is off.", seenVersion);
         }
         else
         {
@@ -645,6 +654,22 @@ public sealed partial class IngestService : IHostedService, IDisposable
         var fs = new PhysicalFileOperations();
         foreach (var action in queued)
         {
+            if (action.Kind == QueuedActionKind.ApproveAll)
+            {
+                // Only the review state changes (in one save); the approved releases are planned later in this sweep
+                try
+                {
+                    var outcome = Api.ReviewDecisions.ApproveAll(_state, action.Approvals);
+                    LogReturned(_logger, action.Kind, outcome);
+                }
+                finally
+                {
+                    _progress.Complete(action);
+                }
+
+                continue;
+            }
+
             try
             {
                 Directory.CreateDirectory(_ingestPaths.DataFolder);
@@ -702,6 +727,40 @@ public sealed partial class IngestService : IHostedService, IDisposable
     /// <param name="review">The release's review, if any.</param>
     /// <returns><c>true</c> to leave it alone.</returns>
     public static bool IsHeld(PendingReview? review) => review is { Held: true, Request: ReviewRequest.None };
+
+    /// <summary>
+    /// A plan's review items as a review keeps them (relative to the watch folder), with any AI suggestion waiting for
+    /// approval.
+    /// </summary>
+    /// <param name="watchFolder">The watch folder.</param>
+    /// <param name="plan">A plan that needs review.</param>
+    /// <returns>The items.</returns>
+    public static IReadOnlyList<PendingReviewItem> ItemsOf(string watchFolder, IngestPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return [.. plan.Review.Select(r => new PendingReviewItem(Path.GetRelativePath(watchFolder, r.Source), r.Reason)
+        {
+            Existing = r.Existing,
+            Suggestion = r.Suggestion,
+            ApprovalOnly = r.ApprovalOnly,
+        })];
+    }
+
+    /// <summary>
+    /// How a filing's library was chosen, for <see cref="ActivityEntry.ChosenBy"/>: in review when a title and library
+    /// were chosen there; <see cref="FilingChoice.AiApproved"/> when an approved AI suggestion was filed (the library
+    /// was still Ingest's choice); otherwise automatically.
+    /// </summary>
+    /// <param name="previous">The release's review before planning, if any.</param>
+    /// <param name="plan">The plan that was carried out.</param>
+    /// <returns>The choice.</returns>
+    public static FilingChoice ChoiceOf(PendingReview? previous, IngestPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return previous?.Chosen is not null ? FilingChoice.Review
+            : plan.ApprovedAi > 0 ? FilingChoice.AiApproved
+            : FilingChoice.Automatic;
+    }
 
     /// <summary>
     /// The film and show folders a plan files into (not the quarantine), for refreshing just those.

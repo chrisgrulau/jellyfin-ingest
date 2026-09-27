@@ -84,6 +84,48 @@ public sealed record ReviewMatchView
 
     /// <summary>Gets each search result's state.</summary>
     public IReadOnlyList<CandidateState> SearchResults { get; init; } = [];
+
+    /// <summary>Gets the AI plugin's suggestion waiting for approval (a watch folder that asks first); <c>null</c> when there is none.</summary>
+    public AiSuggestionView? Ai { get; init; }
+}
+
+/// <summary>
+/// The AI plugin's suggestion on a Needs review card: what it chose, why, from what, and how to approve it.
+/// </summary>
+public sealed record AiSuggestionView
+{
+    /// <summary>Gets the suggestions' key (<see cref="Service.AiApproval.KeyOf"/>), sent back with an approval.</summary>
+    public required string Key { get; init; }
+
+    /// <summary>Gets what was suggested, e.g. <c>Harbour Watch (2004) S02E03 'Glass Harbour'</c>.</summary>
+    public required string Title { get; init; }
+
+    /// <summary>Gets who suggested it, e.g. <c>AI (model)</c>.</summary>
+    public string By { get; init; } = string.Empty;
+
+    /// <summary>Gets the AI's short reason (one sentence); empty when it gave none.</summary>
+    public string Reason { get; init; } = string.Empty;
+
+    /// <summary>Gets what it chose from, e.g. <c>Picked from 3 close candidates.</c> or, for an episode from a transcript, how much was heard and from where.</summary>
+    public string Basis { get; init; } = string.Empty;
+
+    /// <summary>Gets how closely the name matched the pick, e.g. <c>Name match 92%</c>; for a transcript, that the name says nothing.</summary>
+    public string Confidence { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets a value indicating whether the AI picked the episode (the title came from the name): if it is wrong, the
+    /// right one is given as a season and episode under <em>Choose file by file</em> rather than by picking another title.
+    /// </summary>
+    public bool Episode { get; init; }
+
+    /// <summary>Gets how many other files of the release have a suggestion too (their details are in the card's details).</summary>
+    public int More { get; init; }
+
+    /// <summary>Gets a value indicating whether the release waits for nothing but approving (Approve all takes it).</summary>
+    public bool OnlyAi { get; init; }
+
+    /// <summary>Gets a value indicating whether every file is already on the server, so approving means replacing those copies.</summary>
+    public bool Replaces { get; init; }
 }
 
 /// <summary>

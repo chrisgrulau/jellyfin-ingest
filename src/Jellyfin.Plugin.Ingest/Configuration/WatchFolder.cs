@@ -42,6 +42,13 @@ public class WatchFolder
     public bool? DryRun { get; set; }
 
     /// <summary>
+    /// Gets or sets what happens when the AI plugin decided what a release is (a close match settled by it, or an
+    /// episode it picked by title or from a transcript): filed as usual (the default, and what folders saved before this
+    /// setting existed do), or held under <em>Needs review</em> with the AI's choice ready to approve.
+    /// </summary>
+    public AiDecisionMode WhenAiDecides { get; set; } = AiDecisionMode.FileAutomatically;
+
+    /// <summary>
     /// Whether this folder is in dry run: its own setting, or <paramref name="fallback"/> when it has none.
     /// </summary>
     /// <param name="fallback">The global setting (<see cref="PluginConfiguration.DryRun"/>).</param>
@@ -66,6 +73,18 @@ public class WatchFolder
 
         return changed;
     }
+}
+
+/// <summary>
+/// What a watch folder does with a release the AI plugin identified.
+/// </summary>
+public enum AiDecisionMode
+{
+    /// <summary>File it, as for any confident match (the AI's reason is in Recent activity).</summary>
+    FileAutomatically = 0,
+
+    /// <summary>Hold it under Needs review with the AI's choice pre-selected, until an administrator approves it.</summary>
+    AskFirst,
 }
 
 /// <summary>

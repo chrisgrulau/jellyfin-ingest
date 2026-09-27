@@ -134,7 +134,8 @@ public sealed class ActivityReport
                 + (plan.Replacing.Count > 0 ? string.Create(CultureInfo.InvariantCulture, $" Replaced the copies already on the server ({plan.Replacing.Count} file(s), now in quarantine).") : string.Empty)
                 + (plan.ReplacementSummary.Length > 0 ? " " + plan.ReplacementSummary : string.Empty)
                 + (plan.Skipped.Count > 0 ? string.Create(CultureInfo.InvariantCulture, $" {plan.Skipped.Count} file(s) quarantined as chosen, not filed.") : string.Empty)
-                + (plan.Notes.Count > 0 ? " The AI plugin decided part of this (see the details)." : string.Empty),
+                + (plan.ApprovedAi > 0 ? " Approved AI suggestion (see the details)."
+                    : plan.Notes.Count > 0 ? " The AI plugin decided part of this (see the details)." : string.Empty),
             Details = [.. plan.Notes, .. plan.ReplacementNotes, .. plan.Replacing.Select(p => "Replaced (moved to quarantine): " + p), .. plan.Skipped.Select(p => "Quarantined as chosen: " + Path.GetRelativePath(watchFolder, p)), .. Describe(watchFolder, completed)],
             Counts = CountOf(plan, completed),
             Videos = VideosOf(completed),

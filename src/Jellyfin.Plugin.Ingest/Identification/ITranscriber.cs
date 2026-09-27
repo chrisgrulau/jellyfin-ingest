@@ -8,7 +8,11 @@ namespace Jellyfin.Plugin.Ingest.Identification;
 /// </summary>
 /// <param name="Text">The words heard, or <c>null</c> if there is no usable transcript.</param>
 /// <param name="Note">Why not, in words for the activity panel (empty when there is nothing worth saying).</param>
-public sealed record HeardText(string? Text, string Note);
+public sealed record HeardText(string? Text, string Note)
+{
+    /// <summary>Gets where in the video the transcript starts, when known.</summary>
+    public System.TimeSpan? From { get; init; }
+}
 
 /// <summary>
 /// Transcribes a short stretch of a video (for example through the Subtitles plugin), to tell which episode it is.
