@@ -27,6 +27,15 @@
       #IngestConfigPage .ig-button-row > .emby-button, #IngestConfigPage .emby-button.block { display: inline-flex; justify-content: center; width: auto; min-width: 12em; max-width: 20em; margin: 0; }
       #IngestConfigPage .ig-button-row > .emby-button.block { flex: 0 1 16em; }
       #IngestConfigPage .ig-button-row:not(:has(> :not([hidden]))) { display: none; }
+      /* In-progress feedback on action buttons: a small spinner (still, when motion is reduced) and the outcome inline */
+      #IngestConfigPage .ig-spinner { display: inline-block; width: .85em; height: .85em; margin-right: .45em; vertical-align: -.1em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: ig-spin .8s linear infinite; }
+      @keyframes ig-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { #IngestConfigPage .ig-spinner { animation: none; border-right-color: currentColor; opacity: .6; } }
+      #IngestConfigPage .emby-button.ig-busy { cursor: progress; }
+      #IngestConfigPage .emby-button.ig-busy[disabled] { opacity: .85; }
+      #IngestConfigPage .ig-outcome { margin: .4em 0 .3em; font-size: .9em; }
+      #IngestConfigPage .ig-outcome-ok { color: var(--ig-ok); }
+      #IngestConfigPage .ig-outcome-bad { color: var(--ingest-error); }
       /* Watch folder rows */
       #IngestConfigPage .ingest-row { padding: 1em; margin: .75em 0; border-radius: 6px; border: 1px solid var(--ig-line); }
       #IngestConfigPage .ingest-row.invalid { border-color: rgba(220,53,69,.8); }
@@ -296,6 +305,77 @@
           var m = (getComputedStyle(page).color || '').match(/\d+(\.\d+)?/g);
           var light = !!m && (0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2]) < 128;
           page.classList.toggle('ingest-light', light);
+        }
+
+        // ---- In-progress feedback: busy(button, label) disables the button and its row's other actions, shows a spinner
+        // and the label until done(ok, message) is called, then shows the outcome inline (kept across list refreshes) ----
+        var busyCount = 0;
+        var outcomes = [];
+        function selectorOf(b) {
+          var cls = Array.prototype.filter.call(b.classList, function (c) { return /^ingest-/.test(c); })[0];
+          var sel = b.id ? '#' + CSS.escape(b.id) : cls ? '.' + cls : 'button';
+          Array.prototype.forEach.call(b.attributes, function (a) { if (/^data-/.test(a.name)) { sel += '[' + a.name + '="' + CSS.escape(a.value) + '"]'; } });
+          var card = b.closest('.ingest-card[data-id]');
+          return card ? '.ingest-card[data-id="' + CSS.escape(card.getAttribute('data-id')) + '"] ' + sel : sel;
+        }
+        function placeOutcomes() {
+          Array.prototype.forEach.call(page.querySelectorAll('.ig-outcome'), function (n) { n.remove(); });
+          var now = Date.now();
+          outcomes = outcomes.filter(function (o) { return o.until > now; });
+          outcomes.forEach(function (o) {
+            var p = document.createElement('p');
+            p.className = 'ig-outcome ' + (o.ok ? 'ig-outcome-ok' : 'ig-outcome-bad');
+            p.textContent = o.msg;
+            var b = page.querySelector(o.sel);
+            if (b) { (b.closest('.ig-actions, .ig-day, .ig-button-row, .ingest-tools') || b.parentNode).insertAdjacentElement('afterend', p); }
+            else if (o.section) { page.querySelector('#' + o.section).insertAdjacentElement('beforebegin', p); }
+          });
+        }
+        function busy(b, label) {
+          var sel = selectorOf(b);
+          var section = b.closest('#Reviews, #Waiting, #Activity, #Quarantine');
+          var group = b.closest('.ig-day, li.ig-row, .ingest-card, .ig-button-row, .ingest-tools, .ingest-banner') || b.parentNode;
+          var rows = [group];
+          // A day's heading goes with the list of its releases below it
+          var next = group.nextElementSibling;
+          while (next && next.classList.contains('ig-outcome')) { next = next.nextElementSibling; }
+          if (group.classList.contains('ig-day') && next && next.tagName === 'UL') { rows.push(next); }
+          var others = [];
+          rows.forEach(function (r) {
+            r.setAttribute('aria-busy', 'true');
+            Array.prototype.forEach.call(r.querySelectorAll('button'), function (x) { if (!x.disabled) { x.disabled = true; others.push(x); } });
+          });
+          if (others.indexOf(b) < 0) { b.disabled = true; others.push(b); }
+          var span = b.querySelector('span') || b;
+          var before = span.innerHTML;
+          span.innerHTML = '<span class="ig-spinner" aria-hidden="true"></span>' + esc(label);
+          b.classList.add('ig-busy');
+          outcomes = outcomes.filter(function (o) { return o.sel !== sel; });
+          placeOutcomes();
+          busyCount++;
+          announce(label);
+          var finished = false;
+          return function done(ok, msg) {
+            if (finished) { return; }
+            finished = true;
+            busyCount = Math.max(0, busyCount - 1);
+            span.innerHTML = before;
+            b.classList.remove('ig-busy');
+            others.forEach(function (x) { x.disabled = false; });
+            rows.forEach(function (r) { r.removeAttribute('aria-busy'); });
+            if (msg) {
+              outcomes.push({ sel: sel, section: section && section.id, ok: ok, msg: msg, until: Date.now() + 60000 });
+              announce(msg);
+              setTimeout(placeOutcomes, 61000);
+            }
+            placeOutcomes();
+          };
+        }
+        function bytesText(n) {
+          var units = ['bytes', 'KB', 'MB', 'GB', 'TB'], i = 0;
+          n = +n || 0;
+          while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+          return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + ' ' + units[i];
         }
 
         function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -820,6 +900,7 @@
             renderWaiting();
             renderReviews();
             renderActivity();
+            placeOutcomes();
           });
         }
 
@@ -834,15 +915,18 @@
 
         function plural(n, one) { return n + ' ' + one + (n === 1 ? '' : 's'); }
 
+        var TODAY_NOTE = 'Today\'s folder is still in use; anything quarantined later today goes into a new folder for today.';
         function dayHeading(d) {
           var date = day(d.Date);
           var label = dayDiff(new Date(), date) === 0 ? 'Today' : dayDiff(new Date(), date) === 1 ? 'Yesterday' : date.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
           var fate = d.Managed ? 'deleted ' + until(day(d.DeletesOn).toISOString()) : 'not created by Ingest, so never deleted';
           var fk = d.Root + '|' + d.Folder + '|';
+          var today = dayDiff(new Date(), date) === 0;
           var roots = (quarantinePage.Days || []).map(function (x) { return x.Root; }).filter(function (r, i, a) { return a.indexOf(r) === i; });
           return '<div class="ig-day"><span><strong title="' + esc(d.Folder) + '">' + esc(label) + '</strong> <span class="ingest-muted">' + plural(d.Releases, 'release') + ', ' + esc(d.Size) + ' · ' + esc(fate) + '</span>' +
             (roots.length > 1 ? '<div class="ingest-muted">' + esc(d.Root) + '</div>' : '') + '</span>' +
-            (d.Managed ? '<button is="emby-button" type="button" class="raised button-cancel ingest-qdelete" data-root="' + esc(d.Root) + '" data-folder="' + esc(d.Folder) + '" data-name=""><span>' + (confirmDelete[fk] ? 'Confirm: delete this day now' : 'Delete day now') + '</span></button>' : '') + '</div>';
+            (d.Managed ? '<button is="emby-button" type="button" class="raised button-cancel ingest-qdelete" data-root="' + esc(d.Root) + '" data-folder="' + esc(d.Folder) + '" data-name=""><span>' + (confirmDelete[fk] ? 'Confirm: delete this day now' : 'Delete day now') + '</span></button>' : '') +
+            (d.Managed && today && confirmDelete[fk] ? '<div class="ingest-muted ig-today-note">' + TODAY_NOTE + '</div>' : '') + '</div>';
         }
 
         function renderQuarantine() {
@@ -878,6 +962,7 @@
           return ApiClient.getJSON(ApiClient.getUrl('Ingest/Quarantine/Page', { offset: 0, limit: quarantineLimit })).then(function (p) {
             quarantinePage = p || { Items: [], Total: 0, Days: [] };
             renderQuarantine();
+            placeOutcomes();
           }, function () {
             page.querySelector('#Quarantine').innerHTML = '<p class="ig-empty">The quarantine couldn\'t be read.</p>';
           });
@@ -893,10 +978,30 @@
           }, loadStatus);
         }
 
-        function post(path, body) {
+        // The server's message for a refused request (a plain string), or a fallback
+        function messageOf(xhr, fallback) {
+          var p = xhr && xhr.text ? xhr.text() : Promise.resolve('');
+          return p.then(function (t) { return t && t.length < 300 ? t.replace(/^"|"$/g, '') : fallback; }, function () { return fallback; });
+        }
+
+        // With a button: it shows the work in progress (busy) and then the outcome on its row instead of an alert.
+        // No timeout is set on purpose: ApiClient.ajax only gives up when asked to, and a delete of a large folder, or one
+        // waiting for a filing to finish, can take minutes.
+        function post(path, body, btn, label, okMsg) {
+          var done = btn ? busy(btn, label || 'Working…') : null;
           var req = { type: 'POST', url: ApiClient.getUrl(path) };
           if (body) { req.data = JSON.stringify(body); req.contentType = 'application/json'; }
-          return ApiClient.ajax(req).then(function () { announce('Done. The page is being refreshed.'); return loadStatus(); }, failed);
+          return ApiClient.ajax(req).then(function () {
+            if (done) { done(true, okMsg || null); }
+            if (!okMsg) { announce('Done. The page is being refreshed.'); }
+            return loadStatus();
+          }, function (xhr) {
+            if (!done) { return failed(xhr); }
+            return messageOf(xhr, 'That didn\'t go through; the page is being refreshed.').then(function (msg) {
+              done(false, msg);
+              return loadStatus();
+            });
+          });
         }
 
         // Same as ReviewChoice.KeyOf on the server: name|year|provider ids sorted by name
@@ -929,9 +1034,9 @@
             if (!shown[index]) { return; }
             delete searchResults[id];
             // The server resolves the choice from its own list; the browser says which one and what it showed there
-            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose', { List: list === 'search' ? 'search' : 'suggested', Index: index, LibraryId: lib, Key: candidateKey(shown[index].Candidate) });
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose', { List: list === 'search' ? 'search' : 'suggested', Index: index, LibraryId: lib, Key: candidateKey(shown[index].Candidate) }, btn, 'Saving the choice…');
           } else if (btn.classList.contains('ingest-retry')) {
-            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Retry');
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Retry', null, btn, 'Retrying…');
           } else if (btn.classList.contains('ingest-apply-files')) {
             var rf = reviewById(id);
             if (!rf) { return; }
@@ -945,14 +1050,14 @@
             });
             delete fileChoices[id];
             delete fileNums[id];
-            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Files', { Decisions: decisions, Key: matchKey(id) });
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Files', { Decisions: decisions, Key: matchKey(id) }, btn, 'Saving…');
           } else if (btn.classList.contains('ingest-replace')) {
             var rr = reviewById(id);
             if (!rr) { return; }
             if (!confirmReplace[id]) { confirmReplace[id] = true; renderReviews(); return; }
             delete confirmReplace[id];
             // The title the page showed as in use goes too: the server refuses if it has changed since
-            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Replace', { Existing: rr.Items.map(function (i) { return i.Existing; }).join('\n'), Key: matchKey(id) });
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Replace', { Existing: rr.Items.map(function (i) { return i.Existing; }).join('\n'), Key: matchKey(id) }, btn, 'Replacing…');
           } else if (btn.classList.contains('ingest-open-files')) {
             filesOpen[id] = true;
             renderReviews();
@@ -961,7 +1066,7 @@
           } else if (btn.classList.contains('ingest-quarantine')) {
             if (!confirmQuarantine[id]) { confirmQuarantine[id] = true; btn.querySelector('span').textContent = 'Confirm: quarantine whole release'; return; }
             delete confirmQuarantine[id];
-            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Quarantine');
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Quarantine', null, btn, 'Quarantining…');
           }
         });
 
@@ -1015,9 +1120,8 @@
           if (e.target.closest('#WaitingMore')) { waitingLimit += 10; renderWaiting(); return; }
           var b = e.target.closest('.ingest-process-now');
           if (!b) { return; }
-          b.disabled = true;
           // Starts a sweep now; refresh again once it has had a moment to pick the release up
-          post('Ingest/Waiting/' + encodeURIComponent(b.getAttribute('data-id')) + '/ProcessNow').then(function () { setTimeout(loadStatus, 5000); });
+          post('Ingest/Waiting/' + encodeURIComponent(b.getAttribute('data-id')) + '/ProcessNow', null, b, 'Starting…').then(function () { setTimeout(loadStatus, 5000); });
         });
 
         page.querySelector('#Activity').addEventListener('click', function (e) {
@@ -1028,8 +1132,7 @@
           // Two clicks: the files go back to the watch folder (or the library copies are deleted, for a copied release)
           if (!confirmUndo[run]) { confirmUndo[run] = true; b.querySelector('span').textContent = 'Confirm: undo this filing'; return; }
           delete confirmUndo[run];
-          b.disabled = true;
-          post('Ingest/Activity/' + encodeURIComponent(run) + '/Undo').then(function () { setTimeout(loadStatus, 5000); });
+          post('Ingest/Activity/' + encodeURIComponent(run) + '/Undo', null, b, 'Undoing…').then(function () { setTimeout(loadStatus, 5000); });
         });
 
         page.querySelector('#Quarantine').addEventListener('click', function (e) {
@@ -1038,21 +1141,38 @@
           if (!b) { return; }
           var body = { Root: b.getAttribute('data-root'), Folder: b.getAttribute('data-folder'), Name: b.getAttribute('data-name') };
           if (b.classList.contains('ingest-qrestore')) {
-            b.disabled = true;
-            post('Ingest/Quarantine/Restore', body).then(function () { setTimeout(function () { loadStatus().then(loadQuarantine); }, 5000); });
+            post('Ingest/Quarantine/Restore', body, b, 'Restoring…').then(function () { setTimeout(function () { loadStatus().then(loadQuarantine); }, 5000); });
             return;
           }
           // Delete now takes two clicks, and can't be undone
           var k = body.Root + '|' + body.Folder + '|' + body.Name;
-          if (!confirmDelete[k]) { confirmDelete[k] = true; b.querySelector('span').textContent = body.Name ? 'Confirm: delete now' : 'Confirm: delete this day now'; return; }
+          var dayInfo = (quarantinePage.Days || []).filter(function (d) { return d.Root === body.Root && d.Folder === body.Folder; })[0];
+          var isToday = !!dayInfo && dayDiff(new Date(), day(dayInfo.Date)) === 0;
+          if (!confirmDelete[k]) {
+            confirmDelete[k] = true;
+            b.querySelector('span').textContent = body.Name ? 'Confirm: delete now' : 'Confirm: delete this day now';
+            var head = b.closest('.ig-day');
+            if (!body.Name && isToday && head && !head.querySelector('.ig-today-note')) { head.insertAdjacentHTML('beforeend', '<div class="ingest-muted ig-today-note">' + TODAY_NOTE + '</div>'); }
+            return;
+          }
           delete confirmDelete[k];
-          b.disabled = true;
-          if (!body.Name) { delete body.Name; }
-          post('Ingest/Quarantine/Delete', body).then(loadQuarantine);
+          var what, size;
+          if (body.Name) {
+            var rel = (quarantinePage.Items || []).filter(function (q) { return q.Root === body.Root && q.Folder === body.Folder && q.Name === body.Name; })[0];
+            what = body.Name;
+            size = rel ? bytesText(rel.Bytes) : '';
+          } else {
+            delete body.Name;
+            what = body.Folder;
+            size = dayInfo ? dayInfo.Size : '';
+          }
+          var okMsg = 'Deleted ' + what + (size ? ' — ' + size + ' freed.' : '.') + (!body.Name && isToday ? ' Anything quarantined later today goes into a new folder for today.' : '');
+          // Refreshed either way: a partial delete changes the sizes and counts
+          post('Ingest/Quarantine/Delete', body, b, 'Deleting…', okMsg).then(loadQuarantine);
         });
 
-        page.querySelector('#PauseIngest').addEventListener('click', function () { post('Ingest/Pause'); });
-        page.querySelector('#ResumeIngest').addEventListener('click', function () { post('Ingest/Resume'); });
+        page.querySelector('#PauseIngest').addEventListener('click', function (e) { post('Ingest/Pause', null, e.currentTarget, 'Pausing…'); });
+        page.querySelector('#ResumeIngest').addEventListener('click', function (e) { post('Ingest/Resume', null, e.currentTarget, 'Resuming…'); });
 
         page.querySelector('#ActivityFilters').addEventListener('click', function (e) {
           var b = e.target.closest('button');
@@ -1086,7 +1206,7 @@
             Dashboard.hideLoadingMsg();
             loadStatus();
             loadQuarantine();
-            if (!statusTimer) { statusTimer = setInterval(function () { if (!document.hidden && !busyCard && !page.querySelector('#Reviews').contains(document.activeElement)) { loadStatus(); } }, 15000); }
+            if (!statusTimer) { statusTimer = setInterval(function () { if (!document.hidden && !busyCard && !busyCount && !page.querySelector('#Reviews').contains(document.activeElement)) { loadStatus(); } }, 15000); }
             if (!tickTimer) { tickTimer = setInterval(tickTimes, 30000); }
           });
         });
@@ -1144,6 +1264,7 @@
 
           // The server applies the folder safety rules (libraries, Jellyfin's own folders, overlaps); show its answer
           var quarantinePath = page.querySelector('#QuarantinePath').value.trim();
+          var saved = busy(page.querySelector('#IngestConfigForm button[type="submit"]'), 'Saving…');
           Dashboard.showLoadingMsg();
           ApiClient.ajax({
             type: 'POST',
@@ -1164,6 +1285,7 @@
             });
             if (problems.length) {
               Dashboard.hideLoadingMsg();
+              saved(false, 'Not saved: some folders aren\'t safe to use.');
               Dashboard.alert('Some folders aren\'t safe to use. Fix the highlighted settings, then save.');
               var bad = page.querySelector('.ingest-row.invalid') || qError;
               if (bad) { reveal(bad); }
@@ -1171,14 +1293,16 @@
             }
 
             return Promise.resolve(saveSettings(folders, quarantinePath)).then(function () {
+              saved(true, 'Saved.');
               if (warnings.length) {
                 Dashboard.alert('Saved. Note: ' + warnings.map(function (w) { return w.Folder + ': ' + w.Problem; }).join(' '));
               }
             });
           }, function () {
             Dashboard.hideLoadingMsg();
+            saved(false, 'The folder settings couldn\'t be checked; nothing was saved.');
             Dashboard.alert('The folder settings couldn\'t be checked; nothing was saved.');
-          });
+          }).then(function () { saved(false, null); }, function () { saved(false, 'Not saved; check the Jellyfin log.'); });
           return false;
         });
 

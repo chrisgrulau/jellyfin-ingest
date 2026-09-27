@@ -22,6 +22,7 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
     private readonly ILibraryManager _libraryManager;
     private readonly IApplicationPaths _paths;
     private readonly IConfigurationManager _configuration;
+    private readonly IngestProgress _progress;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PurgeQuarantineTask"/> class.
@@ -30,9 +31,11 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
     /// <param name="libraryManager">Jellyfin library manager (to check the quarantine is safe).</param>
     /// <param name="paths">Jellyfin's own folders (to check the quarantine is safe).</param>
     /// <param name="configuration">Jellyfin's configuration (for the transcode folder).</param>
+    /// <param name="progress">Holds the gate filing uses, so the purge never runs while files are being moved.</param>
     /// <param name="logger">Logger.</param>
-    public PurgeQuarantineTask(IngestStateStore state, ILibraryManager libraryManager, IApplicationPaths paths, IConfigurationManager configuration, ILogger<PurgeQuarantineTask> logger)
+    public PurgeQuarantineTask(IngestStateStore state, ILibraryManager libraryManager, IApplicationPaths paths, IConfigurationManager configuration, IngestProgress progress, ILogger<PurgeQuarantineTask> logger)
     {
+        _progress = progress ?? throw new ArgumentNullException(nameof(progress));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
@@ -53,14 +56,14 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
     public string Category => "Shoal";
 
     /// <inheritdoc />
-    public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(progress);
 
         var config = IngestPlugin.Instance?.Configuration;
         if (config is null)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         // Never purge in a quarantine that breaks the folder rules (e.g. one pointed at a library)
@@ -68,10 +71,24 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
         var roots = FolderPolicy.SafeQuarantineRoots(config, problems);
         var retention = Math.Max(1, config.QuarantineRetentionDays);
         var today = DateOnly.FromDateTime(DateTime.Now);
+
+        // Holds the gate filing uses for the whole purge (waiting a little for a filing that is running)
+        var results = await QuarantinePurger.PurgeAsync(_progress.FileGate, FileOperationsGate.DefaultWait, roots, today, retention, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (results is null)
+        {
+            _state.Record(new ActivityEntry
+            {
+                Time = DateTimeOffset.UtcNow,
+                Status = ActivityStatus.Failed,
+                Release = "Quarantine purge",
+                Summary = "Ingest was filing, so the quarantine wasn't purged this time; it is tried again next time.",
+            });
+            return;
+        }
+
         for (var i = 0; i < roots.Count; i++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var deleted = QuarantinePurger.Purge(roots[i], today, retention, out var failed);
+            var (deleted, failed) = results[i];
             if (failed.Count > 0)
             {
                 _state.Record(new ActivityEntry
@@ -105,8 +122,6 @@ public sealed partial class PurgeQuarantineTask : IScheduledTask
 
             progress.Report(100.0 * (i + 1) / roots.Count);
         }
-
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc />

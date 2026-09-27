@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.Ingest.Planning;
 using Jellyfin.Plugin.Ingest.Quarantine;
 using Jellyfin.Plugin.Ingest.Service;
@@ -18,7 +19,7 @@ public sealed class QuarantineOwnershipTests : IDisposable
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
     [Fact]
-    public void Someone_elses_dated_folder_survives_quarantine_and_purge()
+    public async Task Someone_elses_dated_folder_survives_quarantine_and_purge()
     {
         var theirs = Path.Combine(_root, "2026-09-26");
         Directory.CreateDirectory(theirs);
@@ -31,7 +32,7 @@ public sealed class QuarantineOwnershipTests : IDisposable
         File.WriteAllText(Path.Combine(ours, "info.nfo"), "clutter");
         Assert.Equal(ours, QuarantineMarkers.DatedFolderFor(_root, new DateOnly(2026, 9, 26)));
 
-        var deleted = QuarantinePurger.Purge(_root, new DateOnly(2026, 11, 30), 30);
+        var deleted = (await QuarantinePurger.PurgeAsync(_root, new DateOnly(2026, 11, 30), 30)).Deleted;
 
         Assert.Equal([ours], deleted);
         Assert.True(File.Exists(Path.Combine(theirs, "backup.tar")));
@@ -75,7 +76,7 @@ public sealed class QuarantineOwnershipTests : IDisposable
     // ING-34: a read-only file doesn't stop a purge, and a folder that can't be fully deleted keeps its marker (so it is
     // tried again) while the other folders are still purged
     [Fact]
-    public void A_read_only_file_is_purged()
+    public async Task A_read_only_file_is_purged()
     {
         var day = Path.Combine(_root, "2026-09-01");
         QuarantineMarkers.Mark(_root, day);
@@ -84,13 +85,13 @@ public sealed class QuarantineOwnershipTests : IDisposable
         File.WriteAllText(file, "clutter");
         new FileInfo(file).IsReadOnly = true;
 
-        Assert.Equal([day], QuarantinePurger.Purge(_root, new DateOnly(2026, 11, 30), 30));
+        Assert.Equal([day], (await QuarantinePurger.PurgeAsync(_root, new DateOnly(2026, 11, 30), 30)).Deleted);
         Assert.False(Directory.Exists(day));
     }
 
     [Fact]
     [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
-    public void A_folder_that_cant_be_emptied_keeps_its_marker_and_the_others_are_still_purged()
+    public async Task A_folder_that_cant_be_emptied_keeps_its_marker_and_the_others_are_still_purged()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows() || Environment.UserName == "root", "Needs a non-root Unix account.");
         var stuck = Path.Combine(_root, "2026-09-01");
@@ -103,7 +104,7 @@ public sealed class QuarantineOwnershipTests : IDisposable
         File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
-            var deleted = QuarantinePurger.Purge(_root, new DateOnly(2026, 11, 30), 30, out var failed);
+            var (deleted, failed) = await QuarantinePurger.PurgeAsync(_root, new DateOnly(2026, 11, 30), 30);
 
             Assert.Equal([fine], deleted);
             Assert.Single(failed);

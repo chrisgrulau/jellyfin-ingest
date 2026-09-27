@@ -119,6 +119,13 @@ public static class QuarantineMarkers
     public static bool IsMarked(string datedFolder) => File.Exists(Path.Combine(datedFolder, DatedMarker));
 
     /// <summary>
+    /// Puts back the marker of a dated folder a deletion couldn't finish, so it is never left unmarked (an unmarked folder
+    /// is never purged, and Ingest would quarantine beside it instead of into it).
+    /// </summary>
+    /// <param name="datedFolder">The folder (which exists).</param>
+    internal static void Remark(string datedFolder) => WriteIfMissing(Path.Combine(datedFolder, DatedMarker));
+
+    /// <summary>
     /// Finds the dated folders that Ingest's action log shows it quarantined files into, for marking folders created
     /// before markers existed. Only folders named <c>yyyy-MM-dd</c> directly inside a quarantine folder count.
     /// </summary>
