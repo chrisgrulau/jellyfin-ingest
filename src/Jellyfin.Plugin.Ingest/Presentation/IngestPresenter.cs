@@ -341,7 +341,7 @@ public sealed partial class IngestPresenter
             }
 
             yield return new DetailRow(Group, "Chose from", Basis(d));
-            yield return new DetailRow(Group, "Confidence", ConfidenceOf(d));
+            yield return new DetailRow(Group, "Name match", ConfidenceOf(d));
             if (d.TranscriptSnippet is { Length: > 0 } snippet)
             {
                 yield return new DetailRow(Group, "Transcript begins", "“" + snippet + "”");

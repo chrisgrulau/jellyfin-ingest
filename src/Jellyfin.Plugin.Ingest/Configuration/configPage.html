@@ -785,7 +785,7 @@
         function aiDecisionHtml(r, m, ai, pending, files) {
           var why = (ai.Reason ? '<div><dt>Why:</dt> <dd>' + esc(ai.Reason) + '</dd></div>' : '') +
             (ai.Basis ? '<div><dt>Chose from:</dt> <dd>' + esc(ai.Basis) + '</dd></div>' : '') +
-            (ai.Confidence ? '<div><dt>Confidence:</dt> <dd>' + esc(ai.Confidence) + '</dd></div>' : '') +
+            (ai.Confidence ? '<div><dt>Name match:</dt> <dd>' + esc(ai.Confidence) + '</dd></div>' : '') +
             (ai.More ? '<div class="ingest-muted">' + esc(plural(ai.More, 'more file')) + ' suggested too; see the details.</div>' : '');
           var html = '<div class="ingest-decision ingest-ai"><p class="ingest-decision-head"><span class="ingest-ai-tag">🤖 Suggested by the AI</span>' + esc(m.Headline || ('Suggested by the AI: ' + ai.Title + '.')) + '</p>' +
             (ai.By ? '<div class="ingest-muted">' + esc(ai.By) + '</div>' : '') +
