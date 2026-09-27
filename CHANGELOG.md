@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **A review card says which title Ingest is using.** When a release waits only because it is already on the server,
+  the card now leads with the decision: "Matched to Lantern (2001). 10 of these episodes are already in Shows.", then
+  *Replace existing copies*, *Choose file by file* and *Quarantine release*. In the list of candidates the title in use
+  is marked *Using this* (purple, not a button to press) and the others offer *Use this instead*, under "Wrong show?
+  Pick another". A release Ingest couldn't identify keeps "Is it one of these?" with *Use this*.
+- **Picking another title starts the check over.** Choosing a different title drops a pending *Replace existing
+  copies* and any file-by-file "replace" decisions (they were for the previous title's copies; "quarantine this file"
+  and episode numbers are kept) and plans the release again as the new title, looking for that title's copies on the
+  server. Until that has happened the card says Ingest is checking, and the previous candidates stay on offer.
+
+### Fixed
+
+- **"Ingest is paused" no longer shows while Ingest is running.** The banner's own layout overrode the `hidden`
+  attribute, so it (and its *Resume* button) showed all the time. Hidden elements on the page are now always hidden,
+  and exactly one of *Pause Ingest* and *Resume Ingest* shows, matching the server.
+- A replace asked for from a page drawn before the release's title changed (in another tab, say) is refused with
+  "look again" instead of replacing copies of a different title; this covers *Replace existing copies* and "replace"
+  chosen file by file.
+
 ## [0.12.1-alpha] - 2026-09-27
 
 ### Changed

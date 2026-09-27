@@ -147,9 +147,9 @@ public sealed partial class IngestPresenter
         else
         {
             (headline, subline) = Identity(fromName is null ? [] : [fromName], review.Release);
-            if (review.Candidates.Count > 0)
+            if ((review.Matched ?? (review.Candidates.Count > 0 ? review.Candidates[0].Candidate : null)) is { } likely)
             {
-                var top = Named(review.Candidates[0].Candidate);
+                var top = Named(likely);
                 if (!string.Equals(top, headline, StringComparison.OrdinalIgnoreCase))
                 {
                     subline = (subline.Length > 0 ? subline + " · " : string.Empty) + "Looks like " + top;
@@ -206,6 +206,59 @@ public sealed partial class IngestPresenter
             Tone = "warn",
             Chips = chips,
             Details = details,
+            Match = Match(review),
+        };
+    }
+
+    /// <summary>
+    /// The decision part of a Needs review card: the title in use (chosen, or matched by the last plan) and what was
+    /// found for it, and whether each candidate is that title, another one to switch to, or (with none in use) an option.
+    /// </summary>
+    /// <param name="review">The review.</param>
+    /// <returns>The view.</returns>
+    public ReviewMatchView Match(PendingReview review)
+    {
+        ArgumentNullException.ThrowIfNull(review);
+        var current = ReviewChoice.CurrentMatch(review);
+        IReadOnlyList<CandidateState> States(IReadOnlyList<ScoredCandidate> list)
+            => [.. list.Select(c => current is null ? CandidateState.Option : ReviewChoice.SameTitle(c.Candidate, current) ? CandidateState.InUse : CandidateState.Alternative)];
+        if (current is null)
+        {
+            return new ReviewMatchView { Candidates = States(review.Candidates), SearchResults = States(review.SearchResults) };
+        }
+
+        var title = Named(current);
+        var checking = !ReviewChoice.IsAssessed(review);
+        var headline = "Matched to " + title + ".";
+        if (checking)
+        {
+            headline += " Ingest looks for copies of it on the server on the next sweep.";
+        }
+        else if (review.Items.Count(i => i.Existing.Length > 0) is var held and > 0)
+        {
+            var libraries = review.Items.Where(i => i.Existing.Length > 0)
+                .SelectMany(i => i.Existing.Split('\n'))
+                .Select(p => LibraryOf(p) ?? "a library")
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var where = libraries.Count == 1 ? libraries[0] : string.Join(", ", libraries.Take(libraries.Count - 1)) + " and " + libraries[^1];
+            var noun = current.IsSeries ? "episode" : "file";
+            headline += " " + (held == 1 && review.Items.Count == 1
+                ? (current.IsSeries ? "This episode is" : "It is") + " already in " + where + "."
+                : held == review.Items.Count
+                    ? string.Create(CultureInfo.InvariantCulture, $"{held} of these {noun}s are already in {where}.")
+                    : string.Create(CultureInfo.InvariantCulture, $"{held} of these {review.Items.Count} {noun}s are already in {where}."));
+        }
+
+        return new ReviewMatchView
+        {
+            CurrentKey = ReviewChoice.CurrentMatchKey(review),
+            Title = title,
+            Headline = headline,
+            Checking = checking,
+            PickHeading = current.IsSeries ? "Wrong show? Pick another" : "Wrong film? Pick another",
+            Candidates = States(review.Candidates),
+            SearchResults = States(review.SearchResults),
         };
     }
 

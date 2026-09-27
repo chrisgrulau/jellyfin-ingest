@@ -463,33 +463,7 @@ public class IngestController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public ActionResult Replace([FromRoute] string id, [FromBody, Required] ReplaceRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        var review = _state.GetReview(id);
-        if (review is null)
-        {
-            return NotFound();
-        }
-
-        // Only a release held back by copies already on the server, and only the copies the page showed
-        if (review.Items.Count == 0 || review.Items.Any(i => i.Existing.Length == 0))
-        {
-            return BadRequest("Only a release held back because it is already on the server can replace what's there.");
-        }
-
-        if (!string.Equals(ExistingOf(review), request.Existing, StringComparison.Ordinal))
-        {
-            return Conflict("What's on the server changed since the page was drawn; look again before replacing.");
-        }
-
-        if (!_state.RequestReplace(id))
-        {
-            return NotFound();
-        }
-
-        RecordDecision(review, "Asked to replace the copies already on the server (they go to quarantine).");
-        return NoContent();
-    }
+        => ReviewDecisions.Replace(_state, id, request);
 
     /// <summary>
     /// Records decisions made file by file and plans the release again on the next sweep: replace a file's copies on
@@ -506,76 +480,7 @@ public class IngestController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public ActionResult Files([FromRoute] string id, [FromBody, Required] FilesRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        var review = _state.GetReview(id);
-        if (review is null)
-        {
-            return NotFound();
-        }
-
-        var decisions = new Dictionary<string, FileDecision?>(StringComparer.Ordinal);
-        var episodes = new Dictionary<string, EpisodeNumber?>(StringComparer.Ordinal);
-        foreach (var choice in request.Decisions ?? [])
-        {
-            var item = review.Items.FirstOrDefault(i => string.Equals(i.Source, choice.Source, StringComparison.Ordinal));
-            if (item is null)
-            {
-                return BadRequest("That file isn't waiting in this review.");
-            }
-
-            // A season and episode (ING-30): both or neither, for a video, in range
-            if (EpisodeNumber.Read(choice.Season, choice.Episode, item, choice.Action, out var number) is { } problem)
-            {
-                return BadRequest(problem);
-            }
-
-            episodes[item.Source] = number;
-
-            switch (choice.Action)
-            {
-                case "replace":
-                    if (item.Existing.Length == 0)
-                    {
-                        return BadRequest("Only a file that is already on the server can replace what's there.");
-                    }
-
-                    if (!string.Equals(item.Existing, choice.Existing, StringComparison.Ordinal))
-                    {
-                        return Conflict("What's on the server changed since the page was drawn; look again before replacing.");
-                    }
-
-                    decisions[item.Source] = FileDecision.Replace;
-                    break;
-                case "quarantine":
-                    decisions[item.Source] = FileDecision.Quarantine;
-                    break;
-                case "later":
-                    decisions[item.Source] = null;
-                    break;
-                default:
-                    return BadRequest("Unknown choice.");
-            }
-        }
-
-        // Two videos given the same episode would only wait again
-        var repeated = episodes.Values.OfType<EpisodeNumber>().GroupBy(n => n).FirstOrDefault(g => g.Count() > 1)?.Key;
-        if (repeated is not null)
-        {
-            return BadRequest(string.Create(CultureInfo.InvariantCulture, $"Two files are given season {repeated.Season}, episode {repeated.Episode}; each file needs its own episode."));
-        }
-
-        if (!_state.RequestFiles(id, decisions, episodes))
-        {
-            return NotFound();
-        }
-
-        var replace = decisions.Values.Count(d => d == FileDecision.Replace);
-        var quarantine = decisions.Values.Count(d => d == FileDecision.Quarantine);
-        var numbered = episodes.Values.Count(n => n is not null);
-        RecordDecision(review, string.Create(CultureInfo.InvariantCulture, $"Chose file by file: {replace} to replace what's on the server, {quarantine} to quarantine, {numbered} given a season and episode."));
-        return NoContent();
-    }
+        => ReviewDecisions.Files(_state, id, request);
 
     private ReturnScope ReturnScope()
     {
@@ -610,25 +515,13 @@ public class IngestController : ControllerBase
     /// </summary>
     /// <param name="review">The review.</param>
     /// <returns>The copies.</returns>
-    public static string ExistingOf(PendingReview review)
-    {
-        ArgumentNullException.ThrowIfNull(review);
-        return string.Join('\n', review.Items.Select(i => i.Existing));
-    }
+    public static string ExistingOf(PendingReview review) => ReviewDecisions.ExistingOf(review);
 
     private static string Describe(MetadataCandidate c)
         => c.Year is { } y ? $"{c.Name} ({y})" : c.Name;
 
     // Who decided isn't stored: only administrators can decide, and the state file shouldn't collect user names
-    private void RecordDecision(PendingReview review, string summary)
-        => _state.Record(new ActivityEntry
-        {
-            Time = DateTimeOffset.UtcNow,
-            Status = ActivityStatus.Decision,
-            Release = review.Release,
-            WatchFolder = review.WatchFolder,
-            Summary = summary,
-        });
+    private void RecordDecision(PendingReview review, string summary) => ReviewDecisions.Record(_state, review, summary);
 }
 
 /// <summary>
@@ -668,6 +561,9 @@ public sealed record ReplaceRequest
 {
     /// <summary>Gets the copies the page showed, one per line (every review item's, in order).</summary>
     public string? Existing { get; init; }
+
+    /// <summary>Gets the key of the title the page showed as in use (<see cref="ReviewChoice.CurrentMatchKey"/>; empty for none).</summary>
+    public string? Key { get; init; }
 }
 
 /// <summary>
@@ -677,6 +573,9 @@ public sealed record FilesRequest
 {
     /// <summary>Gets the decisions.</summary>
     public IReadOnlyList<FileChoice>? Decisions { get; init; }
+
+    /// <summary>Gets the key of the title the page showed as in use (<see cref="ReviewChoice.CurrentMatchKey"/>; empty for none), checked for a replace.</summary>
+    public string? Key { get; init; }
 }
 
 /// <summary>

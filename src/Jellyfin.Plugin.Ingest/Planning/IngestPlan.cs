@@ -73,6 +73,12 @@ public sealed record ReviewItem(string Source, string Reason)
     /// review can offer to replace them.
     /// </summary>
     public string Existing { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the title this file was identified as (or chosen as in review), when identification succeeded and something
+    /// else holds the file back (a copy already on the server, no library of its kind …); <c>null</c> otherwise.
+    /// </summary>
+    public MetadataCandidate? Matched { get; init; }
 }
 
 /// <summary>
