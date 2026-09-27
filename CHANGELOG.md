@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.2-alpha] - 2026-09-27
+
 ### Changed
 
 - **A review card says which title Ingest is using.** When a release waits only because it is already on the server,
