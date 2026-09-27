@@ -438,5 +438,6 @@ public sealed class ReleaseUndo
             WatchFolder = filing.WatchFolder,
             Summary = summary,
             Details = details,
+            Videos = filing.Videos,
         });
 }

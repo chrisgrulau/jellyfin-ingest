@@ -100,6 +100,44 @@ public sealed record ActivityEntry
     /// <summary>Gets when this filing was undone, if it was.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? UndoneAt { get; init; }
+
+    /// <summary>
+    /// Gets how many files of each kind a filing or quarantine moved (or would move, in dry run), for the page's
+    /// icons; <c>null</c> for other entries and ones recorded before it existed (the page then counts the details).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ActivityCounts? Counts { get; init; }
+
+    /// <summary>
+    /// Gets where a filing's videos went (absolute paths, named by Ingest), so the page can say what was filed
+    /// (<c>Show S01E05</c>) without reading file names; <c>null</c> when there were none, or for older entries.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Videos { get; init; }
+}
+
+/// <summary>
+/// How many files of each kind an activity entry moved.
+/// </summary>
+public sealed record ActivityCounts
+{
+    /// <summary>Gets the main videos filed.</summary>
+    public int Videos { get; init; }
+
+    /// <summary>Gets the subtitle files filed.</summary>
+    public int Subtitles { get; init; }
+
+    /// <summary>Gets the extras filed.</summary>
+    public int Extras { get; init; }
+
+    /// <summary>Gets the release clutter (and whole releases' files) moved to quarantine.</summary>
+    public int Clutter { get; init; }
+
+    /// <summary>Gets the copies already on the server that were replaced (moved to quarantine).</summary>
+    public int Replaced { get; init; }
+
+    /// <summary>Gets the files quarantined because a person chose not to file them.</summary>
+    public int SetAside { get; init; }
 }
 
 /// <summary>
@@ -294,6 +332,18 @@ public sealed record IngestState
     /// <summary>Gets the undos and restores asked for and not yet carried out (only in the Status API; never saved).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<QueuedAction>? Queued { get; init; }
+
+    /// <summary>Gets how the page shows each review, by review id (only in the Status API; never saved).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, Presentation.ItemView>? ReviewViews { get; init; }
+
+    /// <summary>Gets how the page shows each waiting release, by its id (only in the Status API; never saved).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, Presentation.ItemView>? WaitingViews { get; init; }
+
+    /// <summary>Gets how the page shows the release being worked on (only in the Status API; never saved).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Presentation.ItemView? WorkingView { get; init; }
 }
 
 /// <summary>

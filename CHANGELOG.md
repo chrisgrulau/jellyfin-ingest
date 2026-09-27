@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Tidier lists on the Ingest page.** Each row of *Recent activity*, *Waiting*, *Needs review* and *Quarantine* now
+  leads with what the media is ("Lantern S01E05" with the episode title underneath, "Harbour Lights (2024)", or
+  "Lantern — Season 2, 10 episodes" for a pack) instead of the release folder's name, says what happened in one plain
+  sentence, and shows what was moved as small icons with counts (🎬 videos, 💬 subtitles, 📦 extras, 🗑️ quarantined,
+  ♻️ replaced, 🤖 AI helped, ⚠️ needs attention, ↩️ put back). Release names, paths, scores, candidates and the AI's
+  reasoning are in each row's expandable details. The wording and icons are worked out on the server
+  (`Presentation.IngestPresenter`), so every list reads the same.
+- New filings and quarantines record how many files of each kind they moved and where the videos went, for those
+  icons; older entries are read from their details.
+- API: `GET Ingest/Activity?status=&offset=&limit=` and `GET Ingest/Quarantine/Page?offset=&limit=` return a page of
+  presented rows (15 by default, at most 300) with totals; `GET Ingest/Status` also returns how each review and
+  waiting release is shown, and `limit=0` leaves the activity out.
+
 ## [0.11.0-alpha] - 2026-09-27
 
 ### Added
