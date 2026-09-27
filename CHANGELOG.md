@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Filed files that can't be opened on a virtiofs or network mount.** Files are still written to a temporary name
+  beside their destination and renamed into place (so a half-written file never has a real name, Jellyfin never scans
+  one, and a crash leaves something recovery recognises), but the temporary name is no longer hidden: it is now
+  `<final name>.ingest-<8 hex>.partial` instead of `.ingest-<32 hex>.partial`. On a Samba share a dot name got the DOS
+  *hidden* attribute, which stayed on the filed file after the rename. It still ends in `.partial`, so download
+  filters and recovery treat a leftover as unfinished; leftovers with the old name are still recovered. After the
+  rename each file is opened again by its new name and its length checked; if it can't be opened, the folder is listed
+  again (a fresh look-up that can revalidate a stale cache entry) and the open retried, up to 4 times over about 3.5
+  seconds. A file that still can't be read back is left filed (the rename succeeded, and rolling back through the same
+  stale cache could orphan it) but never reported as a plain success: the filing says "But 1 file can't be read back
+  through the library's mount" with the file under *Needs attention*, the server log has an error, and a *Library
+  storage* failure entry (also in Jellyfin's Activity log) says what to change: set the host's virtiofs cache to
+  `metadata` or `never`, or drop the guest's caches (`sysctl vm.drop_caches=2`), then scan the library. Undo, restore
+  from quarantine and move to another library check the same way. A file whose length reads back wrong after the
+  rename is now moved back by the rollback (it used to be left at its real name).
+
 ## [0.14.0-alpha] - 2026-09-27
 
 ### Added
