@@ -543,6 +543,57 @@ public class IngestController : ControllerBase
         => ReviewDecisions.Replace(_state, id, request);
 
     /// <summary>
+    /// Approves the AI plugin's suggestion for a release (a watch folder set to ask before filing what the AI decided):
+    /// on the next sweep it is filed exactly as suggested, without asking the AI again. With <c>Replace</c>, the copies
+    /// already on the server that hold it back are replaced too (they go to quarantine).
+    /// </summary>
+    /// <param name="id">Review id.</param>
+    /// <param name="request">The suggestions' key the page showed (and, to replace, the copies it showed).</param>
+    /// <returns>No content, or why not (409 when the suggestion or what's on the server changed since).</returns>
+    [HttpPost("Reviews/{id}/Approve")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult Approve([FromRoute] string id, [FromBody, Required] ApproveRequest request)
+        => ReviewDecisions.Approve(_state, id, request);
+
+    /// <summary>
+    /// Approves the AI suggestions of many releases at once, on the next sweep (which starts now): only releases that
+    /// wait for nothing but approving their AI suggestion, each only as the page showed it; the rest are skipped.
+    /// </summary>
+    /// <param name="request">The reviews and their suggestions' keys, as the page showed them.</param>
+    /// <returns>Accepted, or why not.</returns>
+    [HttpPost("Reviews/ApproveAll")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult ApproveAll([FromBody, Required] ApproveAllRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var approvals = (request.Reviews ?? []).Where(r => r is not null && !string.IsNullOrEmpty(r.Id) && !string.IsNullOrEmpty(r.Key)).ToList();
+        if (approvals.Count == 0)
+        {
+            return BadRequest("No AI suggestions to approve.");
+        }
+
+        if (approvals.Count > ApproveAllRequest.MaxReviews)
+        {
+            return BadRequest(string.Create(CultureInfo.InvariantCulture, $"At most {ApproveAllRequest.MaxReviews} releases can be approved at once."));
+        }
+
+        if (_progress.Queued().Any(q => q.Kind == QueuedActionKind.ApproveAll))
+        {
+            return Conflict("Approve all is already waiting for the next sweep.");
+        }
+
+        _progress.Queue(new QueuedAction { Kind = QueuedActionKind.ApproveAll, Approvals = approvals });
+        return Accepted();
+    }
+
+    /// <summary>
     /// Records decisions made file by file and plans the release again on the next sweep: replace a file's copies on
     /// the server, quarantine a file (and its subtitles) instead of filing it, or decide later. The rest of the release
     /// is filed as usual once nothing is left undecided.
@@ -662,6 +713,33 @@ public sealed record ReplaceRequest
 
     /// <summary>Gets the key of the title the page showed as in use (<see cref="ReviewChoice.CurrentMatchKey"/>; empty for none).</summary>
     public string? Key { get; init; }
+}
+
+/// <summary>
+/// Body of <see cref="IngestController.Approve"/>.
+/// </summary>
+public sealed record ApproveRequest
+{
+    /// <summary>Gets the key of the suggestions the page showed (<see cref="AiApproval.KeyOf"/>).</summary>
+    public string? Key { get; init; }
+
+    /// <summary>Gets a value indicating whether to also replace the copies already on the server that hold the release back.</summary>
+    public bool Replace { get; init; }
+
+    /// <summary>Gets the copies the page showed, one per line (every review item's, in order), for <see cref="Replace"/>.</summary>
+    public string? Existing { get; init; }
+}
+
+/// <summary>
+/// Body of <see cref="IngestController.ApproveAll"/>.
+/// </summary>
+public sealed record ApproveAllRequest
+{
+    /// <summary>The most releases approved at once.</summary>
+    public const int MaxReviews = 5000;
+
+    /// <summary>Gets the reviews to approve, each with the key of the suggestions the page showed.</summary>
+    public IReadOnlyList<ReviewApproval>? Reviews { get; init; }
 }
 
 /// <summary>

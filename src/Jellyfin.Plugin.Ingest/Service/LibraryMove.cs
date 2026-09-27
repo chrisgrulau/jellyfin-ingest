@@ -133,7 +133,8 @@ public sealed partial class LibraryMove
         ArgumentNullException.ThrowIfNull(activity);
         return filing.ChosenBy switch
         {
-            FilingChoice.Automatic => true,
+            // An approved AI suggestion chose the title, not the library: Ingest still chose that itself
+            FilingChoice.Automatic or FilingChoice.AiApproved => true,
             FilingChoice.Review => false,
             _ => !activity.Any(a => a.Status == ActivityStatus.Decision
                 && string.Equals(a.Release, filing.Release, StringComparison.Ordinal)

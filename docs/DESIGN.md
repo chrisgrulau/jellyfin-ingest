@@ -181,6 +181,47 @@ or failure is asked again on the next try, so changing the Subtitles plugin's se
 
 Anything else leaves the release in review, with the reason.
 
+### AI suggests, you approve
+
+`WatchFolder.WhenAiDecides` is `FileAutomatically` (the default; a folder saved before the setting existed has none in
+its XML and so gets it) or `AskFirst`. Every AI decision on the way to an identification is recorded in
+`IdentificationResult.AiDecisions` (`AiDecision`: `Match` from the tie-breaker, `EpisodeByTitle`, `Transcript`; who,
+the one-sentence reason, how many options, and the name's score for the pick, or for a transcript the characters heard,
+where they start, `HeardText.From`, and a snippet of at most 100 characters). The AI plugin gives no confidence of its
+own, so "confidence" on the card is the name match.
+
+With `AskFirst` (`IngestPlanner.AskBeforeAiFiling`) a video whose identification succeeded with any AI decision
+(`AiSuggestion.From`: the matched title, season, episode and the decisions) is still planned through (library, the
+duplicate guard, the destination), and the plan is then held for review:
+
+- a video held back by something else too keeps that item, with the suggestion attached (`ReviewItem.Suggestion`);
+- otherwise it gets an item of its own, `ApprovalOnly`, reason "Suggested by …: …. This watch folder asks before filing
+  what the AI decided.", with the AI's title as `Matched`, so the review shows it in use and the others as "Use this
+  instead".
+
+`POST Reviews/{id}/Approve` (`ReviewDecisions.Approve`) checks the key the page showed (`AiApproval.KeyOf`: each
+suggested file with its title key, season and episode; 409 when it differs or a request is already waiting; 400 with no
+suggestion). With `Replace` it also needs every item held by copies on the server and the same copies the page showed,
+and asks for a replace. It stores the suggestions in `PendingReview.Approved` (kept by `PutReview`, dropped by a new
+choice or a clean retry) and requests planning. The planner identifies an approved video with `IdentifyAsChosenAsync`,
+the title and numbers as suggested (only the episode's title is looked up), so the AI and the transcriber are not asked
+again; a season and episode typed under *Choose file by file* win. `IngestPlan.ApprovedAi` counts those videos, the
+plan's note says "Approved AI suggestion: …", and the filing's `ChosenBy` is `AiApproved` (`IngestService.ChoiceOf`;
+`Review` still wins when a title and library were chosen in review). In dry run an approval is kept like a choice.
+
+**Move and Undo:** approving chose the title, not the library (still the watch folder's destinations, or where a
+replaced copy lives), so `LibraryMove.IsAutomatic` treats `AiApproved` as automatic and the filing can be moved. Undo
+is unchanged; an undone release waits, held, and planning it again asks the AI again.
+
+**Approve all** (`POST Reviews/ApproveAll`, the reviews and keys the page showed, at most 5,000) is queued like an undo
+(`QueuedActionKind.ApproveAll`, 202) and carried out at the start of the next sweep, in one save
+(`IngestStateStore.ApproveAll`): only reviews that `AiApproval.IsOnlyAi` (every item `ApprovalOnly`, none held by a copy
+on the server, no request waiting, not held) and whose key still matches; the rest are skipped. One *Decision* entry
+lists what was approved; the approved releases are then planned in the same sweep.
+
+Switching a folder back to "file automatically" doesn't file suggestions already waiting (it isn't part of the settings
+fingerprint that plans waiting releases again, which would ask the AI again); approve them.
+
 ## Undo
 
 Every real execution gets a run id, written on each of its action-log lines together with the destination's modified
@@ -224,8 +265,10 @@ move) and the release held for review, possibly partly returned; nothing is file
 
 A filing whose library Ingest chose itself can be moved to another library (`LibraryMove`). Filings record how the
 library was chosen (`ActivityEntry.ChosenBy`): `Review` when the release was planned with a choice made in review
-(`PendingReview.Chosen`, which always names a library), otherwise `Automatic` (the watch folder's destinations, or the
-library of a copy being replaced, including a replace or file-by-file decision, which don't pick a library). A filing
+(`PendingReview.Chosen`, which always names a library), `AiApproved` when an approved AI suggestion was filed (the
+title was approved in review, the library still came from the watch folder: movable), otherwise `Automatic` (the watch
+folder's destinations, or the library of a copy being replaced, including a replace or file-by-file decision, which
+don't pick a library). A filing
 recorded before `ChosenBy` existed counts as automatic only if *Recent activity* holds no `Decision` entry for the same
 release and watch folder from before it was filed (a decision that has aged out of the capped list can't be seen; the
 move is still only ever to a compatible library). It is offered (`ActivityView.CanMove`, `LibraryMove.Ineligible`)

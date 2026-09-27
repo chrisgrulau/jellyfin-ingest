@@ -167,6 +167,7 @@ public sealed partial class IngestPresenter
             ReviewRequest.Quarantine => "Quarantining it on the next sweep.",
             ReviewRequest.Replace => "Replacing what's on the server on the next sweep.",
             ReviewRequest.Retry => "Trying again on the next sweep.",
+            _ when AiApproval.IsOnlyAi(review) => Friendly.EndSentence("The AI suggests " + AiApproval.Describe(review)) + " Approve it, or pick another.",
             _ => Friendly.EndSentence("Waiting for you: " + Friendly.Reasons(reasons)),
         };
         if (review.RetryAt is not null && review.Request == ReviewRequest.None && !summary.Contains("by itself", StringComparison.Ordinal))
@@ -175,6 +176,11 @@ public sealed partial class IngestPresenter
         }
 
         var chips = new List<Chip>();
+        if (review.Items.Any(i => i.Suggestion is not null))
+        {
+            chips.Add(new Chip(Icons.Ai, 0, "Suggested by the AI; waiting for your approval"));
+        }
+
         if (review.Items.Count > 1)
         {
             chips.Add(new Chip(Icons.Review, review.Items.Count, MediaTitle.Plural(review.Items.Count, "file") + " waiting for a decision"));
@@ -198,6 +204,7 @@ public sealed partial class IngestPresenter
         };
         details.AddRange(review.Items.Select(i => new DetailRow("Why it waits", LastSegment(i.Source), i.Reason)));
         details.AddRange(review.Items.Where(i => i.Existing.Length > 0).SelectMany(i => i.Existing.Split('\n')).Select(p => new DetailRow("Already on the server", LibraryOf(p) ?? "Library", p)));
+        details.AddRange(review.Items.Where(i => i.Suggestion is not null).SelectMany(i => SuggestionDetails(i.Source, i.Suggestion!)));
         details.AddRange(review.Candidates.Select(c => new DetailRow("Candidates", Named(c.Candidate), CandidateStats(c))));
         return new ItemView
         {
@@ -226,14 +233,15 @@ public sealed partial class IngestPresenter
         var current = ReviewChoice.CurrentMatch(review);
         IReadOnlyList<CandidateState> States(IReadOnlyList<ScoredCandidate> list)
             => [.. list.Select(c => current is null ? CandidateState.Option : ReviewChoice.SameTitle(c.Candidate, current) ? CandidateState.InUse : CandidateState.Alternative)];
+        var ai = Suggestion(review);
         if (current is null)
         {
-            return new ReviewMatchView { Candidates = States(review.Candidates), SearchResults = States(review.SearchResults) };
+            return new ReviewMatchView { Candidates = States(review.Candidates), SearchResults = States(review.SearchResults), Ai = ai, PickHeading = ai is null ? "Is it one of these?" : "Wrong? Pick another" };
         }
 
         var title = Named(current);
         var checking = !ReviewChoice.IsAssessed(review);
-        var headline = "Matched to " + title + ".";
+        var headline = ai is null ? "Matched to " + title + "." : "Suggested by the AI: " + ai.Title + ".";
         if (checking)
         {
             headline += " Ingest looks for copies of it on the server on the next sweep.";
@@ -260,10 +268,85 @@ public sealed partial class IngestPresenter
             Title = title,
             Headline = headline,
             Checking = checking,
-            PickHeading = current.IsSeries ? "Wrong show? Pick another" : "Wrong film? Pick another",
+            PickHeading = ai is not null ? "Wrong? Pick another" : current.IsSeries ? "Wrong show? Pick another" : "Wrong film? Pick another",
             Candidates = States(review.Candidates),
             SearchResults = States(review.SearchResults),
+            Ai = ai,
         };
+    }
+
+    /// <summary>
+    /// The AI plugin's suggestion waiting for approval on a review, as the card shows it: the first suggested file's
+    /// reason, what it chose from and how closely the name matched (the others are in the details).
+    /// </summary>
+    /// <param name="review">The review.</param>
+    /// <returns>The view, or <c>null</c> when the review holds no suggestion.</returns>
+    public static AiSuggestionView? Suggestion(PendingReview review)
+    {
+        ArgumentNullException.ThrowIfNull(review);
+        var suggested = review.Items.Where(i => i.Suggestion is not null).Select(i => i.Suggestion!).ToList();
+        if (AiApproval.KeyOf(review) is not { } key || suggested.Count == 0)
+        {
+            return null;
+        }
+
+        var first = suggested[0];
+        var decision = first.Decisions.FirstOrDefault(d => d.Kind == AiDecisionKind.Transcript) ?? (first.Decisions.Count > 0 ? first.Decisions[0] : null);
+        return new AiSuggestionView
+        {
+            Key = key,
+            Title = AiApproval.Describe(review),
+            By = decision?.By ?? string.Empty,
+            Reason = string.Join(" ", first.Decisions.Select(d => d.Reason).Where(r => r.Length > 0)),
+            Basis = string.Join(" ", first.Decisions.Select(Basis)),
+            Confidence = decision is null ? string.Empty : ConfidenceOf(decision),
+            Episode = first.Decisions.All(d => d.Kind != AiDecisionKind.Match),
+            More = suggested.Count - 1,
+            OnlyAi = AiApproval.IsOnlyAi(review),
+            Replaces = review.Items.All(i => i.Existing.Length > 0),
+        };
+    }
+
+    // What the AI chose from, in words: "Picked from 3 close candidates." or, for a transcript, how much was heard where
+    private static string Basis(AiDecision d) => d.Kind switch
+    {
+        AiDecisionKind.Match => string.Create(CultureInfo.InvariantCulture, $"Picked {d.Picked} from {MediaTitle.Plural(d.Options, "close candidate")}."),
+        AiDecisionKind.EpisodeByTitle => string.Create(CultureInfo.InvariantCulture, $"Picked {d.Picked} from {MediaTitle.Plural(d.Options, "episode")} of the season, by the episode title in the name."),
+        _ => string.Create(CultureInfo.InvariantCulture, $"Picked {d.Picked} from {MediaTitle.Plural(d.Options, "episode")} by comparing {TranscriptWords(d)} with their synopses."),
+    };
+
+    private static string TranscriptWords(AiDecision d)
+    {
+        var size = d.TranscriptCharacters is { } n ? string.Create(CultureInfo.InvariantCulture, $"{n:N0} characters of transcript") : "a short transcript";
+        return d.TranscriptFrom is { } from ? size + string.Create(CultureInfo.InvariantCulture, $" (from {(int)from.TotalMinutes}:{from.Seconds:00} in)") : size;
+    }
+
+    private static string ConfidenceOf(AiDecision d)
+        => d.Confidence is { } c
+            ? string.Create(CultureInfo.InvariantCulture, $"{(d.Kind == AiDecisionKind.EpisodeByTitle ? "Episode title match" : "Name match")} {Math.Round(Math.Min(1, c) * 100):0}%")
+            : "The name says nothing about the episode; the AI went by what is said in it.";
+
+    // One file's suggestion in the card's details: what, by whom, why, from what; a transcript only as its size, where
+    // it starts and its first words
+    private static IEnumerable<DetailRow> SuggestionDetails(string source, AiSuggestion suggestion)
+    {
+        const string Group = "AI suggestion";
+        yield return new DetailRow(Group, LastSegment(source), suggestion.Describe());
+        foreach (var d in suggestion.Decisions)
+        {
+            yield return new DetailRow(Group, "Decided by", d.By);
+            if (d.Reason.Length > 0)
+            {
+                yield return new DetailRow(Group, "Why", d.Reason);
+            }
+
+            yield return new DetailRow(Group, "Chose from", Basis(d));
+            yield return new DetailRow(Group, "Name match", ConfidenceOf(d));
+            if (d.TranscriptSnippet is { Length: > 0 } snippet)
+            {
+                yield return new DetailRow(Group, "Transcript begins", "“" + snippet + "”");
+            }
+        }
     }
 
     /// <summary>
@@ -482,7 +565,11 @@ public sealed partial class IngestPresenter
                     text += " Some files were set aside, as you chose.";
                 }
 
-                if (lines.Notes.Count > 0)
+                if (entry.ChosenBy == FilingChoice.AiApproved)
+                {
+                    text += " You approved the AI's suggestion.";
+                }
+                else if (lines.Notes.Count > 0)
                 {
                     text += " The AI plugin helped decide.";
                 }
@@ -544,7 +631,7 @@ public sealed partial class IngestPresenter
 
         if (lines.Notes.Count > 0 && entry.Status is ActivityStatus.Filed or ActivityStatus.DryRun)
         {
-            chips.Add(new Chip(Icons.Ai, 0, "The AI plugin helped decide (see the details)"));
+            chips.Add(new Chip(Icons.Ai, 0, entry.ChosenBy == FilingChoice.AiApproved ? "Approved AI suggestion (see the details)" : "The AI plugin helped decide (see the details)"));
         }
 
         if (lines.Attention.Count > 0)

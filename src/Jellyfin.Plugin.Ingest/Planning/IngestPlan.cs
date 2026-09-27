@@ -79,6 +79,18 @@ public sealed record ReviewItem(string Source, string Reason)
     /// else holds the file back (a copy already on the server, no library of its kind …); <c>null</c> otherwise.
     /// </summary>
     public MetadataCandidate? Matched { get; init; }
+
+    /// <summary>
+    /// Gets what the AI plugin decided this file is, when the watch folder asks before filing that (and the AI decided
+    /// it); <c>null</c> otherwise.
+    /// </summary>
+    public AiSuggestion? Suggestion { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the file waits only for the AI's suggestion to be approved (nothing else holds it
+    /// back: not a copy already on the server, a missing library or a taken destination).
+    /// </summary>
+    public bool ApprovalOnly { get; init; }
 }
 
 /// <summary>
@@ -174,4 +186,7 @@ public sealed record IngestPlan
 
     /// <summary>Gets the release's videos quarantined by a person's choice instead of being filed (absolute paths).</summary>
     public IReadOnlyList<string> Skipped { get; init; } = [];
+
+    /// <summary>Gets how many videos were filed as an approved AI suggestion (identified from it, not asked again).</summary>
+    public int ApprovedAi { get; init; }
 }

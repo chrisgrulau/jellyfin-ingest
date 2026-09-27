@@ -57,6 +57,79 @@ internal static class ReviewDecisions
     }
 
     /// <summary>
+    /// See <see cref="IngestController.Approve"/>.
+    /// </summary>
+    /// <param name="state">Reviews and activity.</param>
+    /// <param name="id">Review id.</param>
+    /// <param name="request">The suggestions the page showed, and whether to replace what's on the server.</param>
+    /// <returns>No content, or why not.</returns>
+    public static ActionResult Approve(IngestStateStore state, string id, ApproveRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var review = state.GetReview(id);
+        if (review is null)
+        {
+            return new NotFoundResult();
+        }
+
+        if (request.Replace)
+        {
+            // As for Replace: only a release held back by copies already on the server, and only the copies shown
+            if (review.Items.Count == 0 || review.Items.Any(i => i.Existing.Length == 0))
+            {
+                return new BadRequestObjectResult("Only a release held back because it is already on the server can replace what's there.");
+            }
+
+            if (!string.Equals(ExistingOf(review), request.Existing, StringComparison.Ordinal))
+            {
+                return new ConflictObjectResult("What's on the server changed since the page was drawn; look again before replacing.");
+            }
+        }
+
+        var outcome = state.RequestApprove(id, request.Key, request.Replace);
+        switch (outcome)
+        {
+            case AiApprovalOutcome.NotFound:
+                return new NotFoundResult();
+            case AiApprovalOutcome.NoSuggestion:
+                return new BadRequestObjectResult("This release has no AI suggestion to approve.");
+            case AiApprovalOutcome.Pending:
+                return new ConflictObjectResult("A decision for this release is already waiting for the next sweep; look again after it.");
+            case AiApprovalOutcome.Stale:
+                return new ConflictObjectResult("The AI's suggestion for this release changed since the page was drawn; look again before approving.");
+        }
+
+        Record(state, review, "Approved AI suggestion: " + AiApproval.Describe(review) + (request.Replace ? ", replacing the copies already on the server (they go to quarantine)." : "."));
+        return new NoContentResult();
+    }
+
+    /// <summary>
+    /// Carries out Approve all (queued by <see cref="IngestController.ApproveAll"/>, run by the sweep): approves each
+    /// review that waits only for its AI suggestion, as the page showed it, and records one decision for them all.
+    /// </summary>
+    /// <param name="state">Reviews and activity.</param>
+    /// <param name="approvals">The reviews and the keys the page showed.</param>
+    /// <returns>What was done, for the log.</returns>
+    public static string ApproveAll(IngestStateStore state, IReadOnlyList<ReviewApproval> approvals)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(approvals);
+        var done = state.ApproveAll(approvals);
+        var skipped = approvals.Select(a => a.Id).Distinct(StringComparer.Ordinal).Count() - done.Count;
+        var summary = string.Create(CultureInfo.InvariantCulture, $"Approved {done.Count} AI suggestion{(done.Count == 1 ? string.Empty : "s")} (Approve all); {(done.Count == 1 ? "it is" : "they are")} filed on the next sweep.")
+            + (skipped > 0 ? string.Create(CultureInfo.InvariantCulture, $" {skipped} skipped: changed since the page was drawn, or no longer waiting only for approval.") : string.Empty);
+        state.Record(new ActivityEntry
+        {
+            Time = DateTimeOffset.UtcNow,
+            Status = ActivityStatus.Decision,
+            Release = "Needs review",
+            Summary = summary,
+            Details = [.. done.Select(r => r.Release + ": Approved AI suggestion: " + AiApproval.Describe(r))],
+        });
+        return summary;
+    }
+
+    /// <summary>
     /// See <see cref="IngestController.Files"/>.
     /// </summary>
     /// <param name="state">Reviews and activity.</param>

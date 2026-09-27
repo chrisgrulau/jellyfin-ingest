@@ -66,6 +66,7 @@ plugin page, where you pick the right title (and library) with one click or sear
 | AI tie-breaker | Optional, with the Shoal AI plugin: a close call between candidates Ingest already found is settled by the AI choosing one of them (or none). Only file names, titles and years are sent for this (see [What Ingest sends](#what-ingest-sends)); every choice is shown in *Recent activity*. |
 | Episodes from a transcript | Optional, with the Shoal Subtitles and AI plugins: when a name doesn't say which episode it is, two minutes of it are transcribed (built-in speech-to-text by default, on this server) and the AI picks the listed episode whose synopsis fits, or none. |
 | Episodes named by title | A file that gives the episode title but no number (typically a special) is matched against that season's episode list from your providers; if no title clearly matches, the AI plugin (when installed) may choose one of the listed episodes. |
+| AI suggests, you approve | Per watch folder, **When the AI decides: ask me first** holds any release whose title or episode the AI decided (a close match, an episode by title or from a transcript) under *Needs review*, marked *Suggested by the AI* with its reason, what it chose from and how closely the name matched. **Approve** files exactly that suggestion without asking the AI again; **Wrong? Pick another** uses the usual candidate list. A suggestion that duplicates a copy on the server is approved with **Approve and replace existing copies**. **Approve all AI suggestions (N)** approves every release that waits for nothing else. The default, **file automatically**, files as before. |
 | Waiting | *Waiting* on the plugin page: releases that are still arriving, when each will settle, and the release being identified or filed ("Filing file 2 of 5"). **Process now** skips the rest of a release's settle wait. |
 | Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. *Choose file by file* replaces or quarantines single files, and gives a video of a show a season and episode when its name has none it can read. |
 | Activity | *Recent activity* on the plugin page: filed, dry run, needs review, decisions, failures, quarantine and purges. Each row says what the media is ("Lantern S01E04", "Harbour Lights (2024)", "Lantern — Season 2, 10 episodes"), what happened in one sentence, and what moved as icons with counts; release names, paths, scores and the AI's reasoning are in the row's details. A page at a time, with **Show more**. |
@@ -129,6 +130,7 @@ nothing is watched until you do. A new watch folder starts in dry run until you 
 | Files are (per watch folder) | moved | **moved**, **hard-linked** (the release stays for seeding; no extra space; copied instead if the library is on another drive) or **copied** (the release stays; uses the space twice). With hard link or copy, clutter stays in the release too. |
 | Quarantine folder | `<watch folder>/.ingest-quarantine` | Keep it on the same filesystem as the watch folder so moves are instant. |
 | Quarantine retention | 30 days | Enforced by the *Purge Ingest quarantine* scheduled task. |
+| When the AI decides (per watch folder) | file automatically | **file automatically** (as before), or **ask me first**: what the AI decided waits under *Needs review* for your approval. Folders saved before this setting existed file automatically. |
 | Dry run (per watch folder) | On for a new folder | Records what would happen (see *Recent activity*) without moving anything. Turn it off for a folder once you are happy with its results. Folders saved before 0.8 keep the old global setting. |
 | Settle time | 300 s | How long nothing in a release (files, sizes, write times) may change before it is processed. |
 | Refresh filed folders after ingest | On | Only the film or show folders filed into are refreshed, never whole libraries. |
@@ -141,7 +143,7 @@ Everything stays on your server, in Jellyfin's plugin data folder (`<jellyfin da
 
 | File | What's in it | Kept |
 |---|---|---|
-| `state.json` | Releases waiting for review and the recent activity shown on the Ingest page (release names, paths, chosen titles). Who made a decision is not recorded. | The latest 300 activity entries |
+| `state.json` | Releases waiting for review and the recent activity shown on the Ingest page (release names, paths, chosen titles; for an AI suggestion waiting for approval, the AI's reason and at most the first 100 characters of a transcript). Who made a decision is not recorded. | The latest 300 activity entries |
 | `actions.jsonl` | One line per file moved: time, release, source and destination, size and modified time. Used to finish or undo moves interrupted by a restart, and for **Undo** and **Move to another library**. | 90 days, at most 5 MB |
 | `search-cache.json` | Recent title searches and their provider ids, so the same title isn't searched again. | 24 hours |
 
@@ -203,6 +205,7 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Undo a filed release from *Recent activity*
 - [x] Move an automatically filed release to another library from *Recent activity*
 - [x] Restore from quarantine, delete now, pause switch; new titles into the library folder with the most free space
+- [x] "AI suggests, you approve": per watch folder, hold what the AI decided for one-click approval
 
 Design notes live in [`docs/DESIGN.md`](docs/DESIGN.md).
 

@@ -127,6 +127,12 @@
       #IngestConfigPage .ingest-pick.alternatives .ingest-pick-head { font-weight: 600; font-size: .9em; opacity: .9; }
       #IngestConfigPage .ingest-cands tr.ingest-inuse-row td { background: var(--ig-using-bg); }
       #IngestConfigPage .ingest-inuse { display: inline-flex; align-items: center; gap: .3em; padding: .35em .9em; border-radius: 999px; border: 1px solid var(--ig-using-line); background: var(--ig-using-bg); color: var(--ig-using-fg); font: inherit; font-size: .85em; font-weight: 600; cursor: default; white-space: nowrap; }
+      #IngestConfigPage .ingest-ai-tag { display: inline-block; font-size: .78em; font-weight: 600; letter-spacing: .03em; padding: .1em .55em; border-radius: 999px; margin-right: .5em; vertical-align: .1em; border: 1px solid var(--ig-info); color: var(--ig-info); background: var(--ig-chip); }
+      #IngestConfigPage .ingest-ai-why { margin: .35em 0 0; }
+      #IngestConfigPage .ingest-ai-why dt { display: inline; opacity: var(--ig-muted); }
+      #IngestConfigPage .ingest-ai-why dd { display: inline; margin: 0; }
+      #IngestConfigPage .ingest-ai-why div + div { margin-top: .15em; }
+      #IngestConfigPage .wf-ai-help { flex-basis: 100%; margin: 0; }
       #IngestConfigPage .ingest-chosen { padding: .5em .75em; border-radius: 4px; background: rgba(0,164,220,.15); border-left: 3px solid rgba(0,164,220,.7); margin: .5em 0; }
       #IngestConfigPage .ingest-files { margin-top: .5em; }
       #IngestConfigPage .ingest-files > summary, #IngestConfigPage .ingest-search > summary { cursor: pointer; opacity: .85; }
@@ -188,6 +194,10 @@
         </div>
 
         <div class="ingest-head"><h3 class="sectionTitle">Needs review <span class="ingest-muted" id="ReviewCount"></span></h3></div>
+        <div class="ig-button-row" id="ApproveAllRow">
+          <button is="emby-button" type="button" class="raised button-submit block emby-button" id="ApproveAllAi" hidden><span>Approve all AI suggestions</span></button>
+        </div>
+        <p class="ingest-muted" id="ApproveAllNote" hidden></p>
         <div id="Reviews"></div>
 
         <div class="ingest-head"><h3 class="sectionTitle">Recent activity</h3></div>
@@ -451,7 +461,7 @@
 
         function addRow(w) {
           // A new folder starts in dry run (ING-32); one saved before dry run was per folder shows the old global setting
-          w = w || { Path: '', Destinations: [], Enabled: true, DryRun: true };
+          w = w || { Path: '', Destinations: [], Enabled: true, DryRun: true, WhenAiDecides: 'FileAutomatically' };
           var dry = w.DryRun == null ? config.DryRun !== false : !!w.DryRun;
           var n = rowCount++;
           var row = document.createElement('div');
@@ -466,7 +476,12 @@
             '<option value="HardLink"' + (w.Transfer === 'HardLink' ? ' selected' : '') + '>hard-linked (torrents keep seeding; no extra space, same drive)</option>' +
             '<option value="Copy"' + (w.Transfer === 'Copy' ? ' selected' : '') + '>copied (torrents keep seeding; uses the space twice)</option>' +
             '</select>' +
-            '<label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" id="wf-dry-' + n + '" class="wf-dry"' + (dry ? ' checked' : '') + ' /><span>Dry run (record only, move nothing)</span></label></div>' +
+            '<label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" id="wf-dry-' + n + '" class="wf-dry"' + (dry ? ' checked' : '') + ' /><span>Dry run (record only, move nothing)</span></label>' +
+            '<span><label for="wf-ai-' + n + '">When the AI decides</label> <select id="wf-ai-' + n + '" class="wf-ai">' +
+            '<option value="FileAutomatically"' + (w.WhenAiDecides !== 'AskFirst' ? ' selected' : '') + '>file automatically</option>' +
+            '<option value="AskFirst"' + (w.WhenAiDecides === 'AskFirst' ? ' selected' : '') + '>ask me first</option>' +
+            '</select></span>' +
+            '<p class="ingest-muted wf-ai-help">When the AI plugin settles a close match or picks the episode (by its title or from a transcript): file it straight away, or hold it under <em>Needs review</em> with the AI\'s choice ready to approve in one click.</p></div>' +
             '<div class="wf-dests"></div>' +
             '<div class="ig-button-row"><button is="emby-button" type="button" class="raised button-alt wf-add-dest"><span>Add destination</span></button></div>' +
             '<p class="ingest-muted wf-hint"></p><p class="wf-error" aria-live="polite"></p>';
@@ -765,9 +780,64 @@
           return reviewViews[r.Id] || { Key: r.Id, Headline: r.Release, Subline: '', Summary: 'Waiting for you.', Icon: '⚠️', StatusLabel: 'Needs review', Tone: 'warn', Chips: [], Details: [] };
         }
 
+        // The AI's suggestion (a watch folder set to "ask me first"): what it chose, why and from what, with Approve first.
+        // A suggestion that duplicates what's on the server is approved by replacing those copies (two clicks).
+        function aiDecisionHtml(r, m, ai, pending, files) {
+          var why = (ai.Reason ? '<div><dt>Why:</dt> <dd>' + esc(ai.Reason) + '</dd></div>' : '') +
+            (ai.Basis ? '<div><dt>Chose from:</dt> <dd>' + esc(ai.Basis) + '</dd></div>' : '') +
+            (ai.Confidence ? '<div><dt>Name match:</dt> <dd>' + esc(ai.Confidence) + '</dd></div>' : '') +
+            (ai.More ? '<div class="ingest-muted">' + esc(plural(ai.More, 'more file')) + ' suggested too; see the details.</div>' : '');
+          var html = '<div class="ingest-decision ingest-ai"><p class="ingest-decision-head"><span class="ingest-ai-tag">🤖 Suggested by the AI</span>' + esc(m.Headline || ('Suggested by the AI: ' + ai.Title + '.')) + '</p>' +
+            (ai.By ? '<div class="ingest-muted">' + esc(ai.By) + '</div>' : '') +
+            '<dl class="ingest-ai-why">' + why + '</dl>' +
+            (r.Chosen ? '<div class="ingest-muted">Filed into <strong>' + esc(libraryFor(r.Chosen.Target.Root)) + '</strong>, the library chosen in review.</div>' : '');
+          if (!pending) {
+            var replace = ai.Replaces && canReplace(r);
+            var ec = replace ? existingCount(r) : 0;
+            var approve = replace
+              ? '<button is="emby-button" type="button" class="raised button-submit ingest-approve" data-replace="1"><span>' + (confirmReplace[r.Id] ? 'Confirm: approve and replace ' + ec + ' file' + (ec === 1 ? '' : 's') + ' on the server' : 'Approve and replace existing copies') + '</span></button>'
+              : '<button is="emby-button" type="button" class="raised button-submit ingest-approve"><span>Approve</span></button>';
+            html += '<div class="ig-actions">' + approve +
+              // A wrong episode is put right by giving its season and episode; a wrong title by picking another
+              (ai.Episode && files
+                ? '<button is="emby-button" type="button" class="raised button-alt ingest-open-files"><span>Wrong episode? Give the right one</span></button>'
+                : ((r.Candidates || []).length || (r.SearchResults || []).length ? '<button is="emby-button" type="button" class="raised button-alt ingest-pick-other"><span>Wrong? Pick another</span></button>' : '') +
+                  (files ? '<button is="emby-button" type="button" class="raised button-alt ingest-open-files"><span>Choose file by file</span></button>' : '')) +
+              '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button></div>' +
+              '<div class="ingest-muted">' + (replace
+                ? 'Files it exactly as suggested and replaces ' + ec + ' file' + (ec === 1 ? '' : 's') + ' in ' + esc(replacingIn(r)) + '; the old copies go to quarantine.'
+                : 'Files it exactly as suggested, without asking the AI again.') + ' Or leave it waiting and decide later.</div>';
+          }
+          return html + '</div>';
+        }
+
+        // "Approve all AI suggestions (N)": only releases that wait for nothing but approval, as this page shows them
+        function pureAi() {
+          return reviews.filter(function (r) {
+            var v = reviewViews[r.Id];
+            return v && v.Match && v.Match.Ai && v.Match.Ai.OnlyAi && (!r.Request || r.Request === 'None');
+          });
+        }
+        function renderApproveAll() {
+          var b = page.querySelector('#ApproveAllAi');
+          var note = page.querySelector('#ApproveAllNote');
+          var waitingAll = queued.filter(function (q) { return q.Kind === 'ApproveAll'; })[0];
+          var n = pureAi().length;
+          if (b.classList.contains('ig-busy')) { return; }
+          b.hidden = !n || !!waitingAll;
+          if (!n) { confirmApproveAll = false; }
+          b.querySelector('span').textContent = confirmApproveAll ? 'Confirm: approve and file ' + plural(n, 'release') : 'Approve all AI suggestions (' + n + ')';
+          note.hidden = !waitingAll && !confirmApproveAll;
+          note.textContent = waitingAll
+            ? 'Approving ' + plural(waitingAll.Count, 'AI suggestion') + ' on the next sweep…'
+            : 'Files ' + plural(n, 'release') + ' exactly as the AI suggested. Releases with anything else to decide (a copy already on the server, say) are left for you.';
+        }
+        var confirmApproveAll = false;
+
         function renderReviews() {
           var box = page.querySelector('#Reviews');
           page.querySelector('#ReviewCount').textContent = reviews.length ? '(' + reviews.length + ')' : '';
+          renderApproveAll();
           if (!reviews.length) { box.innerHTML = '<p class="ig-empty">Nothing waiting. Releases Ingest can\'t file confidently will appear here.</p>'; return; }
           box.innerHTML = reviews.slice(0, reviewLimit).map(function (r, n) {
             var v = reviewView(r);
@@ -780,7 +850,12 @@
             }
             var files = pending ? '' : perFile(r, n);
             var replaceable = !pending && inUse && !m.Checking && canReplace(r);
-            if (inUse) {
+            var ai = m.Ai || null;
+            // The decision (the AI's suggestion, or the title in use) leads the card; other titles follow below
+            var lead = inUse || !!ai;
+            if (ai) {
+              html += aiDecisionHtml(r, m, ai, pending, files);
+            } else if (inUse) {
               // The decision for the title in use leads the card; other titles follow under "Wrong show? Pick another"
               html += '<div class="ingest-decision"><p class="ingest-decision-head">' + esc(m.Headline) + '</p>' +
                 (r.Chosen ? '<div class="ingest-muted">Chosen in review, to be filed into <strong>' + esc(libraryFor(r.Chosen.Target.Root)) + '</strong>. ' + links(r.Chosen.Candidate.ProviderIds, r.Chosen.Candidate.IsSeries) + '</div>' +
@@ -801,7 +876,7 @@
             if (pending) {
               return html + '<p class="ingest-muted">On the next sweep (within 30 seconds)…</p></div>' + moreHtml('rv:' + r.Id, 'Details', '', v.Details) + '</div>';
             }
-            if (inUse) { html += files; }
+            if (lead) { html += files; }
             var cands = r.Candidates || [];
             var sr = searchResults[r.Id];
             html += pickTable(r, cands, 'suggested', m);
@@ -810,15 +885,15 @@
             // With nothing to pick from, searching is the main way forward
             var searchUpFront = !cands.length || !!sr;
             if (searchUpFront) { html += searchForm(r, true); }
-            if (!inUse && canReplace(r)) {
+            if (!lead && canReplace(r)) {
               var ec2 = existingCount(r);
               html += '<div class="ig-actions" style="margin-left:0"><button is="emby-button" type="button" class="raised button-submit ingest-replace"><span>' + (confirmReplace[r.Id] ? 'Confirm: replace ' + ec2 + ' file' + (ec2 === 1 ? '' : 's') + ' on the server' : 'Replace existing copies') + '</span></button>' +
                 '<span class="ingest-muted">Replaces ' + ec2 + ' file' + (ec2 === 1 ? '' : 's') + ' in ' + esc(replacingIn(r)) + '; the old copies go to quarantine.</span></div>';
             }
-            if (!inUse) { html += files; }
+            if (!lead) { html += files; }
             html += '</div>';
             var secondary = '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>' + (r.Chosen ? 'Clear choice and retry' : 'Retry') + '</span></button>' +
-              (inUse ? '' : '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>');
+              (lead ? '' : '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>');
             html += moreHtml('rv:' + r.Id, 'More options and details', (searchUpFront ? '' : searchForm(r, false)) + secondary, v.Details);
             return html + '</div>';
           }).join('') + showMoreHtml('ReviewsMore', Math.min(reviewLimit, reviews.length), reviews.length);
@@ -1076,6 +1151,24 @@
             delete searchResults[id];
             // The server resolves the choice from its own list; the browser says which one and what it showed there
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Choose', { List: list === 'search' ? 'search' : 'suggested', Index: index, LibraryId: lib, Key: candidateKey(shown[index].Candidate) }, btn, 'Saving the choice…');
+          } else if (btn.classList.contains('ingest-approve')) {
+            var ra = reviewById(id);
+            var av = reviewViews[id] && reviewViews[id].Match && reviewViews[id].Match.Ai;
+            if (!ra || !av) { return; }
+            var withReplace = btn.getAttribute('data-replace') === '1';
+            if (withReplace && !confirmReplace[id]) { confirmReplace[id] = true; renderReviews(); return; }
+            delete confirmReplace[id];
+            // The suggestion the page showed goes too: the server refuses (409) if it has changed since
+            post('Ingest/Reviews/' + encodeURIComponent(id) + '/Approve', withReplace
+              ? { Key: av.Key, Replace: true, Existing: ra.Items.map(function (i) { return i.Existing; }).join('\n') }
+              : { Key: av.Key }, btn, 'Approving…');
+          } else if (btn.classList.contains('ingest-pick-other')) {
+            var pick = card.querySelector('.ingest-pick');
+            if (pick) {
+              pick.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              var first = pick.querySelector('.ingest-choose, .ingest-lib');
+              if (first) { first.focus(); }
+            }
           } else if (btn.classList.contains('ingest-retry')) {
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Retry', null, btn, 'Retrying…');
           } else if (btn.classList.contains('ingest-apply-files')) {
@@ -1109,6 +1202,16 @@
             delete confirmQuarantine[id];
             post('Ingest/Reviews/' + encodeURIComponent(id) + '/Quarantine', null, btn, 'Quarantining…');
           }
+        });
+
+        page.querySelector('#ApproveAllAi').addEventListener('click', function (e) {
+          var list = pureAi();
+          if (!list.length) { return; }
+          // Two clicks, the second stating how many releases get filed
+          if (!confirmApproveAll) { confirmApproveAll = true; renderApproveAll(); return; }
+          confirmApproveAll = false;
+          var body = { Reviews: list.map(function (r) { return { Id: r.Id, Key: reviewViews[r.Id].Match.Ai.Key }; }) };
+          post('Ingest/Reviews/ApproveAll', body, e.currentTarget, 'Approving ' + plural(list.length, 'release') + '…', 'Queued — approved and filed on the next sweep.').then(function () { setTimeout(loadStatus, 5000); });
         });
 
         page.querySelector('#Reviews').addEventListener('change', function (e) {
@@ -1313,7 +1416,7 @@
             row.querySelector('.wf-error').textContent = error;
             row.classList.toggle('invalid', !!error);
             if (error) { ok = false; }
-            return { Path: path, Destinations: dests, Enabled: row.querySelector('.wf-on').checked, Transfer: row.querySelector('.wf-mode').value, DryRun: row.querySelector('.wf-dry').checked };
+            return { Path: path, Destinations: dests, Enabled: row.querySelector('.wf-on').checked, Transfer: row.querySelector('.wf-mode').value, DryRun: row.querySelector('.wf-dry').checked, WhenAiDecides: row.querySelector('.wf-ai').value };
           }).filter(Boolean);
           if (!ok) { return null; }
           if (!folders.length) { addRow(); return null; }

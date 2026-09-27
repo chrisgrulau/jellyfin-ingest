@@ -16,6 +16,7 @@ public static class Friendly
     // First match wins: a phrase in the recorded reason, and what the page says instead
     private static readonly (string Contains, string Say)[] Phrases =
     [
+        ("asks before filing what the AI decided", "the AI made a suggestion for you to approve"),
         ("too close to call", "two matches look alike"),
         ("close candidates", "two matches look alike"),
         ("is already on the server", "it's already on the server"),

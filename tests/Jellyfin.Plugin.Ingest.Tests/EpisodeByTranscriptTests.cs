@@ -235,6 +235,7 @@ public sealed class EpisodeByTranscriptTests : IDisposable
         var again = await transcriber.TranscribeAsync(video, TestContext.Current.CancellationToken);
 
         Assert.Equal(Heard, first.Text);
+        Assert.Equal(TimeSpan.FromMinutes(1), first.From); // where it was heard, for a suggestion's card (FEAT-02)
         Assert.Equal(first, again);
         Assert.Equal([TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(1)], starts);
     }

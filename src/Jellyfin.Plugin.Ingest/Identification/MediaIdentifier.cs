@@ -134,12 +134,23 @@ public sealed class MediaIdentifier
 
         var chosen = options[i].Candidate;
         var settled = await IdentifyAsChosenAsync(release, chosen, chosen.IsSeries, ct, videoPath).ConfigureAwait(false);
+        var named = $"'{chosen.Name}'{(chosen.Year is { } y ? $" ({y})" : string.Empty)}";
+        var decision = new AiDecision
+        {
+            Kind = AiDecisionKind.Match,
+            By = pick.By ?? "tie-breaker",
+            Picked = chosen.Year is { } year ? string.Create(CultureInfo.InvariantCulture, $"{chosen.Name} ({year})") : chosen.Name,
+            Reason = pick.Note,
+            Options = options.Count,
+            Confidence = Math.Min(1, options[i].Score),
+        };
         return settled.Status == IdentificationStatus.Identified
             ? settled with
             {
-                Reason = $"Chosen by {pick.By ?? "the tie-breaker"} from {options.Count} close candidates: '{chosen.Name}'{(chosen.Year is { } y ? $" ({y})" : string.Empty)}. {pick.Note}",
+                Reason = $"Chosen by {pick.By ?? "the tie-breaker"} from {options.Count} close candidates: {named}. {pick.Note}",
                 Candidates = result.Candidates,
                 DecidedBy = pick.By ?? "tie-breaker",
+                AiDecisions = [decision, .. settled.AiDecisions],
             }
             : result;
     }
@@ -176,7 +187,7 @@ public sealed class MediaIdentifier
         {
             var byTitle = await FindEpisodeAsync(release, chosen, videoPath, cancellationToken).ConfigureAwait(false);
             return byTitle.Hit is { } hit
-                ? ByTitle(series, hit, 1, [], reason + " " + byTitle.Note, byTitle.By)
+                ? ByTitle(series, hit, 1, [], reason + " " + byTitle.Note, byTitle.Ai)
                 : new IdentificationResult
                 {
                     Status = IdentificationStatus.NeedsReview,
@@ -437,7 +448,7 @@ public sealed class MediaIdentifier
         {
             var byTitle = await FindEpisodeAsync(release, c, videoPath, ct).ConfigureAwait(false);
             return byTitle.Hit is { } hit
-                ? ByTitle(series, hit, Math.Min(1, best.Score), ranked, reason + " " + byTitle.Note, byTitle.By)
+                ? ByTitle(series, hit, Math.Min(1, best.Score), ranked, reason + " " + byTitle.Note, byTitle.Ai)
                 : new IdentificationResult
                 {
                     Status = IdentificationStatus.NeedsReview,
@@ -460,20 +471,21 @@ public sealed class MediaIdentifier
         };
     }
 
-    private static IdentificationResult ByTitle(SeriesIdentity series, EpisodeListing hit, double confidence, IReadOnlyList<ScoredCandidate> ranked, string reason, string? by) => new()
+    private static IdentificationResult ByTitle(SeriesIdentity series, EpisodeListing hit, double confidence, IReadOnlyList<ScoredCandidate> ranked, string reason, AiDecision? ai) => new()
     {
         Status = IdentificationStatus.Identified,
         Confidence = confidence,
         Candidates = ranked,
         Reason = reason.Trim(),
-        DecidedBy = by,
+        DecidedBy = ai?.By,
+        AiDecisions = ai is null ? [] : [ai],
         Episode = new EpisodeIdentity { Series = series, Season = hit.Season, Episode = hit.Episode, Title = hit.Title },
     };
 
     // A file that names its episode by title only (typically a special, "S13SP2 A Special Title"): find that title in
     // the season's episode list. A clear match is taken; otherwise an episode picker (the AI plugin) may choose one of
     // the listed episodes. The note is appended to the reason either way.
-    private async Task<(EpisodeListing? Hit, string Note, string? By)> FindByTitleAsync(ParsedRelease release, MetadataCandidate series, string? videoPath, CancellationToken ct)
+    private async Task<(EpisodeListing? Hit, string Note, AiDecision? Ai)> FindByTitleAsync(ParsedRelease release, MetadataCandidate series, string? videoPath, CancellationToken ct)
     {
         if (release.Season is not { } season || release.Episode is not null || string.IsNullOrWhiteSpace(release.EpisodeTitle))
         {
@@ -512,14 +524,26 @@ public sealed class MediaIdentifier
         }
 
         var chosen = options[i];
-        return (chosen, string.Create(CultureInfo.InvariantCulture, $"Episode S{chosen.Season:00}E{chosen.Episode:00} '{chosen.Title}' chosen by {pick.By ?? "the episode picker"} from {options.Count} listed episodes. {pick.Note}"), pick.By ?? "episode picker");
+        var decision = new AiDecision
+        {
+            Kind = AiDecisionKind.EpisodeByTitle,
+            By = pick.By ?? "episode picker",
+            Picked = EpisodeWords(chosen),
+            Reason = pick.Note,
+            Options = options.Count,
+            Confidence = Math.Min(1, TitleMatcher.Similarity(title, chosen.Title)),
+        };
+        return (chosen, string.Create(CultureInfo.InvariantCulture, $"Episode S{chosen.Season:00}E{chosen.Episode:00} '{chosen.Title}' chosen by {pick.By ?? "the episode picker"} from {options.Count} listed episodes. {pick.Note}"), decision);
     }
 
     private static string? FileName(string? videoPath) => string.IsNullOrEmpty(videoPath) ? null : Path.GetFileName(videoPath);
 
+    private static string EpisodeWords(EpisodeListing e)
+        => string.Create(CultureInfo.InvariantCulture, $"S{e.Season:00}E{e.Episode:00}") + (string.IsNullOrWhiteSpace(e.Title) ? string.Empty : " '" + e.Title + "'");
+
     // The episode number is missing: first by the episode title in the name, then (with a transcriber and an episode
     // picker) by comparing a short transcript with the episode synopses
-    private async Task<(EpisodeListing? Hit, string Note, string? By)> FindEpisodeAsync(ParsedRelease release, MetadataCandidate series, string? videoPath, CancellationToken ct)
+    private async Task<(EpisodeListing? Hit, string Note, AiDecision? Ai)> FindEpisodeAsync(ParsedRelease release, MetadataCandidate series, string? videoPath, CancellationToken ct)
     {
         var byTitle = await FindByTitleAsync(release, series, videoPath, ct).ConfigureAwait(false);
         if (byTitle.Hit is not null || release.Episode is not null)
@@ -547,7 +571,7 @@ public sealed class MediaIdentifier
         return byTranscript.Hit is not null ? byTranscript : (null, byTitle.Note + byTranscript.Note, null);
     }
 
-    private async Task<(EpisodeListing? Hit, string Note, string? By)> FindByTranscriptAsync(ParsedRelease release, MetadataCandidate series, string videoPath, IEpisodePicker picker, CancellationToken ct)
+    private async Task<(EpisodeListing? Hit, string Note, AiDecision? Ai)> FindByTranscriptAsync(ParsedRelease release, MetadataCandidate series, string videoPath, IEpisodePicker picker, CancellationToken ct)
     {
         // The transcript first (ING-31): it answers at once when the Subtitles plugin is missing or doesn't allow Ingest,
         // so the seasons are only listed when there is something to compare
@@ -596,6 +620,17 @@ public sealed class MediaIdentifier
         }
 
         var chosen = episodes[i];
-        return (chosen, string.Create(CultureInfo.InvariantCulture, $"Episode S{chosen.Season:00}E{chosen.Episode:00} '{chosen.Title}' identified from a transcript by {pick.By ?? "the episode picker"}, among {episodes.Count} episodes. {pick.Note}"), pick.By ?? "episode picker");
+        var decision = new AiDecision
+        {
+            Kind = AiDecisionKind.Transcript,
+            By = pick.By ?? "episode picker",
+            Picked = EpisodeWords(chosen),
+            Reason = pick.Note,
+            Options = episodes.Count,
+            TranscriptCharacters = text.Length,
+            TranscriptFrom = heard.From,
+            TranscriptSnippet = AiDecision.Snippet(text),
+        };
+        return (chosen, string.Create(CultureInfo.InvariantCulture, $"Episode S{chosen.Season:00}E{chosen.Episode:00} '{chosen.Title}' identified from a transcript by {pick.By ?? "the episode picker"}, among {episodes.Count} episodes. {pick.Note}"), decision);
     }
 }
