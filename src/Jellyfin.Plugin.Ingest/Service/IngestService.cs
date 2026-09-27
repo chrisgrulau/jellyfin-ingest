@@ -185,8 +185,13 @@ public sealed partial class IngestService : IHostedService, IDisposable
         // Undos and restores asked for on the page, between releases so they never race a filing or a scan
         RunQueued(config, libraries, problems);
 
-        // Reviews of a watch folder that has been removed from the settings can never be acted on
-        _state.PruneWatchFolders([.. config.WatchFolders.Select(w => w.Path)]);
+        // Reviews that can never be acted on: the watch folder was removed from the settings, or the release has gone
+        // (also from a watch folder that isn't swept: switched off, unsafe settings, no library)
+        foreach (var (review, why) in _state.PruneGone([.. config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path)).Select(w => w.Path)], Directory.Exists, EntryExists))
+        {
+            RecordReviewRemoved(review, why);
+        }
+
         _progress.KeepOnly([.. config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)).Select(w => w.Path)]);
         foreach (var watch in config.WatchFolders.Where(w => w.Enabled && !string.IsNullOrWhiteSpace(w.Path)))
         {
@@ -295,7 +300,11 @@ public sealed partial class IngestService : IHostedService, IDisposable
             tracker.Forget(release);
         }
 
-        _state.PruneReviews(watch.Path, [.. snapshot.Keys, .. scan.Links, .. scan.Unsettled, .. scan.Unreadable]);
+        foreach (var gone in _state.PruneReviews(watch.Path, [.. snapshot.Keys, .. scan.Links, .. scan.Unsettled, .. scan.Unreadable]))
+        {
+            RecordReviewRemoved(gone, "It is no longer in the watch folder.");
+        }
+
         _state.PruneCopied(watch.Path, [.. snapshot.Keys, .. scan.Unsettled, .. scan.Unreadable]);
         ReviewLinks(watch, scan.Links);
         ReviewUnreadable(watch, scan.Unreadable);
@@ -392,6 +401,30 @@ public sealed partial class IngestService : IHostedService, IDisposable
             }
         }
     }
+
+    // A release, file, folder or link (a broken link counts: it is still there to review)
+    private static bool EntryExists(string path)
+    {
+        try
+        {
+            return File.Exists(path) || Directory.Exists(path) || new FileInfo(path).LinkTarget is not null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Can't tell: keep the review
+            return true;
+        }
+    }
+
+    private void RecordReviewRemoved(PendingReview review, string why)
+        => _state.Record(new ActivityEntry
+        {
+            Time = _clock.GetUtcNow(),
+            Status = ActivityStatus.ReviewRemoved,
+            Release = review.Release,
+            WatchFolder = review.WatchFolder,
+            Summary = "Review removed: the release is gone. " + why,
+        });
 
     // What this watch folder is still waiting for, for the page (ING-36). Releases with a review are shown there instead,
     // and one filed by copy or hard link that is only being checked again isn't news.
