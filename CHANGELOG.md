@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Settings pages use the full width; buttons are centred.** The Ingest page's sections, lists, cards and fields now
+  use the whole page area instead of stopping at about half a wide screen (help text keeps a comfortable reading
+  width), and rows such as *Destination library / Library folder / Remove* spread across it (still stacking on narrow
+  screens). *Save*, *Add watch folder* and *Add destination* are centred at a sensible width instead of stretching
+  across the page; buttons inside rows stay compact.
+
+### Fixed
+
+- A summary that already ends with a question mark (or `!`, `.` or `…`) no longer gets a full stop added, so
+  *Recent activity* reads "Waiting for you: which episode is it?" rather than "…is it?.".
+
 ## [0.12.0-alpha] - 2026-09-27
 
 ### Changed

@@ -110,7 +110,25 @@ public static class Friendly
             return sentence[..(cut > MaxSentence / 2 ? cut : MaxSentence - 1)].TrimEnd(',', ';', ':', ' ') + "…";
         }
 
-        return sentence.TrimEnd(')', '\'', '"').EndsWith('.') || sentence.EndsWith('!') || sentence.EndsWith('?') || sentence.EndsWith('…') ? sentence : sentence + ".";
+        return EndSentence(sentence);
+    }
+
+    /// <summary>
+    /// Ends a sentence with a full stop unless it already ends with <c>.</c>, <c>?</c>, <c>!</c> or <c>…</c>
+    /// (looking past a closing bracket or quote), so "which episode is it?" never becomes "it?.".
+    /// </summary>
+    /// <param name="sentence">The sentence.</param>
+    /// <returns>The sentence with exactly one closing mark.</returns>
+    public static string EndSentence(string? sentence)
+    {
+        if (string.IsNullOrWhiteSpace(sentence))
+        {
+            return string.Empty;
+        }
+
+        sentence = sentence.TrimEnd();
+        var bare = sentence.TrimEnd(')', ']', '\'', '"', '’', '”');
+        return bare.Length > 0 && bare[^1] is '.' or '?' or '!' or '…' ? sentence : sentence + ".";
     }
 
     /// <summary>

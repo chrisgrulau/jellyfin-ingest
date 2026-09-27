@@ -14,6 +14,18 @@
       #IngestConfigPage .ingest-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
       #IngestConfigPage .ingest-muted { opacity: var(--ig-muted); font-size: .9em; }
       #IngestConfigPage .emby-button { margin: 0; }
+      /* Full width: Jellyfin caps every form (and .readOnlyContent) at 54em from 50em up; this page uses the whole content area.
+         Help text keeps a comfortable reading width; inputs, lists and tables stretch. */
+      #IngestConfigPage .content-primary { max-width: none; box-sizing: border-box; }
+      #IngestConfigPage form, #IngestConfigPage .readOnlyContent { max-width: none; }
+      #IngestConfigPage p, #IngestConfigPage .fieldDescription { max-width: 80ch; }
+      @media (min-width: 80em) { #IngestConfigPage .content-primary { padding-left: 2em; padding-right: 2em; } }
+      /* Primary actions are centred at a reasonable width (a group sits centred as a row); row actions stay compact */
+      #IngestConfigPage .ig-button-row { display: flex; flex-wrap: wrap; justify-content: center; gap: .5em 1em; margin: 1em 0; }
+      #IngestConfigPage .ig-button-row > .emby-button, #IngestConfigPage .emby-button.block { display: inline-flex; justify-content: center; width: auto; min-width: 12em; max-width: 20em; margin: 0; }
+      #IngestConfigPage .ig-button-row > .emby-button.block { flex: 0 1 16em; }
+      #IngestConfigPage .ig-button-row > [hidden] { display: none; }
+      #IngestConfigPage .ig-button-row:not(:has(> :not([hidden]))) { display: none; }
       /* Watch folder rows */
       #IngestConfigPage .ingest-row { padding: 1em; margin: .75em 0; border-radius: 6px; border: 1px solid var(--ig-line); }
       #IngestConfigPage .ingest-row.invalid { border-color: rgba(220,53,69,.8); }
@@ -75,7 +87,7 @@
       #IngestConfigPage .ig-nerd dl { display: grid; grid-template-columns: minmax(6em, max-content) minmax(0, 1fr); gap: .15em .9em; margin: 0; }
       #IngestConfigPage .ig-nerd dt { opacity: var(--ig-muted); word-break: break-word; }
       #IngestConfigPage .ig-nerd dd { margin: 0; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
-      #IngestConfigPage .ig-show-more { display: block; margin: .5em auto; background: none; border: 1px solid var(--ig-line); color: inherit; border-radius: 999px; padding: .35em 1.2em; cursor: pointer; font: inherit; }
+      #IngestConfigPage .ig-show-more { display: block; min-width: 12em; max-width: 20em; margin: .5em auto; background: none; border: 1px solid var(--ig-line); color: inherit; border-radius: 999px; padding: .35em 1.2em; cursor: pointer; font: inherit; }
       #IngestConfigPage .ig-empty { opacity: var(--ig-muted); margin: .5em 0; }
       /* Activity filters */
       #IngestConfigPage .ingest-filters { display: flex; flex-wrap: wrap; gap: .4em; margin: .5em 0; }
@@ -88,7 +100,7 @@
       #IngestConfigPage .ingest-card a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
       #IngestConfigPage .ingest-card .ig-body { margin: .5em 0 0 2.4em; }
       #IngestConfigPage .ingest-links a + a { margin-left: .6em; }
-      #IngestConfigPage .ingest-pick { max-width: 56em; margin: .5em 0; }
+      #IngestConfigPage .ingest-pick { margin: .5em 0; }
       #IngestConfigPage .ingest-into { display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1em; margin-bottom: .25em; }
       #IngestConfigPage .ingest-into select { min-width: 12em; max-width: 100%; padding: .3em .5em; background: var(--ingest-field-bg); color: inherit; border: 1px solid var(--ig-line); border-radius: 4px; font: inherit; }
       #IngestConfigPage .ingest-cands { width: 100%; border-collapse: collapse; }
@@ -179,7 +191,9 @@
             <div>
               <p class="ingest-muted">A new watch folder starts in <strong>dry run</strong>: Ingest records what it would do (see <em>Recent activity</em>) and moves nothing until you untick it for that folder. Releases are filed by kind: shows into a Shows library, films into a Movies library, or both into a Mixed Movies and Shows library (which must then be the folder's only destination). Media with no destination of its kind waits for review. To split films between two Movies libraries, use a watch folder for each.</p>
               <div id="WatchFolders"></div>
-              <button is="emby-button" type="button" class="raised button-alt" id="AddWatchFolder"><span>Add watch folder</span></button>
+              <div class="ig-button-row">
+                <button is="emby-button" type="button" class="raised button-alt" id="AddWatchFolder"><span>Add watch folder</span></button>
+              </div>
             </div>
           </details>
 
@@ -250,7 +264,7 @@
             </div>
           </details>
 
-          <div style="margin-top:1em">
+          <div class="ig-button-row" style="margin-top:1.5em">
             <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
           </div>
         </form>
@@ -366,7 +380,7 @@
             '</select>' +
             '<label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" id="wf-dry-' + n + '" class="wf-dry"' + (dry ? ' checked' : '') + ' /><span>Dry run (record only, move nothing)</span></label></div>' +
             '<div class="wf-dests"></div>' +
-            '<button is="emby-button" type="button" class="raised button-alt wf-add-dest"><span>Add destination</span></button>' +
+            '<div class="ig-button-row"><button is="emby-button" type="button" class="raised button-alt wf-add-dest"><span>Add destination</span></button></div>' +
             '<p class="ingest-muted wf-hint"></p><p class="wf-error" aria-live="polite"></p>';
           row.querySelector('.wf-remove').addEventListener('click', function () { row.remove(); syncBanner(); });
           row.querySelector('.wf-dry').addEventListener('change', syncBanner);

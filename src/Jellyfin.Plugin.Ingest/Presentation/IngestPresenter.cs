@@ -163,7 +163,7 @@ public sealed partial class IngestPresenter
             ReviewRequest.Quarantine => "Quarantining it on the next sweep.",
             ReviewRequest.Replace => "Replacing what's on the server on the next sweep.",
             ReviewRequest.Retry => "Trying again on the next sweep.",
-            _ => "Waiting for you: " + Friendly.Reasons(reasons) + ".",
+            _ => Friendly.EndSentence("Waiting for you: " + Friendly.Reasons(reasons)),
         };
         if (review.RetryAt is not null && review.Request == ReviewRequest.None && !summary.Contains("by itself", StringComparison.Ordinal))
         {
@@ -414,7 +414,7 @@ public sealed partial class IngestPresenter
             case ActivityStatus.Filed when entry.Run is null && entry.Videos is null && lines.Moves.Count == 0:
                 return Friendly.FirstSentence(entry.Summary);
             case ActivityStatus.Filed:
-                var text = "Filed into " + into + ".";
+                var text = Friendly.EndSentence("Filed into " + into);
                 if (counts is { Replaced: > 0 })
                 {
                     text += counts.Replaced == 1 ? " It replaced the copy that was there." : " It replaced the copies that were there.";
@@ -434,9 +434,9 @@ public sealed partial class IngestPresenter
             case ActivityStatus.DryRun:
                 return entry.Summary.StartsWith("Would quarantine", StringComparison.Ordinal)
                     ? "Dry run: the whole release would be quarantined. Nothing was moved."
-                    : "Dry run: would be filed into " + into + ". Nothing was moved.";
+                    : Friendly.EndSentence("Dry run: would be filed into " + into) + " Nothing was moved.";
             case ActivityStatus.NeedsReview:
-                return "Waiting for you: " + (lines.Reasons.Count > 0 ? Friendly.Reasons(lines.Reasons) : Friendly.Reason(entry.Summary)) + ".";
+                return Friendly.EndSentence("Waiting for you: " + (lines.Reasons.Count > 0 ? Friendly.Reasons(lines.Reasons) : Friendly.Reason(entry.Summary)));
             case ActivityStatus.Quarantined:
                 var files = counts?.Clutter ?? lines.Moves.Count;
                 return string.Create(CultureInfo.InvariantCulture, $"Moved the whole release to quarantine ({MediaTitle.Plural(files, "file")}).");

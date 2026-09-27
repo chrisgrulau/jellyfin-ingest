@@ -376,6 +376,33 @@ public sealed class PresenterTests
     [InlineData("A size of 1.5 GB was too big", "A size of 1.5 GB was too big.")]
     public void First_sentence(string text, string expected) => Assert.Equal(expected, Friendly.FirstSentence(text));
 
+    [Theory]
+    [InlineData("which episode is it?", "which episode is it?")]
+    [InlineData("Waiting for you: which episode is it?", "Waiting for you: which episode is it?")]
+    [InlineData("Stop!", "Stop!")]
+    [InlineData("Done.", "Done.")]
+    [InlineData("Filing…", "Filing…")]
+    [InlineData("It said \"what?\"", "It said \"what?\"")]
+    [InlineData("Filed into Movies", "Filed into Movies.")]
+    [InlineData("Filed into Movies ", "Filed into Movies.")]
+    [InlineData("", "")]
+    public void A_sentence_gets_one_closing_mark(string text, string expected) => Assert.Equal(expected, Friendly.EndSentence(text));
+
+    [Fact]
+    public void A_question_reason_is_not_followed_by_a_full_stop()
+    {
+        var review = new PendingReview
+        {
+            Id = "q",
+            WatchFolder = Watch,
+            Release = "Lantern.S03.720p-GRP",
+            Time = Now,
+            Items = [new PendingReviewItem("Lantern.S03.720p-GRP/a.mkv", "The season or episode number can't be read from the name.")],
+        };
+
+        Assert.Equal("Waiting for you: which episode is it?", Presenter.Review(review).Summary);
+    }
+
     [Fact]
     public void Long_messages_are_shortened_at_a_word()
     {
