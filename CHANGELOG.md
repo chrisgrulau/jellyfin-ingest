@@ -24,6 +24,7 @@ All notable changes to this project are documented here. The format follows
   this count as automatic unless *Recent activity* holds a review decision for the release made before it was filed.
 ### Fixed
 
+- The "Move to another library" confirm button shows progress ("Moving…") like the page's other actions.
 - **Quarantine: *Delete now* can't race filing or orphan a folder.** *Delete day now*, *Delete now* for one release and
   the scheduled purge now hold the same file-operations gate as filing, undo and restore for the whole deletion,
   waiting up to 2 minutes for a filing that is running; if it doesn't finish they touch nothing and say "Ingest is

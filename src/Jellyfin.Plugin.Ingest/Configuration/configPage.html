@@ -1174,9 +1174,12 @@
             if (mv.classList.contains('ingest-move-cancel')) { delete movePick[mr]; renderActivity(); return; }
             var pick = movePick[mr];
             if (!pick || !pick.options) { return; }
-            mv.disabled = true;
-            delete movePick[mr];
-            post('Ingest/Activity/' + encodeURIComponent(mr) + '/Move', { LibraryId: pick.choice }).then(function () { setTimeout(loadStatus, 5000); });
+            // Busy while the request is sent; the move itself runs on the next sweep (like Undo)
+            post('Ingest/Activity/' + encodeURIComponent(mr) + '/Move', { LibraryId: pick.choice }, mv, 'Moving…', 'Queued — moves on the next sweep.').then(function () {
+              delete movePick[mr];
+              renderActivity();
+              setTimeout(loadStatus, 5000);
+            });
             return;
           }
           var b = e.target.closest('.ingest-undo');
