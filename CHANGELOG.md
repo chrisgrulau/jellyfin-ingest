@@ -22,6 +22,21 @@ All notable changes to this project are documented here. The format follows
   Ingest/Activity/{run}/MoveTargets`, `POST Ingest/Activity/{run}/Move` (`{ "LibraryId": … }`).
 - Filings now record how their library was chosen (`ChosenBy`: `Automatic` or `Review`). Filings recorded before
   this count as automatic unless *Recent activity* holds a review decision for the release made before it was filed.
+### Fixed
+
+- **Quarantine: *Delete now* can't race filing or orphan a folder.** *Delete day now*, *Delete now* for one release and
+  the scheduled purge now hold the same file-operations gate as filing, undo and restore for the whole deletion,
+  waiting up to 2 minutes for a filing that is running; if it doesn't finish they touch nothing and say "Ingest is
+  filing right now; try again in a minute". A dated folder is emptied, looked at again (anything that arrived meanwhile
+  is deleted too), and temporary names that network and FUSE mounts leave for files still open elsewhere (`.smb…`,
+  `.fuse_hidden…`, `.nfs…`) are waited for briefly. Only when nothing but its marker is left are the marker and the
+  folder removed; otherwise the folder keeps its marker (so the next purge removes it, and Ingest keeps using it
+  instead of creating a "(Ingest)" folder beside it) and the page says how many items couldn't be deleted yet.
+- The Ingest page shows that its actions are working: the button pressed (*Delete now*, *Restore*, *Undo*,
+  *Replace existing copies*, *Use this*, *Process now*, *Pause*/*Resume*, *Save* …) and the other actions on its row
+  are disabled and show a small spinner until the server answers, then the outcome ("Deleted 2026-09-27 — 31 GB
+  freed.", or why not) is shown on the row, and the list is refreshed. Confirming *Delete day now* for today notes that
+  anything quarantined later today goes into a new folder for today.
 
 ## [0.12.2-alpha] - 2026-09-27
 

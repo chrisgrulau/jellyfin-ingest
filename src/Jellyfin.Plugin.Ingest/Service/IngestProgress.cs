@@ -112,10 +112,10 @@ public sealed class IngestProgress
     private TaskCompletionSource _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
-    /// Gets the lock held while files are moved or deleted (filing, quarantining, undo, restore, "delete now"), so a
-    /// deletion asked for on the page never runs while the sweep is moving files into the same folder.
+    /// Gets the gate held while files are moved or deleted (filing, quarantining, undo, restore, recovery, "delete now",
+    /// the purge), so a deletion never runs while the sweep is moving files into the same folder.
     /// </summary>
-    public Lock FileGate { get; } = new();
+    public FileOperationsGate FileGate { get; } = new();
 
     /// <summary>
     /// Gets the release being worked on, if any.

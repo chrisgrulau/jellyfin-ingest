@@ -270,7 +270,7 @@ public class IngestController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public ActionResult DeleteQuarantined([FromBody, Required] QuarantineEntryRequest request)
+    public async Task<ActionResult> DeleteQuarantined([FromBody, Required] QuarantineEntryRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         var name = string.IsNullOrEmpty(request.Name) ? null : request.Name;
@@ -279,23 +279,30 @@ public class IngestController : ControllerBase
             return BadRequest(problem);
         }
 
-        // Never while the sweep is moving files (it may be quarantining into this very folder)
-        if (!_progress.FileGate.TryEnter(TimeSpan.FromSeconds(10)))
+        // Holds the same gate as filing, undo and restore for the whole deletion, so nothing is moved into the folder
+        // while it is deleted; waits a little for a filing that is running, else touches nothing
+        var outcome = await QuarantinePurger.DeleteNowAsync(
+            _progress.FileGate,
+            FileOperationsGate.DefaultWait,
+            name is null ? path : System.IO.Path.GetDirectoryName(path)!,
+            name,
+            cancellationToken: HttpContext.RequestAborted).ConfigureAwait(false);
+        switch (outcome.Status)
         {
-            return Conflict("Ingest is moving files right now; try again in a moment.");
-        }
-
-        try
-        {
-            QuarantinePurger.DeleteNow(name is null ? path : System.IO.Path.GetDirectoryName(path)!, name);
-        }
-        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            return Conflict("It couldn't be (fully) deleted: " + ex.Message);
-        }
-        finally
-        {
-            _progress.FileGate.Exit();
+            case QuarantineDeleteStatus.Busy:
+                return Conflict(outcome.Message);
+            case QuarantineDeleteStatus.Refused:
+                return Conflict("It couldn't be deleted: " + outcome.Message);
+            case QuarantineDeleteStatus.Failed:
+                _state.Record(new ActivityEntry
+                {
+                    Time = DateTimeOffset.UtcNow,
+                    Status = ActivityStatus.Failed,
+                    Release = name ?? request.Folder!,
+                    Summary = "Partly deleted from quarantine: " + outcome.Message,
+                    Details = [path],
+                });
+                return Conflict(outcome.Message);
         }
 
         _state.Record(new ActivityEntry
