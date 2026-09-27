@@ -220,6 +220,50 @@ filing's entry gets `UndoneAt` (the page shows **Undone**), and an `Undone` entr
 Activity log). A crash part-way leaves each file whole (the executor's recovery finishes or discards the interrupted
 move) and the release held for review, possibly partly returned; nothing is filed again by itself.
 
+## Move to another library
+
+A filing whose library Ingest chose itself can be moved to another library (`LibraryMove`). Filings record how the
+library was chosen (`ActivityEntry.ChosenBy`): `Review` when the release was planned with a choice made in review
+(`PendingReview.Chosen`, which always names a library), otherwise `Automatic` (the watch folder's destinations, or the
+library of a copy being replaced, including a replace or file-by-file decision, which don't pick a library). A filing
+recorded before `ChosenBy` existed counts as automatic only if *Recent activity* holds no `Decision` entry for the same
+release and watch folder from before it was filed (a decision that has aged out of the capped list can't be seen; the
+move is still only ever to a compatible library). It is offered (`ActivityView.CanMove`, `LibraryMove.Ineligible`)
+for a filing with a run, not undone, not moved already, within the action log's 90 days.
+
+**Targets** (`GET Ingest/Activity/{run}/MoveTargets` → `MoveOptions`): films go to Movies or mixed libraries, shows to
+Shows or mixed libraries (told apart by the filed videos' names, `MediaTitle.FromFiledPath`), never the library the
+files are in now. Within a library with several folders the files go to the folder already holding a film or show
+folder of the same name, else the roomiest (`LibraryRouting.RoomiestOf`), as filing does.
+
+**The move** (`POST Ingest/Activity/{run}/Move`, `{LibraryId}`; 202, 404, or 409 with the reason; queued like an undo
+and carried out by the next sweep under `FileGate`) is planned from the filing's completed moves
+(`LibraryMove.FiledMoves`). Every file that isn't in quarantine must sit in one film or show folder directly under one
+library folder; each moves to the same relative path under `<target folder>/<same title folder name>`. When that title
+folder already exists, an existing show's season folder for the same season (`ExistingFiles.FindSeasonFolder`: `Season
+1`, `S01`, `Specials` …) replaces Ingest's `Season NN`. The whole move is refused, with a plain reason, if:
+
+- the filing isn't eligible (above), or its files are in more than one film or show folder or outside the libraries;
+- the target library is gone, isn't compatible, is the current one, or its folder overlaps a watch folder, a quarantine
+  folder or one of Jellyfin's own folders (`FolderPolicy.MoveScopeOf`), or isn't there (an unmounted share);
+- a filed file is missing, or a video or extra has changed size or modified time since filing (a changed subtitle
+  moves as it is, as for undo);
+- a destination is taken, or the same episode (any name or container, `ExistingFiles.FindEpisode`) or the same film
+  edition is already in the target's film or show folder.
+
+The plan goes through the ordinary executor with `IngestPlan.Returning` (only the listed library files may be
+sources), `AllowedRoots` the target title folder and `RequiredFolders` the target library folder. Before the first move
+the move's run is written on the filing (`ActivityEntry.MoveRun`, via `PlanExecutor.RunId`), so after a crash part-way
+an undo still finds each file where it is; a failure that is fully rolled back clears it again. Afterwards the folders
+the files left are removed if truly empty, never a library folder itself; both title folders are refreshed as filing
+does; the filing gets `MovedAt`/`MovedTo` and a `Moved` entry is recorded (and copied to Jellyfin's Activity log).
+Clutter and replaced copies in quarantine aren't touched. A moved filing isn't offered for another move.
+
+**Undo after a move** follows the files: `LibraryMove.FiledMoves` replaces each filed file's destination, size and
+modified time with those of the move's completed move from that place (only moves that completed and weren't rolled
+back), so an undo takes the files back to the watch folder from the library they were moved to, with the usual
+checks. Jellyfin sees a moved film or episode as a new item: watched state and resume points may not carry over.
+
 ## Restore, delete now, pause
 
 **Restore** (`POST Ingest/Quarantine/Restore`, `{Root, Folder, Name}`) works on one entry of a dated quarantine folder
@@ -238,8 +282,8 @@ read-only files made writable, links removed rather than followed, and the marke
 `IngestProgress.FileGate` so it never overlaps the sweep moving files (409 "busy" after 10 s).
 
 **Pause** (`POST Ingest/Pause` / `Resume`) is kept in `state.json` rather than the plugin settings, which the settings
-page saves as a whole. While paused the sweep still scans, tracks and shows waiting releases, and carries out undos and
-restores, but plans and files nothing and doesn't act on quarantine requests.
+page saves as a whole. While paused the sweep still scans, tracks and shows waiting releases, and carries out undos,
+moves to another library and restores, but plans and files nothing and doesn't act on quarantine requests.
 
 **Libraries with several folders.** Jellyfin libraries can have several folders (`MediaLibrary.Locations`). A
 destination names one, or none; with none, `LibraryRouting.TargetsOf` now takes the folder with the most free space

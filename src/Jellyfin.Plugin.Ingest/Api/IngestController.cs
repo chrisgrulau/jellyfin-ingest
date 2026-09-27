@@ -166,6 +166,76 @@ public class IngestController : ControllerBase
     }
 
     /// <summary>
+    /// Gets the libraries a filing can be moved to: films to Movies or mixed libraries, shows to Shows or mixed libraries,
+    /// not the one it is in. Only filings whose library Ingest chose itself (not one chosen in review) can be moved.
+    /// </summary>
+    /// <param name="run">The filing's run (<see cref="ActivityEntry.Run"/>).</param>
+    /// <returns>The libraries, or why it can't be moved.</returns>
+    [HttpGet("Activity/{run}/MoveTargets")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult<MoveOptions> GetMoveTargets([FromRoute] string run)
+    {
+        var filing = _state.FindFiling(run);
+        if (filing is null)
+        {
+            return NotFound("That filing isn't in Recent activity any more.");
+        }
+
+        if (MoveScope() is not { } scope)
+        {
+            return Conflict("Ingest isn't ready yet.");
+        }
+
+        var options = LibraryMove.Options(filing, _state.Snapshot().Activity, ActionLogLines(), scope, DateTimeOffset.UtcNow, out var refusal);
+        return options is null ? Conflict(refusal) : options;
+    }
+
+    /// <summary>
+    /// Moves a filing to another library on the next sweep (which starts now): every file it filed (videos, subtitles,
+    /// extras) moves to the same place under that library, reusing a film or show folder of the same name there. It is
+    /// checked now and again when it runs; nothing is moved if any file has gone or changed since filing (subtitles
+    /// excepted), or a place it would go is taken. Jellyfin then sees it as a new item.
+    /// </summary>
+    /// <param name="run">The filing's run (<see cref="ActivityEntry.Run"/>).</param>
+    /// <param name="request">The library to move to.</param>
+    /// <returns>Accepted, or why it can't be moved.</returns>
+    [HttpPost("Activity/{run}/Move")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult Move([FromRoute] string run, [FromBody, Required] MoveRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var filing = _state.FindFiling(run);
+        if (filing is null)
+        {
+            return NotFound("That filing isn't in Recent activity any more.");
+        }
+
+        if (_progress.Queued().Any(q => q.Kind is QueuedActionKind.Move or QueuedActionKind.Undo && string.Equals(q.Run, run, StringComparison.Ordinal)))
+        {
+            return Conflict("An undo or move of this filing is already waiting for the next sweep.");
+        }
+
+        if (MoveScope() is not { } scope)
+        {
+            return Conflict("Ingest isn't ready yet.");
+        }
+
+        var refusal = new LibraryMove(_state, new PhysicalFileOperations(), TimeProvider.System).Check(run, request.LibraryId, scope, ActionLogLines());
+        if (refusal is not null)
+        {
+            return Conflict(refusal);
+        }
+
+        _progress.Queue(new QueuedAction { Kind = QueuedActionKind.Move, Run = run, LibraryId = request.LibraryId });
+        return Accepted();
+    }
+
+    /// <summary>
     /// Restores a quarantined release on the next sweep (which starts now): each file goes back to where the action log
     /// says it came from. Refused if any file isn't in the action log or has changed, came from outside the watch
     /// folders and libraries, or its place is taken. A release put back into a watch folder waits for review.
@@ -494,6 +564,18 @@ public class IngestController : ControllerBase
         return FolderPolicy.ReturnScopeOf(config, libraries, FolderPolicy.FolderProblems(config, libraries, _paths, _configuration));
     }
 
+    private MoveScope? MoveScope()
+    {
+        var config = IngestPlugin.Instance?.Configuration;
+        if (config is null)
+        {
+            return null;
+        }
+
+        var libraries = FolderPolicy.Libraries(_libraryManager.GetVirtualFolders());
+        return FolderPolicy.MoveScopeOf(config, libraries, FolderPolicy.FolderProblems(config, libraries, _paths, _configuration), FolderPolicy.ProtectedFolders(_paths, _configuration));
+    }
+
     private string[] ActionLogLines()
     {
         try
@@ -540,6 +622,15 @@ public sealed record ChooseRequest
 
     /// <summary>Gets the chosen candidate's key as the page showed it (<see cref="ReviewChoice.KeyOf"/>).</summary>
     public required string Key { get; init; }
+}
+
+/// <summary>
+/// Body of <see cref="IngestController.Move"/>.
+/// </summary>
+public sealed record MoveRequest
+{
+    /// <summary>Gets the id of the library to move to.</summary>
+    public string? LibraryId { get; init; }
 }
 
 /// <summary>

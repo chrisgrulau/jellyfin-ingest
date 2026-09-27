@@ -23,6 +23,9 @@ public static class Icons
     /// <summary>Put back: undone, or restored from quarantine.</summary>
     public const string PutBack = "↩️";
 
+    /// <summary>Moved to another library.</summary>
+    public const string Moved = "➡️";
+
     /// <summary>Videos.</summary>
     public const string Video = "🎬";
 

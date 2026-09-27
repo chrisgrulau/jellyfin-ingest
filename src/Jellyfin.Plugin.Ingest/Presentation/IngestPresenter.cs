@@ -56,7 +56,7 @@ public sealed partial class IngestPresenter
 
         return new ActivityPage
         {
-            Items = [.. rows.Select(a => Activity(a, now))],
+            Items = [.. rows.Select(a => Activity(a, now, activity))],
             Total = matching.Count,
             Offset = from,
             Limit = size,
@@ -69,8 +69,10 @@ public sealed partial class IngestPresenter
     /// </summary>
     /// <param name="entry">The entry.</param>
     /// <param name="now">Now (for whether Undo is still possible).</param>
+    /// <param name="activity">All of Recent activity (for whether an older filing's library was chosen in review), or
+    /// <c>null</c> to go by the entry alone.</param>
     /// <returns>The row.</returns>
-    public ActivityView Activity(ActivityEntry entry, DateTimeOffset now)
+    public ActivityView Activity(ActivityEntry entry, DateTimeOffset now, IReadOnlyList<ActivityEntry>? activity = null)
     {
         ArgumentNullException.ThrowIfNull(entry);
         var lines = Lines.Read(entry);
@@ -112,6 +114,8 @@ public sealed partial class IngestPresenter
             Run = entry.Run,
             UndoneAt = entry.UndoneAt,
             CanUndo = entry.Status == ActivityStatus.Filed && entry.Run is not null && entry.UndoneAt is null && now - entry.Time <= ActionLog.MaxAge,
+            CanMove = LibraryMove.Ineligible(entry, activity ?? [entry], now) is null,
+            MovedTo = entry.MovedTo,
             Item = new ItemView
             {
                 Key = KeyOf(entry.Run ?? string.Create(CultureInfo.InvariantCulture, $"{entry.Time.UtcTicks}|{entry.Status}|{entry.WatchFolder}|{entry.Release}")),
@@ -483,6 +487,11 @@ public sealed partial class IngestPresenter
                     text += " The AI plugin helped decide.";
                 }
 
+                if (entry.MovedTo is not null)
+                {
+                    text += " Later moved to " + entry.MovedTo + ".";
+                }
+
                 return entry.UndoneAt is null ? text : text + " Later undone.";
             case ActivityStatus.DryRun:
                 return entry.Summary.StartsWith("Would quarantine", StringComparison.Ordinal)
@@ -497,6 +506,8 @@ public sealed partial class IngestPresenter
                 return entry.Summary.Contains("deleted", StringComparison.Ordinal)
                     ? "Undone: the library copies were removed, and it waits under Needs review."
                     : "Undone: it's back in the watch folder, waiting under Needs review.";
+            case ActivityStatus.Moved:
+                return Friendly.FirstSentence(entry.Summary).Replace(" by an administrator:", ":", StringComparison.Ordinal);
             case ActivityStatus.Restored:
                 return "Restored from quarantine" + (entry.WatchFolder is null ? "." : "; it waits under Needs review.");
             default:
@@ -541,6 +552,16 @@ public sealed partial class IngestPresenter
             chips.Add(new Chip(Icons.Review, lines.Attention.Count, MediaTitle.Plural(lines.Attention.Count, "thing") + " need attention"));
         }
 
+        if (entry.Status == ActivityStatus.Moved && lines.Moves.Count > 0)
+        {
+            chips.Add(new Chip(Icons.Moved, lines.Moves.Count, MediaTitle.Plural(lines.Moves.Count, "file") + " moved"));
+        }
+
+        if (entry.MovedTo is not null)
+        {
+            chips.Add(new Chip(Icons.Moved, 0, "Moved to " + entry.MovedTo));
+        }
+
         if (entry.UndoneAt is not null)
         {
             chips.Add(new Chip(Icons.PutBack, 0, "Undone"));
@@ -568,6 +589,7 @@ public sealed partial class IngestPresenter
         ActivityStatus.Purged => Icons.Purged,
         ActivityStatus.ReviewRemoved => Icons.ReviewRemoved,
         ActivityStatus.Undone or ActivityStatus.Restored => Icons.PutBack,
+        ActivityStatus.Moved => Icons.Moved,
         _ => string.Empty,
     };
 

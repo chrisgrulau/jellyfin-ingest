@@ -124,6 +124,15 @@ public sealed record ActivityView
 
     /// <summary>Gets when the filing was undone, if it was.</summary>
     public DateTimeOffset? UndoneAt { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether "Move to another library" can be offered (a filing whose library Ingest chose
+    /// itself, with a run, not undone or moved, within 90 days); the server checks everything else when asked.
+    /// </summary>
+    public bool CanMove { get; init; }
+
+    /// <summary>Gets the library the filing was moved to, if it was.</summary>
+    public string? MovedTo { get; init; }
 }
 
 /// <summary>

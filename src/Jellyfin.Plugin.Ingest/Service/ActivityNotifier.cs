@@ -60,6 +60,7 @@ public sealed class ActivityNotifier
             ActivityStatus.Quarantined => ("Ingest quarantined ", LogLevel.Information),
             ActivityStatus.Undone => ("Ingest undid the filing of ", LogLevel.Information),
             ActivityStatus.Restored => ("Ingest restored from quarantine: ", LogLevel.Information),
+            ActivityStatus.Moved => ("Ingest moved to another library: ", LogLevel.Information),
             _ => ((string?)null, LogLevel.None),
         };
         if (headline is null)

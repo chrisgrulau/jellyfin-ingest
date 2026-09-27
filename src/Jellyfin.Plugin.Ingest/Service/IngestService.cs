@@ -600,7 +600,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
 
         // A real filing carries its run, so it can be undone from Recent activity
-        _state.RecordUnlessRepeat(_activity.Filed(watch.Path, release, plan, report.Completed, summaryLine, dryRun) with { Run = dryRun ? null : report.Run });
+        _state.RecordUnlessRepeat(_activity.Filed(watch.Path, release, plan, report.Completed, summaryLine, dryRun) with { Run = dryRun ? null : report.Run, ChosenBy = previous?.Chosen is null ? FilingChoice.Automatic : FilingChoice.Review });
 
         // A release filed by copy or hard link stays in the watch folder: remember it so it isn't filed again
         if (!dryRun && watch.Transfer != TransferMode.Move)
@@ -629,7 +629,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
     }
 
-    // Carries out the undos and restores asked for on the page (each checked again now), and refreshes what changed
+    // Carries out the undos, restores and moves to another library asked for on the page (each checked again now), and refreshes what changed
     private void RunQueued(PluginConfiguration config, IReadOnlyList<MediaLibrary> libraries, IReadOnlyList<FolderProblem> problems)
     {
         var queued = _progress.Queued();
@@ -649,9 +649,12 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 ReturnOutcome outcome;
                 lock (_progress.FileGate)
                 {
-                    outcome = action.Kind == QueuedActionKind.Undo
-                        ? new ReleaseUndo(_state, fs, _clock).Undo(action.Run ?? string.Empty, scope, lines, _ingestPaths.ActionLog)
-                        : new QuarantineRestore(_state, fs, _clock).Restore(scope, action.Root, action.Folder, action.Name, lines, _ingestPaths.ActionLog);
+                    outcome = action.Kind switch
+                    {
+                        QueuedActionKind.Undo => new ReleaseUndo(_state, fs, _clock).Undo(action.Run ?? string.Empty, scope, lines, _ingestPaths.ActionLog),
+                        QueuedActionKind.Move => new LibraryMove(_state, fs, _clock).Move(action.Run ?? string.Empty, action.LibraryId, FolderPolicy.MoveScopeOf(config, libraries, problems, FolderPolicy.ProtectedFolders(_paths, _configuration)), lines, _ingestPaths.ActionLog),
+                        _ => new QuarantineRestore(_state, fs, _clock).Restore(scope, action.Root, action.Folder, action.Name, lines, _ingestPaths.ActionLog),
+                    };
                 }
 
                 LogReturned(_logger, action.Kind, outcome.Succeeded ? "carried out" : "not carried out (see Recent activity)");
@@ -667,7 +670,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 LogReturnFailed(_logger, action.Kind, ex);
-                _state.Record(new ActivityEntry { Time = _clock.GetUtcNow(), Status = ActivityStatus.Failed, Release = action.Name ?? action.Run ?? string.Empty, Summary = $"The {(action.Kind == QueuedActionKind.Undo ? "undo" : "restore")} couldn't be carried out: {ex.Message}" });
+                _state.Record(new ActivityEntry { Time = _clock.GetUtcNow(), Status = ActivityStatus.Failed, Release = action.Name ?? action.Run ?? string.Empty, Summary = $"The {action.Kind switch { QueuedActionKind.Undo => "undo", QueuedActionKind.Move => "move to another library", _ => "restore" }} couldn't be carried out: {ex.Message}" });
             }
             finally
             {
