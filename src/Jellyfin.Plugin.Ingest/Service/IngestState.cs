@@ -46,6 +46,9 @@ public enum ActivityStatus
 
     /// <summary>Quarantined files were put back where they came from by an administrator.</summary>
     Restored,
+
+    /// <summary>A review was dropped because its release (or its watch folder) is gone.</summary>
+    ReviewRemoved,
 }
 
 /// <summary>
@@ -745,33 +748,61 @@ public sealed partial class IngestStateStore
     /// </summary>
     /// <param name="watchFolder">The watch folder.</param>
     /// <param name="present">Release names currently in it.</param>
-    public void PruneReviews(string watchFolder, IReadOnlyCollection<string> present)
+    /// <returns>The reviews dropped.</returns>
+    public IReadOnlyList<PendingReview> PruneReviews(string watchFolder, IReadOnlyCollection<string> present)
     {
         ArgumentNullException.ThrowIfNull(present);
-        lock (_lock)
-        {
-            var s = Load();
-            if (s.Reviews.RemoveAll(r => r.WatchFolder == watchFolder && !present.Contains(r.Release)) > 0)
-            {
-                Save(s);
-            }
-        }
+        return RemoveReviews(r => r.WatchFolder == watchFolder && !present.Contains(r.Release));
     }
 
     /// <summary>
-    /// Drops reviews of watch folders that are no longer configured.
+    /// Drops every review that can never be acted on: its watch folder is no longer configured, or the watch folder is
+    /// there but the release isn't. Unlike <see cref="PruneReviews"/>, this also covers watch folders that aren't swept
+    /// (switched off, unsafe settings, no library). A watch folder that isn't there at all (an unmounted share) keeps
+    /// its reviews until it is back or removed from the settings.
     /// </summary>
     /// <param name="watchFolders">The configured watch folders.</param>
-    public void PruneWatchFolders(IReadOnlyCollection<string> watchFolders)
+    /// <param name="folderExists">Whether a watch folder is there.</param>
+    /// <param name="entryExists">Whether a release (file, folder or link) is there.</param>
+    /// <returns>The reviews dropped, each with why.</returns>
+    public IReadOnlyList<(PendingReview Review, string Why)> PruneGone(IReadOnlyCollection<string> watchFolders, Func<string, bool> folderExists, Func<string, bool> entryExists)
     {
         ArgumentNullException.ThrowIfNull(watchFolders);
+        ArgumentNullException.ThrowIfNull(folderExists);
+        ArgumentNullException.ThrowIfNull(entryExists);
+
+        string? Why(PendingReview r)
+            => !watchFolders.Any(w => PathGuard.SamePath(w, r.WatchFolder)) ? "Its watch folder is no longer set up."
+                : folderExists(r.WatchFolder) && !entryExists(Path.Combine(r.WatchFolder, r.Release)) ? "It is no longer in the watch folder."
+                : null;
+
         lock (_lock)
         {
             var s = Load();
-            if (s.Reviews.RemoveAll(r => !watchFolders.Any(w => PathGuard.SamePath(w, r.WatchFolder))) > 0)
+            var gone = s.Reviews.Select(r => (Review: r, Why: Why(r))).Where(g => g.Why is not null).Select(g => (g.Review, g.Why!)).ToList();
+            if (gone.Count > 0)
             {
+                s.Reviews.RemoveAll(r => gone.Any(g => ReferenceEquals(g.Review, r)));
                 Save(s);
             }
+
+            return gone;
+        }
+    }
+
+    private List<PendingReview> RemoveReviews(Predicate<PendingReview> match)
+    {
+        lock (_lock)
+        {
+            var s = Load();
+            var removed = s.Reviews.FindAll(match);
+            if (removed.Count > 0)
+            {
+                s.Reviews.RemoveAll(match);
+                Save(s);
+            }
+
+            return removed;
         }
     }
 

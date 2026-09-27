@@ -76,7 +76,7 @@
       #IngestConfigPage .badge.NeedsReview { background: rgba(0,164,220,.25); }
       #IngestConfigPage .badge.Decision { background: rgba(150,110,220,.28); }
       #IngestConfigPage .badge.Failed { background: rgba(220,53,69,.30); }
-      #IngestConfigPage .badge.Quarantined, #IngestConfigPage .badge.Purged { background: rgba(128,128,128,.30); }
+      #IngestConfigPage .badge.Quarantined, #IngestConfigPage .badge.Purged, #IngestConfigPage .badge.ReviewRemoved { background: rgba(128,128,128,.30); }
       #IngestConfigPage .badge.Undone, #IngestConfigPage .badge.Restored { background: rgba(150,110,220,.28); }
       #IngestConfigPage .ingest-banner.paused { background: rgba(220,53,69,.20); border-left: 4px solid rgba(220,53,69,.8); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5em 1em; }
       #IngestConfigPage .ingest-banner.paused .emby-button { margin: 0; }
@@ -418,7 +418,7 @@
 
         // The library picked in a card, kept across the automatic refresh (ING-27)
         var libChoice = {};
-        var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Decision', 'Decisions'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged'], ['Undone', 'Undone'], ['Restored', 'Restored']];
+        var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Decision', 'Decisions'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged'], ['Undone', 'Undone'], ['Restored', 'Restored'], ['ReviewRemoved', 'Review removed']];
         var labels = {}; filters.forEach(function (f) { labels[f[0]] = f[1]; });
         var SHOWN = 5;
 

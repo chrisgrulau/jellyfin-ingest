@@ -323,11 +323,49 @@ public sealed class IngestStateTests : IDisposable
         var store = new IngestStateStore(StatePath);
         store.PutReview(Review("Quiet.Harbour"));
 
-        store.PruneWatchFolders(["/drop/"]);
+        Assert.Empty(store.PruneGone(["/drop/"], _ => true, _ => true));
         Assert.Single(store.Snapshot().Reviews);
 
-        store.PruneWatchFolders(["/other"]);
+        var gone = Assert.Single(store.PruneGone(["/other"], _ => true, _ => true));
+        Assert.Equal("Quiet.Harbour", gone.Review.Release);
+        Assert.Contains("no longer set up", gone.Why, StringComparison.Ordinal);
         Assert.Empty(store.Snapshot().Reviews);
+    }
+
+    // Also for a watch folder that isn't swept (switched off, unsafe settings, no library)
+    [Fact]
+    public void Reviews_whose_release_is_gone_are_dropped()
+    {
+        var store = new IngestStateStore(StatePath);
+        store.PutReview(Review("Example Show Season 2"));
+        store.PutReview(Review("Still.Here"));
+
+        var gone = store.PruneGone(["/drop"], _ => true, p => p == Path.Combine("/drop", "Still.Here"));
+
+        Assert.Equal("Example Show Season 2", Assert.Single(gone).Review.Release);
+        Assert.Contains("no longer in the watch folder", gone[0].Why, StringComparison.Ordinal);
+        Assert.Equal(["Still.Here"], store.Snapshot().Reviews.Select(r => r.Release));
+    }
+
+    // An unmounted share isn't a deleted release
+    [Fact]
+    public void Reviews_of_a_missing_watch_folder_are_kept_while_it_is_configured()
+    {
+        var store = new IngestStateStore(StatePath);
+        store.PutReview(Review("Example Show Season 2"));
+
+        Assert.Empty(store.PruneGone(["/drop"], _ => false, _ => false));
+        Assert.Single(store.Snapshot().Reviews);
+    }
+
+    [Fact]
+    public void Pruning_says_which_reviews_it_dropped()
+    {
+        var store = new IngestStateStore(StatePath);
+        store.PutReview(Review("gone"));
+        store.PutReview(Review("kept"));
+
+        Assert.Equal("gone", Assert.Single(store.PruneReviews("/drop", ["kept"])).Release);
     }
 
     [Fact]

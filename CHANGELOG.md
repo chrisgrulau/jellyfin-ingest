@@ -21,6 +21,11 @@ All notable changes to this project are documented here. The format follows
   unknown; transcripts are off", "…the Subtitles plugin didn't allow a transcript", and so on) instead of only "the
   season or episode number can't be read". A refusal from the Subtitles plugin is no longer remembered, so a retry
   after changing its settings asks again.
+- **Identify: reviews of a release that has gone are dropped.** A review stayed listed forever when its watch folder
+  wasn't swept any more (switched off, unsafe settings, no library, or the folder just removed). Every sweep now drops a
+  review whose watch folder is no longer set up, or whose release is no longer in its watch folder, and notes it in
+  *Recent activity* ("Review removed: the release is gone", with its own filter). A watch folder that is missing
+  altogether (an unmounted share) keeps its reviews while it is still set up.
 
 ## [0.11.0-alpha] - 2026-09-27
 

@@ -112,6 +112,15 @@ them. The planner:
 - replaces a duplicate marked `Replace` as if "Replace existing copies" had been asked for that file only;
 - makes the plan a whole-release quarantine when every video is set aside.
 
+### Reviews whose release is gone
+
+At the start of every sweep `IngestStateStore.PruneGone` drops a review whose watch folder is no longer in the settings,
+or whose watch folder is there but the release (file, folder or link, a broken link included) isn't. This covers
+watch folders that aren't swept too (switched off, unsafe settings, no library). A watch folder that isn't there at all
+(an unmounted share) keeps its reviews until it is back or removed from the settings. Each dropped review is noted in
+*Recent activity* as **Review removed** ("Review removed: the release is gone.", with why); the sweep of a watch folder
+drops, and notes, reviews of releases that have left it in the same way.
+
 ### AI tie-breaker
 
 When the result would be *needs review* but the best score is **≥ 0.60** and there are at least two candidates (for
