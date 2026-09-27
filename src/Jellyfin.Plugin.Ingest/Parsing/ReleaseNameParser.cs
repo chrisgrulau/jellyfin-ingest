@@ -47,8 +47,9 @@ public static partial class ReleaseNameParser
     public const double FolderTitleSimilarity = 0.90;
 
     /// <summary>
-    /// Parses a file name or path. When the file name alone has no usable title (e.g. <c>S01E04.mkv</c>),
-    /// the parent folder name supplies it.
+    /// Parses a file name or path. When the file name alone has no usable title (e.g. <c>S01E04.mkv</c>) or says
+    /// nothing at all (<c>episode.mkv</c>, <c>01.mkv</c>, <c>VTS_01_1.mkv</c>), the release folder supplies it, and a
+    /// season in a folder name (<c>Show Season 2/01.mkv</c>) makes a bare number the episode number.
     /// </summary>
     /// <param name="path">A file name or full path.</param>
     /// <returns>The parsed release.</returns>
@@ -62,17 +63,32 @@ public static partial class ReleaseNameParser
 
         var parent = Path.GetFileName(Path.GetDirectoryName(path) ?? string.Empty);
         var titleFolder = TitleFolder(path);
+
+        // A name that says nothing ("episode.mkv", "01.mkv", "VTS_01_1.mkv") names no title: the release folder does
+        var generic = IsGenericName(stem);
+        if (generic)
+        {
+            parsed = new ParsedRelease { Extra = parsed.Extra, Edition = parsed.Edition };
+        }
+
         if (parsed.Title.Length == 0 && titleFolder.Length > 0)
         {
             var fromParent = ParseName(titleFolder);
             fromParent = fromParent with { Title = TrailingSeason().Replace(fromParent.Title, string.Empty).Trim() };
+            var season = parsed.Season ?? SeasonFromFolders(path) ?? fromParent.Season;
             parsed = parsed with
             {
                 Title = fromParent.Title,
                 Year = parsed.Year ?? fromParent.Year,
-                Season = parsed.Season ?? fromParent.Season,
-                Kind = parsed.Kind == MediaKind.Unknown ? fromParent.Kind : parsed.Kind,
+                Season = season,
+                Kind = season is not null ? MediaKind.Episode : parsed.Kind == MediaKind.Unknown ? fromParent.Kind : parsed.Kind,
             };
+
+            // Inside a season folder, a bare number ("01.mkv", "E01.mkv", "Episode 1.mkv") is the episode number
+            if (generic && parsed.Season is not null && parsed.Episode is null && EpisodeNumberOnly().Match(Normalise(stem)) is { Success: true } n)
+            {
+                parsed = parsed with { Episode = int.Parse(n.Groups["e"].Value, CultureInfo.InvariantCulture) };
+            }
         }
         else if (parsed.Year is null && titleFolder.Length > 0)
         {
@@ -147,6 +163,28 @@ public static partial class ReleaseNameParser
             };
         }
 
+        // A season without an episode ("Show S02", "Show - Season 2 - Untitled", "Show 2nd Season"): a series whose
+        // episode is unknown. At the very start it is only taken when nothing but generic words follow, so a title
+        // that begins with "Season" or "Series" stays a title.
+        if (SeasonOnly().Match(CutAtJunk(text)) is { Success: true } so)
+        {
+            var afterSeason = CleanTitle(WeakJunkToken().Replace(CutAtJunk(text[(so.Index + so.Length)..]), " "));
+            if (so.Index > 0 || afterSeason.Length == 0 || IsGenericName(afterSeason))
+            {
+                var (soTitle, soYear) = SplitTitleAndYear(CutAtJunk(text[..so.Index]));
+                return new ParsedRelease
+                {
+                    Kind = MediaKind.Episode,
+                    Title = soTitle,
+                    Year = soYear,
+                    Season = so.Groups["end"].Success ? null : int.Parse(so.Groups["s"].Value, CultureInfo.InvariantCulture),
+                    EpisodeTitle = afterSeason.Length > 0 && !IsGenericName(afterSeason) ? afterSeason : null,
+                    Edition = edition,
+                    Extra = extra,
+                };
+            }
+        }
+
         var (movieTitle, movieYear) = SplitTitleAndYear(CutAtJunk(text));
         return new ParsedRelease
         {
@@ -175,6 +213,43 @@ public static partial class ReleaseNameParser
 
         return Extras.Where(e => e.Type != ExtraType.Sample && e.Pattern.IsMatch(f)).Select(e => (ExtraType?)e.Type).FirstOrDefault()
             ?? (ExtrasFolder().IsMatch(f) ? ExtraType.Other : null);
+    }
+
+    /// <summary>
+    /// Whether a name says nothing about what it is: <c>episode</c>, <c>video</c>, <c>untitled</c>, <c>01</c>,
+    /// <c>track01</c>, <c>title_t00</c>, <c>VTS_01_1</c>, <c>BDMV</c> and the like (a year after the first word makes
+    /// it a name: <c>Movie Title 2019</c>).
+    /// </summary>
+    /// <param name="name">A file stem, folder name or part of a name.</param>
+    /// <returns><c>true</c> when the name can't identify anything.</returns>
+    public static bool IsGenericName(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var text = Normalise(name);
+        return text.Length > 0 && GenericName().IsMatch(text) && !YearToken().Matches(text).Any(y => y.Index > 0);
+    }
+
+    // The season a folder above the file gives: "Season 2", "S02", or a release folder such as "Show Season 2"
+    private static int? SeasonFromFolders(string path)
+    {
+        var dir = Path.GetDirectoryName(path);
+        for (var depth = 0; depth < 3 && !string.IsNullOrEmpty(dir); depth++)
+        {
+            var name = Path.GetFileName(dir);
+            if (SeasonFolderNumber().Match(name) is { Success: true } m)
+            {
+                return int.Parse(m.Groups["s"].Value, CultureInfo.InvariantCulture);
+            }
+
+            if (name.Length > 0 && ParseName(name) is { Kind: MediaKind.Episode, Season: { } season, Episode: null })
+            {
+                return season;
+            }
+
+            dir = Path.GetDirectoryName(dir);
+        }
+
+        return null;
     }
 
     /// <summary>The nearest ancestor folder that isn't a season or extras folder (e.g. <c>Show/Season 1/x.mkv</c> → <c>Show</c>).</summary>
@@ -285,6 +360,21 @@ public static partial class ReleaseNameParser
     // "Lantern1E4": season digits glued to the title, then E + episode
     [GeneratedRegex(@"(?<=[a-z])(?<s>[0-9]{1,2})e(?<e>[0-9]{1,3})(?![0-9a-z])", RegexOptions.IgnoreCase)]
     private static partial Regex CompactSE();
+
+    [GeneratedRegex(@"^(?:season|series|s)\s?(?<s>[0-9]{1,2})$", RegexOptions.IgnoreCase)]
+    private static partial Regex SeasonFolderNumber();
+
+    // A season with no episode: "S02", "Season 2", "Series 2", "2nd Season" (a range such as "Season 1-3" gives none)
+    [GeneratedRegex(@"(?<![a-z0-9])(?:s(?<s>[0-9]{1,2})(?![0-9a-z])|(?:season|series)\s?(?<s>[0-9]{1,2})(?:\s?-\s?(?<end>[0-9]{1,2}))?(?![0-9a-z])|(?<s>[0-9]{1,2})(?:st|nd|rd|th)\s(?:season|series)(?![a-z]))", RegexOptions.IgnoreCase)]
+    private static partial Regex SeasonOnly();
+
+    // Names that say nothing: generic words, optionally numbered, or numbers alone
+    [GeneratedRegex(@"^(?:(?:unknown|untitled|episode|ep|e|video|movie|film|clip|title|track|chapter|feature|main|vts|bdmv|stream|output|file|disc|disk)(?![a-z])\s?(?:t?[0-9]+(?![a-z])\s?)*)+$|^[0-9]+(?:\s[0-9]+)*$", RegexOptions.IgnoreCase)]
+    private static partial Regex GenericName();
+
+    // A bare episode number: "01", "E01", "Ep 1", "Episode 1"
+    [GeneratedRegex(@"^(?:e|ep|episode)?\s?(?<e>[0-9]{1,3})$", RegexOptions.IgnoreCase)]
+    private static partial Regex EpisodeNumberOnly();
 
     [GeneratedRegex(@"^(?:season|series|s)\s?[0-9]{1,2}$|^specials$", RegexOptions.IgnoreCase)]
     private static partial Regex SeasonFolder();

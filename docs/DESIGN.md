@@ -45,6 +45,29 @@ Key points that are easy to get wrong:
 
 ## Identification
 
+### Reading the name
+
+`ReleaseNameParser` reads title, year, season, episode, edition and extra type from the file name, and falls back to
+the folders above it:
+
+- **Season without an episode:** `S02`, `Season 2`, `Series 2` or `2nd Season` after a title (`Example Show S02 -
+  unknown episode`, `Example Show - Season 2 - Untitled`) means that series, that season, episode unknown, never a
+  film. A range (`Season 1-3`) gives no season. At the very start of a name it only counts when nothing but generic
+  words follow, so a title that begins with "Season" or "Series" stays a title. Words after the code are kept as the
+  episode title unless they are generic.
+- **Generic names** say nothing about what the file is: `episode`, `video`, `movie`, `film`, `clip`, `untitled`,
+  `unknown`, `title_t00`, `track01`, `VTS_01_1`, `BDMV`, numbers alone (`01`, `0001`) and the like (`sample` is not
+  one: it marks a sample). Such a file takes its title, year and season from the release folder (`Example Show Season
+  2/episode.mkv` is series Example Show, season 2, episode unknown). A generic name with no folder above it names no
+  title.
+- **Numbered files in a season folder** (the release folder gives a season, or a `Season 2` / `S02` folder holds
+  them): a bare number, `E01`, `Ep 1` or `Episode 1` is the episode number (`Example Show Season 2/01.mkv` is S02E01).
+  Without a season from a folder, the episode stays unknown.
+
+An unknown episode goes through *Episodes named by title* and *Episodes from a transcript* below.
+
+### Matching titles
+
 `MediaIdentifier` scores every candidate from the configured providers (plus titles already in the destination
 library) and only files automatically when the best is **≥ 0.80** and **clearly ahead** of the next distinct title
 (0.08, or 0.15 when the release name has no year). Everything else is *needs review*.
@@ -139,6 +162,13 @@ Subtitles plugin's `SpeechBridge`) and a tie-breaker that is also an `IEpisodePi
 3. **Pick:** the AI plugin (`ingest.episode`, medium effort) gets the file name, the series, the transcript (as data,
    at most 4,000 characters), and each episode's code, title and first 200 characters of synopsis. It must answer
    with a listed position or -1.
+
+The planner passes the video's full path, so this runs for a series read from the name and for one chosen in review
+alike. When it can't run, the review says why in plain words: "Episode unknown; transcripts are off" (Ingest's own
+setting), "…the AI tie-breaker is off…", "…the Subtitles plugin isn't installed…", "…the Subtitles plugin didn't allow
+a transcript", "…transcription is off in the Subtitles plugin", "…the AI plugin didn't compare the transcript…", or
+that the providers have no episode list. Only a transcript (or "too little speech") is remembered per file; a refusal
+or failure is asked again on the next try, so changing the Subtitles plugin's settings and retrying works.
 
 Anything else leaves the release in review, with the reason.
 
