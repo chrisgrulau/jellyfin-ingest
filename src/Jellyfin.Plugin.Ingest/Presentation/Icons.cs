@@ -44,6 +44,9 @@ public static class Icons
     /// <summary>Expired quarantine deleted.</summary>
     public const string Purged = "🧹";
 
+    /// <summary>A review dropped because its release is gone.</summary>
+    public const string ReviewRemoved = "➖";
+
     /// <summary>Waiting for a release to finish arriving.</summary>
     public const string Waiting = "⏳";
 

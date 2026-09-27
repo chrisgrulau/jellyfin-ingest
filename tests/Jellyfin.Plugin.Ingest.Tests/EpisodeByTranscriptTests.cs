@@ -9,6 +9,7 @@ using Jellyfin.Plugin.Common.Ai;
 using Jellyfin.Plugin.Common.Speech;
 using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Parsing;
+using Jellyfin.Plugin.Ingest.Planning;
 using Jellyfin.Plugin.Ingest.Service;
 using Xunit;
 
@@ -209,8 +210,9 @@ public sealed class EpisodeByTranscriptTests : IDisposable
     {
         Assert.Equal(Heard, SpeechTranscriber.Read(new SpeechReply(true, Heard, "en", "builtin", null, null)).Text);
         Assert.Contains("Too little speech", SpeechTranscriber.Read(new SpeechReply(true, "Hello there.", "en", "builtin", null, null)).Note, StringComparison.Ordinal);
-        Assert.Equal(string.Empty, SpeechTranscriber.Read(new SpeechReply(false, null, null, null, "Not installed.", "not-installed")).Note);
-        Assert.Equal(string.Empty, SpeechTranscriber.Read(new SpeechReply(false, null, null, null, "Not allowed.", "not-allowed")).Note);
+        Assert.Contains("isn't installed", SpeechTranscriber.Read(new SpeechReply(false, null, null, null, "Not installed.", "not-installed")).Note, StringComparison.Ordinal);
+        Assert.Equal("Episode unknown; the Subtitles plugin didn't allow a transcript.", SpeechTranscriber.Read(new SpeechReply(false, null, null, null, "Not allowed.", "not-allowed")).Note);
+        Assert.Contains("transcription is off", SpeechTranscriber.Read(new SpeechReply(false, null, null, null, "Off.", "off")).Note, StringComparison.Ordinal);
         Assert.Contains("over the monthly limit", SpeechTranscriber.Read(new SpeechReply(false, null, null, null, "It would go over the monthly limit.", "provider-limit")).Note, StringComparison.Ordinal);
     }
 
@@ -256,5 +258,116 @@ public sealed class EpisodeByTranscriptTests : IDisposable
         using var doc = JsonDocument.Parse(sent!);
         Assert.Equal(Heard, doc.RootElement.GetProperty("transcript").GetString());
         Assert.Equal("S01E02", doc.RootElement.GetProperty("episodes")[1].GetProperty("code").GetString());
+    }
+    // A series chosen in review (or read from the name) with the episode unknown: the transcript decides
+    private static readonly string SeasonFolderVideo = Path.Combine(Path.GetTempPath(), "Harbour Watch Season 2", "episode.mkv");
+
+    private static Task<IdentificationResult> Choose(ITiebreaker? picker, ITranscriber? transcriber, string video)
+        => new MediaIdentifier(new Lookup(3, 6), null, picker, transcriber).IdentifyAsChosenAsync(ReleaseNameParser.Parse(video), Show, isTv: true, CancellationToken.None, video);
+
+    [Fact]
+    public async Task A_chosen_series_with_the_season_in_the_folder_is_picked_from_that_season()
+    {
+        var picker = Picks(2, 3);
+        var transcriber = new Transcriber(new HeardText(Heard, string.Empty));
+
+        var r = await Choose(picker, transcriber, SeasonFolderVideo);
+
+        Assert.Equal(IdentificationStatus.Identified, r.Status);
+        Assert.Equal(2, r.Episode!.Season);
+        Assert.Equal(3, r.Episode.Episode);
+        Assert.Equal(6, picker.Offered);
+        Assert.Equal([SeasonFolderVideo], transcriber.Asked);
+    }
+
+    [Fact]
+    public async Task A_chosen_series_with_no_season_is_picked_from_every_season()
+    {
+        var video = Path.Combine(Path.GetTempPath(), "Some Release", "episode.mkv");
+        var picker = Picks(3, 1);
+
+        var r = await Choose(picker, new Transcriber(new HeardText(Heard, string.Empty)), video);
+
+        Assert.Equal(IdentificationStatus.Identified, r.Status);
+        Assert.Equal(3, r.Episode!.Season);
+        Assert.Equal(18, picker.Offered);
+    }
+
+    [Fact]
+    public async Task A_season_only_name_is_picked_from_that_season()
+    {
+        var video = Path.Combine(Path.GetTempPath(), "Harbour Watch S02 - unknown episode.mkv");
+        var picker = Picks(2, 5);
+
+        var r = await Identify(new Lookup(3, 6), picker, new Transcriber(new HeardText(Heard, string.Empty)), video);
+
+        Assert.Equal(IdentificationStatus.Identified, r.Status);
+        Assert.Equal(5, r.Episode!.Episode);
+        Assert.Equal(6, picker.Offered);
+    }
+
+    [Fact]
+    public async Task With_transcripts_or_the_AI_off_the_reason_says_so()
+    {
+        var off = await Choose(Picks(2, 3), null, SeasonFolderVideo);
+        var noAi = await Choose(null, new Transcriber(new HeardText(Heard, string.Empty)), SeasonFolderVideo);
+        var aiSilent = await Choose(new Picker(_ => new TiebreakPick(null, string.Empty, null)), new Transcriber(new HeardText(Heard, string.Empty)), SeasonFolderVideo);
+
+        Assert.Equal(IdentificationStatus.NeedsReview, off.Status);
+        Assert.Contains(MediaIdentifier.TranscriptsOff, off.Reason, StringComparison.Ordinal);
+        Assert.Contains(MediaIdentifier.AiOff, noAi.Reason, StringComparison.Ordinal);
+        Assert.Contains(MediaIdentifier.AiUnavailable, aiSilent.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task When_the_Subtitles_plugin_says_no_the_reason_says_so_and_a_retry_asks_again()
+    {
+        var asked = 0;
+        var transcriber = new SpeechTranscriber((caller, purpose, path, start, length, language, ct) =>
+        {
+            asked++;
+            return Task.FromResult(new SpeechReply(false, null, null, null, "Not allowed.", "not-allowed"));
+        });
+
+        var r = await Choose(Picks(2, 3), transcriber, SeasonFolderVideo);
+        await Choose(Picks(2, 3), transcriber, SeasonFolderVideo);
+
+        Assert.Equal(IdentificationStatus.NeedsReview, r.Status);
+        Assert.Contains("the Subtitles plugin didn't allow a transcript", r.Reason, StringComparison.Ordinal);
+        Assert.Equal(2, asked);
+    }
+
+    // The planner hands the identifier the video's full path (a relative one can't be transcribed)
+    [Fact]
+    public async Task A_series_chosen_in_review_is_transcribed_by_its_full_path()
+    {
+        var watch = Path.Combine(Path.GetTempPath(), "drop");
+        var tv = new LibraryTarget(Path.Combine(Path.GetTempPath(), "lib", "Shows"), IsTv: true);
+        var picker = Picks(2, 3);
+        var transcriber = new Transcriber(new HeardText(Heard, string.Empty));
+        var planner = new IngestPlanner(new MediaIdentifier(new Lookup(3, 6), null, picker, transcriber), p => !Path.HasExtension(p), _ => null, TimeProvider.System);
+
+        var plan = await planner.PlanAsync(watch, "Harbour Watch Season 2", [new ReleaseFile("Harbour Watch Season 2/episode.mkv", 500_000_000)], LibraryTargets.Of(tv), Path.Combine(watch, ".ingest-quarantine"), new ChosenMatch(Show, tv), CancellationToken.None);
+
+        Assert.True(plan.IsReady, string.Join("; ", plan.Review.Select(r => r.Reason)));
+        Assert.Equal([Path.Combine(watch, "Harbour Watch Season 2", "episode.mkv")], transcriber.Asked);
+        Assert.Contains(plan.Operations, o => Path.GetFileName(o.Destination).Contains("S02E03", StringComparison.Ordinal));
+    }
+
+    // A season pack whose files are only numbers: series and season from the folder, episodes from the numbers
+    [Fact]
+    public async Task A_season_folder_of_numbered_files_is_filed_as_those_episodes()
+    {
+        var watch = Path.Combine(Path.GetTempPath(), "drop");
+        var tv = new LibraryTarget(Path.Combine(Path.GetTempPath(), "lib", "Shows"), IsTv: true);
+        var transcriber = new Transcriber(new HeardText(Heard, string.Empty));
+        var planner = new IngestPlanner(new MediaIdentifier(new Lookup(3, 6), null, null, transcriber), p => !Path.HasExtension(p), _ => null, TimeProvider.System);
+
+        var plan = await planner.PlanAsync(watch, "Harbour Watch Season 2", [new ReleaseFile("Harbour Watch Season 2/01.mkv", 500_000_000), new ReleaseFile("Harbour Watch Season 2/02.mkv", 500_000_000)], LibraryTargets.Of(tv), Path.Combine(watch, ".ingest-quarantine"), null, CancellationToken.None);
+
+        Assert.True(plan.IsReady, string.Join("; ", plan.Review.Select(r => r.Reason)));
+        Assert.Contains(plan.Operations, o => Path.GetFileName(o.Destination).Contains("S02E01", StringComparison.Ordinal));
+        Assert.Contains(plan.Operations, o => Path.GetFileName(o.Destination).Contains("S02E02", StringComparison.Ordinal));
+        Assert.Empty(transcriber.Asked);
     }
 }

@@ -131,4 +131,115 @@ public class ReleaseNameParserTests
         var p = ReleaseNameParser.Parse(name);
         Assert.Null(p.Episode);
     }
+    // A season with no episode number is a series whose episode is unknown, never a film
+    [Theory]
+    [InlineData("Example Show S02 - unknown episode.mkv", "Example Show", 2, null)]
+    [InlineData("Example Show - Season 2 - Untitled.mkv", "Example Show", 2, null)]
+    [InlineData("Example.Show.Series.3.720p.HDTV.mkv", "Example Show", 3, null)]
+    [InlineData("Example Show 2nd Season.mkv", "Example Show", 2, null)]
+    [InlineData("Example Show (2004) S02 - The Lighthouse.mkv", "Example Show", 2, "The Lighthouse")]
+    public void A_season_only_code_means_a_series_with_the_episode_unknown(string name, string title, int season, string? episodeTitle)
+    {
+        var p = ReleaseNameParser.Parse(name);
+
+        Assert.Equal(MediaKind.Episode, p.Kind);
+        Assert.Equal(title, p.Title);
+        Assert.Equal(season, p.Season);
+        Assert.Null(p.Episode);
+        Assert.Equal(episodeTitle, p.EpisodeTitle);
+    }
+
+    [Theory]
+    [InlineData("Example Show Season 1-3.mkv")]
+    [InlineData("Example Show Seasons.mkv")]
+    public void A_season_range_or_plain_word_gives_no_season(string name)
+    {
+        Assert.Null(ReleaseNameParser.Parse(name).Season);
+    }
+
+    [Theory]
+    [InlineData("Season of the Harbour (2011).mkv", "Season of the Harbour", 2011)]
+    [InlineData("Series 9 The Contest (2003).mkv", "Series 9 The Contest", 2003)]
+    public void A_title_that_starts_with_season_or_series_stays_a_film(string name, string title, int year)
+    {
+        var p = ReleaseNameParser.Parse(name);
+
+        Assert.Equal(MediaKind.Movie, p.Kind);
+        Assert.Equal(title, p.Title);
+        Assert.Equal(year, p.Year);
+    }
+
+    // A file name that says nothing takes its identity from the release folder
+    [Theory]
+    [InlineData("Example Show Season 2/episode.mkv", "Example Show", 2)]
+    [InlineData("Example Show S02/video.mkv", "Example Show", 2)]
+    [InlineData("Example Show Series 2/untitled.mp4", "Example Show", 2)]
+    [InlineData("Example Show/Season 2/unknown episode.mkv", "Example Show", 2)]
+    [InlineData("Example Show (2004) Season 2/title_t00.mkv", "Example Show", 2)]
+    public void A_generic_file_name_in_a_season_folder_is_that_series_and_season(string path, string title, int season)
+    {
+        var p = ReleaseNameParser.Parse(path);
+
+        Assert.Equal(MediaKind.Episode, p.Kind);
+        Assert.Equal(title, p.Title);
+        Assert.Equal(season, p.Season);
+        Assert.Null(p.Episode);
+    }
+
+    [Theory]
+    [InlineData("Example Film (2019)/movie.mkv")]
+    [InlineData("Example Film (2019)/VTS_01_1.mkv")]
+    [InlineData("Example Film (2019)/track01.mkv")]
+    [InlineData("Example Film (2019)/BDMV.mkv")]
+    [InlineData("Example Film (2019)/film.mp4")]
+    [InlineData("Example Film (2019)/0001.mkv")]
+    public void A_generic_file_name_in_a_film_folder_is_that_film(string path)
+    {
+        var p = ReleaseNameParser.Parse(path);
+
+        Assert.Equal(MediaKind.Movie, p.Kind);
+        Assert.Equal("Example Film", p.Title);
+        Assert.Equal(2019, p.Year);
+    }
+
+    [Fact]
+    public void A_generic_file_name_on_its_own_names_no_title()
+    {
+        Assert.Equal(string.Empty, ReleaseNameParser.Parse("episode.mkv").Title);
+        Assert.Equal(string.Empty, ReleaseNameParser.Parse("clip.mkv").Title);
+    }
+
+    [Theory]
+    [InlineData("Mainstream Harbour.mkv")]
+    [InlineData("The Episode Keeper (2010).mkv")]
+    [InlineData("Filmed Harbour.mkv")]
+    public void Real_titles_are_not_generic(string name)
+    {
+        Assert.False(ReleaseNameParser.IsGenericName(System.IO.Path.GetFileNameWithoutExtension(name)));
+    }
+
+    // Numbers alone inside a season folder are episode numbers (a multi-file season pack)
+    [Theory]
+    [InlineData("Example Show Season 2/01.mkv", 1)]
+    [InlineData("Example Show Season 2/02.mkv", 2)]
+    [InlineData("Example Show/Season 2/E03.mkv", 3)]
+    [InlineData("Example Show S02/Episode 4.mkv", 4)]
+    public void A_bare_number_in_a_season_folder_is_the_episode(string path, int episode)
+    {
+        var p = ReleaseNameParser.Parse(path);
+
+        Assert.Equal(MediaKind.Episode, p.Kind);
+        Assert.Equal("Example Show", p.Title);
+        Assert.Equal(2, p.Season);
+        Assert.Equal(episode, p.Episode);
+    }
+
+    [Fact]
+    public void A_bare_number_without_a_season_leaves_the_episode_unknown()
+    {
+        var p = ReleaseNameParser.Parse("Example Show/01.mkv");
+
+        Assert.Equal("Example Show", p.Title);
+        Assert.Null(p.Episode);
+    }
 }

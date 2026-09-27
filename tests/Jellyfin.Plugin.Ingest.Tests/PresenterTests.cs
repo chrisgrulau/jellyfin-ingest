@@ -28,6 +28,26 @@ public sealed class PresenterTests
         => $"{Shows}/Lantern (2001) [tvdbid-100001]/Season {season:00}/Lantern S{season:00}E{episode:00} - {title}.mkv";
 
     [Fact]
+    public void A_removed_review_has_its_own_icon_and_label()
+    {
+        var entry = new ActivityEntry
+        {
+            Time = Now.AddMinutes(-5),
+            Status = ActivityStatus.ReviewRemoved,
+            Release = "Lantern.S01E05.1080p-GRP",
+            WatchFolder = Watch,
+            Summary = "Review removed: the release is gone. It is no longer in the watch folder.",
+        };
+
+        var view = Presenter.Activity(entry, Now);
+
+        Assert.Equal(Icons.ReviewRemoved, view.Item.Icon);
+        Assert.Equal("Review removed", IngestPresenter.LabelOf(ActivityStatus.ReviewRemoved));
+        Assert.Equal("neutral", view.Item.Tone);
+        Assert.False(view.CanUndo);
+    }
+
+    [Fact]
     public void A_filed_episode_reads_as_show_and_code_with_its_title_and_library()
     {
         var entry = new ActivityEntry

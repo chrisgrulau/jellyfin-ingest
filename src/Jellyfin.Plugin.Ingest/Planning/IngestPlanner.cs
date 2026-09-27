@@ -244,9 +244,10 @@ public sealed class IngestPlanner
         {
             // Only a TV library to file into: a name without an episode code is most likely a show; otherwise a film
             var preferTv = targets.Tv is not null && targets.Films is null;
+            // The full path, so a video whose name doesn't say which episode it is can be transcribed
             var result = chosen is null
-                ? await _identifier.IdentifyAsync(parsed[video], preferTv, cancellationToken, video).ConfigureAwait(false)
-                : await _identifier.IdentifyAsChosenAsync(parsed[video], chosen.Candidate, chosen.Target.IsTv, cancellationToken, video).ConfigureAwait(false);
+                ? await _identifier.IdentifyAsync(parsed[video], preferTv, cancellationToken, Abs(video)).ConfigureAwait(false)
+                : await _identifier.IdentifyAsChosenAsync(parsed[video], chosen.Candidate, chosen.Target.IsTv, cancellationToken, Abs(video)).ConfigureAwait(false);
             if (result.DecidedBy is not null)
             {
                 notes.Add(Path.GetFileName(video) + ": " + result.Reason);

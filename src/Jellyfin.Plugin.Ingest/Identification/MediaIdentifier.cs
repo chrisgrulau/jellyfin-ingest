@@ -57,6 +57,15 @@ public sealed class MediaIdentifier
     /// <summary>The most seasons listed when the name gives no season.</summary>
     public const int MaxSeasons = 40;
 
+    /// <summary>Said when the episode is unknown and transcripts are switched off.</summary>
+    public const string TranscriptsOff = "Episode unknown; transcripts are off.";
+
+    /// <summary>Said when the episode is unknown and the AI tie-breaker (which picks from a transcript) is switched off.</summary>
+    public const string AiOff = "Episode unknown; the AI tie-breaker is off, so a transcript can't be compared.";
+
+    /// <summary>Said when the AI plugin gave no answer about a transcript (not installed, or it doesn't allow Ingest).</summary>
+    public const string AiUnavailable = "Episode unknown; the AI plugin didn't compare the transcript (it isn't installed or doesn't allow Ingest).";
+
     /// <summary>The <see cref="MetadataCandidate.Source"/> value used for library hits.</summary>
     public const string LibrarySource = "Library";
 
@@ -434,7 +443,9 @@ public sealed class MediaIdentifier
                     Status = IdentificationStatus.NeedsReview,
                     Confidence = Math.Min(1, best.Score),
                     Candidates = ranked,
-                    Reason = string.Create(CultureInfo.InvariantCulture, $"Series is '{c.Name}', but the episode number is unknown (special named '{release.EpisodeTitle}').") + byTitle.Note,
+                    Reason = (release.EpisodeTitle is { Length: > 0 } named
+                        ? string.Create(CultureInfo.InvariantCulture, $"Series is '{c.Name}', but the episode number is unknown (named '{named}').")
+                        : $"Series is '{c.Name}', but the episode number is unknown.") + byTitle.Note,
                 };
         }
 
@@ -511,8 +522,23 @@ public sealed class MediaIdentifier
     private async Task<(EpisodeListing? Hit, string Note, string? By)> FindEpisodeAsync(ParsedRelease release, MetadataCandidate series, string? videoPath, CancellationToken ct)
     {
         var byTitle = await FindByTitleAsync(release, series, videoPath, ct).ConfigureAwait(false);
-        if (byTitle.Hit is not null || release.Episode is not null || _transcriber is null || _tiebreaker is not IEpisodePicker picker
-            || videoPath is null || !Path.IsPathFullyQualified(videoPath))
+        if (byTitle.Hit is not null || release.Episode is not null)
+        {
+            return byTitle;
+        }
+
+        // Why no transcript is tried, in plain words: the settings say no, or there's no file to listen to
+        if (_transcriber is null)
+        {
+            return (null, byTitle.Note + " " + TranscriptsOff, null);
+        }
+
+        if (_tiebreaker is not IEpisodePicker picker)
+        {
+            return (null, byTitle.Note + " " + AiOff, null);
+        }
+
+        if (videoPath is null || !Path.IsPathFullyQualified(videoPath))
         {
             return byTitle;
         }
@@ -553,7 +579,9 @@ public sealed class MediaIdentifier
 
         if (episodes.Count == 0)
         {
-            return (null, string.Empty, null);
+            return (null, release.Season is { } none
+                ? string.Create(CultureInfo.InvariantCulture, $" The providers have no episode list for season {none}, so the transcript can't be compared.")
+                : " The providers have no episode list for this series, so the transcript can't be compared.", null);
         }
 
         if (episodes.Count > TranscriptOptions)
@@ -564,7 +592,7 @@ public sealed class MediaIdentifier
         var pick = await picker.PickFromTranscriptAsync(Path.GetFileName(videoPath), series.Name, text, episodes, ct).ConfigureAwait(false);
         if (pick.Index is not { } i || i < 0 || i >= episodes.Count)
         {
-            return (null, string.IsNullOrEmpty(pick.Note) ? string.Empty : " From a transcript: " + pick.Note, null);
+            return (null, string.IsNullOrEmpty(pick.Note) ? " " + AiUnavailable : " From a transcript: " + pick.Note, null);
         }
 
         var chosen = episodes[i];

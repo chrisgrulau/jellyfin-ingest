@@ -513,6 +513,7 @@ public sealed partial class IngestPresenter
         ActivityStatus.Failed => Icons.Failed,
         ActivityStatus.Quarantined => Icons.Quarantine,
         ActivityStatus.Purged => Icons.Purged,
+        ActivityStatus.ReviewRemoved => Icons.ReviewRemoved,
         ActivityStatus.Undone or ActivityStatus.Restored => Icons.PutBack,
         _ => string.Empty,
     };
@@ -527,6 +528,7 @@ public sealed partial class IngestPresenter
         ActivityStatus.DryRun => "Dry run",
         ActivityStatus.NeedsReview => "Needs review",
         ActivityStatus.Purged => "Deleted from quarantine",
+        ActivityStatus.ReviewRemoved => "Review removed",
         _ => status.ToString(),
     };
 

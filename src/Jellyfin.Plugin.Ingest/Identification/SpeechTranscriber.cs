@@ -16,7 +16,8 @@ namespace Jellyfin.Plugin.Ingest.Identification;
 /// in when the video is too short for that.</item>
 /// <item>The video stays on this server: the Subtitles plugin runs in the same process, and a cloud service is used
 /// only if it was chosen there.</item>
-/// <item>Each file is transcribed once while it is unchanged (remembered until the server restarts).</item>
+/// <item>Each file is transcribed once while it is unchanged (remembered until the server restarts). A reply that
+/// says no transcript could be made (the plugin missing or not allowing Ingest, a failed service) isn't remembered.</item>
 /// </list>
 /// </summary>
 public sealed class SpeechTranscriber : ITranscriber
@@ -29,6 +30,8 @@ public sealed class SpeechTranscriber : ITranscriber
 
     /// <summary>The most transcripts remembered.</summary>
     public const int MaxRemembered = 200;
+
+    private const string TooLittle = "Too little speech";
 
     private static readonly TimeSpan Length = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan[] Starts = [TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(1)];
@@ -69,6 +72,14 @@ public sealed class SpeechTranscriber : ITranscriber
         }
 
         var heard = await AskAsync(videoPath, cancellationToken).ConfigureAwait(false);
+
+        // Only an answer about the video itself is remembered: "not installed", "not allowed" or a failed service may
+        // change once the Subtitles plugin's settings do, and a retry should ask again
+        if (heard.Text is null && !heard.Note.StartsWith(TooLittle, StringComparison.Ordinal))
+        {
+            return heard;
+        }
+
         lock (_lock)
         {
             if (_heard.Count >= MaxRemembered)
@@ -92,14 +103,20 @@ public sealed class SpeechTranscriber : ITranscriber
         ArgumentNullException.ThrowIfNull(reply);
         if (!reply.Ok)
         {
-            // Not installed or not allowed: say nothing; anything else: say why there's no transcript
-            return new HeardText(null, reply.Failure is "not-installed" or "not-allowed" or "off" ? string.Empty : "No transcript from the Subtitles plugin: " + reply.Error);
+            // Only asked when the episode is unknown, so the reason always goes with the review
+            return new HeardText(null, reply.Failure switch
+            {
+                "not-installed" => "Episode unknown; the Subtitles plugin isn't installed, so there is no transcript.",
+                "not-allowed" => "Episode unknown; the Subtitles plugin didn't allow a transcript.",
+                "off" => "Episode unknown; transcription is off in the Subtitles plugin.",
+                _ => "No transcript from the Subtitles plugin: " + reply.Error,
+            });
         }
 
         var text = (reply.Text ?? string.Empty).Trim();
         return text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= MinWords
             ? new HeardText(text.Length > 4000 ? text[..4000] : text, string.Empty)
-            : new HeardText(null, "Too little speech was heard to tell which episode this is.");
+            : new HeardText(null, TooLittle + " was heard to tell which episode this is.");
     }
 
     private async Task<HeardText> AskAsync(string videoPath, CancellationToken ct)
@@ -108,7 +125,7 @@ public sealed class SpeechTranscriber : ITranscriber
         foreach (var start in Starts)
         {
             heard = Read(await _transcribe("ingest", Purpose, videoPath, start, Length, null, ct).ConfigureAwait(false));
-            if (heard.Text is not null || !heard.Note.StartsWith("Too little", StringComparison.Ordinal))
+            if (heard.Text is not null || !heard.Note.StartsWith(TooLittle, StringComparison.Ordinal))
             {
                 return heard;
             }

@@ -29,6 +29,28 @@ All notable changes to this project are documented here. The format follows
   presented rows (15 by default, at most 300) with totals; `GET Ingest/Status` also returns how each review and
   waiting release is shown, and `limit=0` leaves the activity out.
 
+### Fixed
+
+- **Identify: generic file names use the release folder.** A file named `episode.mkv`, `video.mkv`, `untitled.mp4`,
+  `01.mkv`, `title_t00.mkv`, `VTS_01_1.mkv` and the like was searched as a film by that word. It now takes its title,
+  year and season from the release folder (`Example Show Season 2/episode.mkv` is Example Show, season 2), and in a
+  season folder a bare number (`01.mkv`, `E01.mkv`, `Episode 1.mkv`) is the episode number, so a season pack of
+  numbered files is filed as those episodes.
+- **Identify: a season without an episode means a series.** `Example Show S02 - unknown episode`, `Example Show -
+  Season 2 - Untitled`, `Series 2` and `2nd Season` were read as films; they are now that series and season with the
+  episode unknown.
+- **Identify: the transcript now runs for an unknown episode.** The planner passed the identifier the video's path
+  relative to the watch folder, which can't be transcribed, so the transcript episode pick never ran, neither for a
+  series read from the name nor for one chosen in review. When it can't run, the review now says why ("Episode
+  unknown; transcripts are off", "…the Subtitles plugin didn't allow a transcript", and so on) instead of only "the
+  season or episode number can't be read". A refusal from the Subtitles plugin is no longer remembered, so a retry
+  after changing its settings asks again.
+- **Identify: reviews of a release that has gone are dropped.** A review stayed listed forever when its watch folder
+  wasn't swept any more (switched off, unsafe settings, no library, or the folder just removed). Every sweep now drops a
+  review whose watch folder is no longer set up, or whose release is no longer in its watch folder, and notes it in
+  *Recent activity* ("Review removed: the release is gone", with its own filter). A watch folder that is missing
+  altogether (an unmounted share) keeps its reviews while it is still set up.
+
 ## [0.11.0-alpha] - 2026-09-27
 
 ### Added
