@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.Ingest.Planning;
 using Jellyfin.Plugin.Ingest.Quarantine;
 using Jellyfin.Plugin.Ingest.Service;
@@ -159,48 +160,48 @@ public sealed class QuarantineRestoreTests : IDisposable
     }
 
     [Fact]
-    public void Delete_now_removes_one_release_or_the_whole_day()
+    public async Task Delete_now_removes_one_release_or_the_whole_day()
     {
         Put(Path.Combine(Dated, "r", "a.mkv"), 1);
         var other = Put(Path.Combine(Dated, "s", "b.nfo"), 1);
         File.SetAttributes(other, FileAttributes.ReadOnly);
 
-        QuarantinePurger.DeleteNow(Dated, "r");
+        await QuarantinePurger.DeleteNowAsync(Dated, "r");
 
         Assert.False(Directory.Exists(Path.Combine(Dated, "r")));
         Assert.True(File.Exists(other));
         Assert.True(QuarantineMarkers.IsMarked(Dated));
 
-        QuarantinePurger.DeleteNow(Dated, null);
+        await QuarantinePurger.DeleteNowAsync(Dated, null);
 
         Assert.False(Directory.Exists(Dated));
         Assert.True(Directory.Exists(Quarantine));
     }
 
     [Fact]
-    public void Delete_now_refuses_what_isnt_ingests()
+    public async Task Delete_now_refuses_what_isnt_ingests()
     {
         var theirs = Path.Combine(Quarantine, "2026-01-01");
         Put(Path.Combine(theirs, "keep.txt"), 1);
 
-        Assert.Throws<ArgumentException>(() => QuarantinePurger.DeleteNow(theirs, null));
-        Assert.Throws<ArgumentException>(() => QuarantinePurger.DeleteNow(Dated, ".."));
-        Assert.Throws<ArgumentException>(() => QuarantinePurger.DeleteNow(Dated, QuarantineMarkers.DatedMarker));
-        Assert.Throws<ArgumentException>(() => QuarantinePurger.DeleteNow(Dated, "missing"));
-        Assert.Throws<ArgumentException>(() => QuarantinePurger.DeleteNow(Drop, null));
+        await Assert.ThrowsAsync<ArgumentException>(() => QuarantinePurger.DeleteNowAsync(theirs, null));
+        await Assert.ThrowsAsync<ArgumentException>(() => QuarantinePurger.DeleteNowAsync(Dated, ".."));
+        await Assert.ThrowsAsync<ArgumentException>(() => QuarantinePurger.DeleteNowAsync(Dated, QuarantineMarkers.DatedMarker));
+        await Assert.ThrowsAsync<ArgumentException>(() => QuarantinePurger.DeleteNowAsync(Dated, "missing"));
+        await Assert.ThrowsAsync<ArgumentException>(() => QuarantinePurger.DeleteNowAsync(Drop, null));
         Assert.True(File.Exists(Path.Combine(theirs, "keep.txt")));
     }
 
     [Fact]
-    public void Delete_now_never_follows_a_link()
+    public async Task Delete_now_never_follows_a_link()
     {
         var outside = Put(Path.Combine(_root, "elsewhere", "precious.mkv"), 1);
         Directory.CreateDirectory(Path.Combine(Dated, "r"));
         Directory.CreateSymbolicLink(Path.Combine(Dated, "r", "link"), Path.GetDirectoryName(outside)!);
         Directory.CreateSymbolicLink(Path.Combine(Dated, "linked"), Path.GetDirectoryName(outside)!);
 
-        QuarantinePurger.DeleteNow(Dated, "r");
-        QuarantinePurger.DeleteNow(Dated, "linked");
+        await QuarantinePurger.DeleteNowAsync(Dated, "r");
+        await QuarantinePurger.DeleteNowAsync(Dated, "linked");
 
         Assert.True(File.Exists(outside));
         Assert.False(Directory.Exists(Path.Combine(Dated, "r")));

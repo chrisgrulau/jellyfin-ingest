@@ -70,7 +70,7 @@ public class ServiceTests
     }
 
     [Fact]
-    public void Purge_deletes_on_disk()
+    public async System.Threading.Tasks.Task Purge_deletes_on_disk()
     {
         var root = Path.Combine(Path.GetTempPath(), "ingest-purge-" + Guid.NewGuid().ToString("N"));
         try
@@ -87,7 +87,7 @@ public class ServiceTests
             // A marked but recent folder is kept
             QuarantineMarkers.Mark(root, Path.Combine(root, "2026-09-20"));
 
-            var deleted = QuarantinePurger.Purge(root, new DateOnly(2026, 9, 24), 30);
+            var deleted = (await QuarantinePurger.PurgeAsync(root, new DateOnly(2026, 9, 24), 30)).Deleted;
 
             Assert.Equal([Path.Combine(root, "2020-01-01")], deleted);
             Assert.True(Directory.Exists(Path.Combine(root, "not-a-date")));

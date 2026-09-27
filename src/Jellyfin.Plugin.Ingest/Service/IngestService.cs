@@ -180,7 +180,10 @@ public sealed partial class IngestService : IHostedService, IDisposable
             [.. libraries.SelectMany(l => l.Locations)],
             libraries);
         var problems = FolderPolicy.FolderProblems(config, libraries, _paths, _configuration);
-        _maintenance.RunDue(config, libraries, problems);
+        using (_progress.FileGate.Enter(ct))
+        {
+            _maintenance.RunDue(config, libraries, problems);
+        }
 
         // Undos and restores asked for on the page, between releases so they never race a filing or a scan
         RunQueued(config, libraries, problems);
@@ -320,7 +323,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
                 try
                 {
-                    lock (_progress.FileGate)
+                    using (_progress.FileGate.Enter(ct))
                     {
                         _quarantineRelease.Run(config, watch, review, releaseFiles, quarantine);
                     }
@@ -554,7 +557,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
         var working = new WorkInProgress { Id = id, WatchFolder = watch.Path, Release = release, Stage = "Filing", Since = _clock.GetUtcNow() };
         ExecutionReport report;
-        lock (_progress.FileGate)
+        using (_progress.FileGate.Enter(ct))
         {
             // Mark the dated quarantine folder as Ingest's own before anything is moved into it (the purge only deletes marked folders)
             if (!dryRun)
@@ -647,7 +650,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 Directory.CreateDirectory(_ingestPaths.DataFolder);
                 var lines = File.Exists(_ingestPaths.ActionLog) ? File.ReadAllLines(_ingestPaths.ActionLog) : [];
                 ReturnOutcome outcome;
-                lock (_progress.FileGate)
+                using (_progress.FileGate.Enter())
                 {
                     outcome = action.Kind == QueuedActionKind.Undo
                         ? new ReleaseUndo(_state, fs, _clock).Undo(action.Run ?? string.Empty, scope, lines, _ingestPaths.ActionLog)
