@@ -92,6 +92,25 @@ public static class FolderPolicy
     }
 
     /// <summary>
+    /// The folders an undo or restore may put files back into or take them from: the watch folders and quarantines that
+    /// pass the folder rules, and the server's library folders.
+    /// </summary>
+    /// <param name="config">Plugin configuration.</param>
+    /// <param name="libraries">The server's libraries.</param>
+    /// <param name="problems">Problems from <see cref="FolderProblems"/>.</param>
+    /// <returns>The scope.</returns>
+    public static ReturnScope ReturnScopeOf(PluginConfiguration config, IEnumerable<MediaLibrary> libraries, IReadOnlyList<FolderProblem> problems)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(libraries);
+        ArgumentNullException.ThrowIfNull(problems);
+        return new ReturnScope(
+            [.. config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path) && Path.IsPathFullyQualified(w.Path) && !problems.Any(p => PathGuard.SamePath(p.Folder, w.Path))).Select(w => w.Path)],
+            [.. libraries.SelectMany(l => l.Locations).Where(l => !string.IsNullOrWhiteSpace(l) && Path.IsPathFullyQualified(l))],
+            SafeQuarantineRoots(config, problems));
+    }
+
+    /// <summary>
     /// Reduces Jellyfin's libraries to what routing needs.
     /// </summary>
     /// <param name="libraries">The server's libraries.</param>

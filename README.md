@@ -56,18 +56,20 @@ plugin page, where you pick the right title (and library) with one click or sear
 
 | Area | Behaviour |
 |---|---|
-| Watch folders | Any number. Each has one or more destinations, at most one per kind: a Shows library, a Movies library, or a single Mixed Movies and Shows library. Releases go to the destination for their kind; new episodes of a show already on the server join it in whichever library it's in. |
+| Watch folders | Any number. Each has one or more destinations, at most one per kind: a Shows library, a Movies library, or a single Mixed Movies and Shows library. Releases go to the destination for their kind; new episodes of a show already on the server join it in whichever library it's in. In a library with several folders, new titles go to the folder with the most free space unless you pick one. |
 | Identification | Own release-name parser + your configured metadata providers; TMDb/TheTVDB matches preferred over IMDb-only ones; titles already in the library preferred; a confidence threshold and a clear lead over the runner-up before anything moves. |
 | Naming | Movies: `Title (Year) [tmdbid-N]/Title (Year) [tmdbid-N].ext` (editions as ` - Label`). Shows: `Series (Year) [tvdbid-N] [tmdbid-N]/Season NN/Series SNNEMM - Title.ext`, multi-episode `S01E01-E02`, specials in `Season 00`. Reserved characters (`< > : " / \ \| ? *`) removed. |
 | Subtitles | Matched by name, by folder (`Subs/`), or by being the only video in the release; renamed `<video>[.Title].<lang>[.default][.sdh][.forced].srt`. When a language has several tracks, the main one is marked default. |
 | Extras | Trailers, featurettes, deleted scenes … filed into Jellyfin's extras folders. |
-| Clutter | Moved to a dated quarantine folder (default or user-chosen), purged after N days (default 30). *Quarantine* on the plugin page shows what is there and when each day's folder is deleted. |
+| Clutter | Moved to a dated quarantine folder (default or user-chosen), purged after N days (default 30). *Quarantine* on the plugin page shows what is there and when each day's folder is deleted; **Restore** puts a release back where it came from (into the watch folder, where it waits for review, or a replaced copy into the library), and **Delete now** removes a release or a day's folder straight away. |
+| Pause | **Pause Ingest** on the plugin page (or `POST Ingest/Pause`) stops all filing until you resume; releases are still listed as waiting. It survives a restart. |
 | AI tie-breaker | Optional, with the Shoal AI plugin: a close call between candidates Ingest already found is settled by the AI choosing one of them (or none). Only file names, titles and years are sent for this (see [What Ingest sends](#what-ingest-sends)); every choice is shown in *Recent activity*. |
 | Episodes from a transcript | Optional, with the Shoal Subtitles and AI plugins: when a name doesn't say which episode it is, two minutes of it are transcribed (built-in speech-to-text by default, on this server) and the AI picks the listed episode whose synopsis fits, or none. |
 | Episodes named by title | A file that gives the episode title but no number (typically a special) is matched against that season's episode list from your providers; if no title clearly matches, the AI plugin (when installed) may choose one of the listed episodes. |
 | Waiting | *Waiting* on the plugin page: releases that are still arriving, when each will settle, and the release being identified or filed ("Filing file 2 of 5"). **Process now** skips the rest of a release's settle wait. |
 | Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. *Choose file by file* replaces or quarantines single files, and gives a video of a show a season and episode when its name has none it can read. |
 | Activity | *Recent activity* on the plugin page: filed, dry run, needs review, decisions, failures, quarantine and purges, with what went where. |
+| Undo | **Undo** on a filed release in *Recent activity* (for 90 days, while the action log holds it) puts everything back: the files return to the watch folder (for a copy or hard-link folder, the library copies are deleted instead), clutter leaves quarantine, and copies it replaced return to the library. All or nothing: refused, with the reason, if anything has gone, a video or extra has changed since filing, or a place is taken (subtitles corrected since filing go back as they are now). The release then waits under *Needs review* instead of being filed again. |
 | Safety | Dry-run mode per watch folder (on for a new folder), never overwrites, never files a second copy of an episode or film already on the server, crash-safe moves (hidden temporary name, size check, then rename; interrupted moves are finished or discarded at the next start), all-or-nothing per release (a failure undoes the moves already made), a JSON-lines action log. |
 | Library refresh | Asks Jellyfin to refresh just the film or show folders filed into after a real ingest. |
 
@@ -139,7 +141,7 @@ Everything stays on your server, in Jellyfin's plugin data folder (`<jellyfin da
 | File | What's in it | Kept |
 |---|---|---|
 | `state.json` | Releases waiting for review and the recent activity shown on the Ingest page (release names, paths, chosen titles). Who made a decision is not recorded. | The latest 300 activity entries |
-| `actions.jsonl` | One line per file moved: time, release, source and destination. Used to finish or undo moves interrupted by a restart. | 90 days, at most 5 MB |
+| `actions.jsonl` | One line per file moved: time, release, source and destination, size and modified time. Used to finish or undo moves interrupted by a restart, and for **Undo**. | 90 days, at most 5 MB |
 | `search-cache.json` | Recent title searches and their provider ids, so the same title isn't searched again. | 24 hours |
 
 Jellyfin's log gets one line per release at Information level. Per-file moves and review reasons, which include full
@@ -197,6 +199,8 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Optional AI tie-breaker for close calls (Shoal AI plugin)
 - [x] Episodes named by title only (specials), with the AI plugin as a fallback
 - [x] Episodes with no usable name: a short transcript compared with episode synopses
+- [x] Undo a filed release from *Recent activity*
+- [x] Restore from quarantine, delete now, pause switch; new titles into the library folder with the most free space
 
 Design notes live in [`docs/DESIGN.md`](docs/DESIGN.md).
 

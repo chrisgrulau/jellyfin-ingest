@@ -65,7 +65,8 @@ public sealed partial class StartupMaintenance
         }
     }
 
-    // Moves cut short by a crash or restart are finished (the file had fully arrived) or discarded (the original is intact)
+    // Moves cut short by a crash or restart are finished (the file had fully arrived) or discarded (the original is intact);
+    // library copies an interrupted undo set aside are deleted
     private void RecoverInterruptedMoves(PluginConfiguration config, IReadOnlyList<MediaLibrary> libraries)
     {
         var log = _paths.ActionLog;
@@ -80,7 +81,12 @@ public sealed partial class StartupMaintenance
             var roots = libraries.SelectMany(l => l.Locations)
                 .Concat(config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path)).Select(w => FolderPolicy.QuarantineFor(config, w)))
                 .ToList();
-            var results = new PlanExecutor(new PhysicalFileOperations(), _clock).Recover([.. File.ReadLines(log)], log, roots);
+            var executor = new PlanExecutor(new PhysicalFileOperations(), _clock);
+            var results = executor.Recover([.. File.ReadLines(log)], log, roots).ToList();
+
+            // Library copies an interrupted undo had set aside are deleted, as it intended (the log is read again, since
+            // recovery may have finished setting one aside)
+            results.AddRange(executor.FinishDeletes([.. File.ReadLines(log)], log, [.. libraries.SelectMany(l => l.Locations)]));
             foreach (var result in results)
             {
                 LogRecovery(_logger, result);

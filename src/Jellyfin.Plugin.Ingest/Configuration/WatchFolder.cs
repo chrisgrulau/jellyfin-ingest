@@ -94,7 +94,8 @@ public class LibraryDestination
     public string LibraryId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the library folder to file into, for libraries with several folders. Empty = the library's first folder.
+    /// Gets or sets the library folder to file into, for libraries with several folders. Empty = the folder with the most
+    /// free space, for new films and shows (those already on the server are added to wherever they are).
     /// </summary>
     public string Path { get; set; } = string.Empty;
 }

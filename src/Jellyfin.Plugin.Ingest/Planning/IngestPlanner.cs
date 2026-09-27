@@ -273,8 +273,9 @@ public sealed class IngestPlanner
                     continue;
                 }
 
-                owner = existingSeries ?? Path.Combine(target!.Root, MediaNamer.SeriesFolderName(ep.Series));
-                libraryRoot = existingSeries is null ? target!.Root : null;
+                var seriesRoot = existingSeries is null ? RootHolding(target!.Root, MediaNamer.SeriesFolderName(ep.Series)) : null;
+                owner = existingSeries ?? Path.Combine(seriesRoot!, MediaNamer.SeriesFolderName(ep.Series));
+                libraryRoot = seriesRoot;
 
                 // An existing show keeps its own season folder naming rather than getting a second "Season NN"
                 var seasonFolder = (existingSeries is null ? null : _existing?.FindSeasonFolder(existingSeries, ep.Season))
@@ -326,9 +327,10 @@ public sealed class IngestPlanner
                     continue;
                 }
 
-                owner = Path.Combine(target.Root, MediaNamer.MovieFolderName(movie));
-                libraryRoot = target.Root;
-                destination = Path.Combine(target.Root, MediaNamer.MovieRelativePath(movie, ext));
+                var movieRoot = RootHolding(target.Root, MediaNamer.MovieFolderName(movie));
+                owner = Path.Combine(movieRoot, MediaNamer.MovieFolderName(movie));
+                libraryRoot = movieRoot;
+                destination = Path.Combine(movieRoot, MediaNamer.MovieRelativePath(movie, ext));
                 var duplicate = _existing?.FindMovie(MovieIds(movie), movie.Edition, destination);
                 if (duplicate is not null && !Replace([duplicate], video))
                 {
@@ -510,6 +512,19 @@ public sealed class IngestPlanner
         => ContainingLocation(path) is { } root
             ? Libraries.First(l => l.Locations.Any(r => PathGuard.SamePath(r, root))).Name
             : otherwise ?? Path.GetDirectoryName(path) ?? path;
+
+    // A library with several folders: a film or show folder of this name already in one of its other folders is used
+    // there (the target folder is chosen for new titles, e.g. by free space), rather than starting a second one
+    private string RootHolding(string root, string titleFolder)
+    {
+        if (_exists(Path.Combine(root, titleFolder)))
+        {
+            return root;
+        }
+
+        var siblings = Libraries.FirstOrDefault(l => l.Locations.Any(r => PathGuard.SamePath(r, root)))?.Locations ?? [];
+        return siblings.FirstOrDefault(r => !PathGuard.SamePath(r, root) && !string.IsNullOrWhiteSpace(r) && Path.IsPathFullyQualified(r) && _exists(Path.Combine(r, titleFolder))) ?? root;
+    }
 
     // Where a copy being replaced lives: a folder of one of the server's libraries that takes this kind of media, and
     // the film or show folder directly inside it (none when the copy sits in the library folder itself)
