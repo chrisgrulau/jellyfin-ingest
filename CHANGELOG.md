@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0-alpha] - 2026-09-27
+
 ### Added
 
 - **FEAT-01: Undo a filed release** from *Recent activity* (**Undo**, then confirm), for filings made from this
