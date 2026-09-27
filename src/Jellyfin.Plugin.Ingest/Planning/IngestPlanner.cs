@@ -259,6 +259,8 @@ public sealed class IngestPlanner
                 continue;
             }
 
+            // The title this file was matched to, so a review can say which one it is using
+            var matched = MatchedTitle(result, chosen);
             var ext = Path.GetExtension(video);
             string destination, owner;
             string? libraryRoot;
@@ -270,7 +272,7 @@ public sealed class IngestPlanner
                 var target = existingSeries is null ? chosen?.Target ?? targets.Tv : null;
                 if (existingSeries is null && target is null)
                 {
-                    review.Add(new ReviewItem(Abs(video), $"Identified as an episode of '{ep.Series.Title}', but this watch folder has no TV library. Choose a library below.") { Candidates = result.Candidates });
+                    review.Add(new ReviewItem(Abs(video), $"Identified as an episode of '{ep.Series.Title}', but this watch folder has no TV library. Choose a library below.") { Matched = matched, Candidates = result.Candidates });
                     continue;
                 }
 
@@ -289,13 +291,13 @@ public sealed class IngestPlanner
                 var code = MediaNamer.EpisodeCode(ep.Season, ep.Episode, ep.EndingEpisode);
                 if (keys.Any(plannedEpisodes.Contains))
                 {
-                    review.Add(new ReviewItem(Abs(video), $"{ep.Series.Title} {code} appears more than once in this release.") { Candidates = result.Candidates });
+                    review.Add(new ReviewItem(Abs(video), $"{ep.Series.Title} {code} appears more than once in this release.") { Matched = matched, Candidates = result.Candidates });
                     continue;
                 }
 
                 if (duplicates.Count > 0 && !Replace(duplicates, video))
                 {
-                    review.Add(new ReviewItem(Abs(video), $"{ep.Series.Title} {code} is already on the server: {string.Join(", ", duplicates)}") { Candidates = result.Candidates, Existing = string.Join('\n', duplicates) });
+                    review.Add(new ReviewItem(Abs(video), $"{ep.Series.Title} {code} is already on the server: {string.Join(", ", duplicates)}") { Matched = matched, Candidates = result.Candidates, Existing = string.Join('\n', duplicates) });
                     continue;
                 }
 
@@ -324,7 +326,7 @@ public sealed class IngestPlanner
                 var target = chosen?.Target ?? targets.Films;
                 if (target is null)
                 {
-                    review.Add(new ReviewItem(Abs(video), $"Identified as the film '{movie.Title}', but this watch folder has no film library. Choose a library below.") { Candidates = result.Candidates });
+                    review.Add(new ReviewItem(Abs(video), $"Identified as the film '{movie.Title}', but this watch folder has no film library. Choose a library below.") { Matched = matched, Candidates = result.Candidates });
                     continue;
                 }
 
@@ -335,7 +337,7 @@ public sealed class IngestPlanner
                 var duplicate = _existing?.FindMovie(MovieIds(movie), movie.Edition, destination);
                 if (duplicate is not null && !Replace([duplicate], video))
                 {
-                    review.Add(new ReviewItem(Abs(video), $"{movie.Title}{(movie.Edition is null ? string.Empty : " (" + movie.Edition + ")")} is already on the server: {duplicate}") { Candidates = result.Candidates, Existing = duplicate });
+                    review.Add(new ReviewItem(Abs(video), $"{movie.Title}{(movie.Edition is null ? string.Empty : " (" + movie.Edition + ")")} is already on the server: {duplicate}") { Matched = matched, Candidates = result.Candidates, Existing = duplicate });
                     continue;
                 }
 
@@ -359,7 +361,7 @@ public sealed class IngestPlanner
             var required = libraryRoot ?? owner;
             if (!_exists(required))
             {
-                review.Add(new ReviewItem(Abs(video), $"The library folder isn't available (is the share mounted?): {required}. Trying again automatically.") { Candidates = result.Candidates, Retry = RetryKind.FolderUnavailable });
+                review.Add(new ReviewItem(Abs(video), $"The library folder isn't available (is the share mounted?): {required}. Trying again automatically.") { Matched = matched, Candidates = result.Candidates, Retry = RetryKind.FolderUnavailable });
                 continue;
             }
 
@@ -370,13 +372,13 @@ public sealed class IngestPlanner
             var ownerInside = libraryRoot is null ? _isInsideLibrary(owner) : PathGuard.IsUnder(owner, libraryRoot);
             if (!ownerInside || !PathGuard.IsUnder(destination, owner))
             {
-                review.Add(new ReviewItem(Abs(video), $"Refused: the destination would be outside the library: {destination}") { Candidates = result.Candidates });
+                review.Add(new ReviewItem(Abs(video), $"Refused: the destination would be outside the library: {destination}") { Matched = matched, Candidates = result.Candidates });
                 continue;
             }
 
             if (Taken(destination))
             {
-                review.Add(new ReviewItem(Abs(video), $"Destination already exists: {destination}") { Candidates = result.Candidates });
+                review.Add(new ReviewItem(Abs(video), $"Destination already exists: {destination}") { Matched = matched, Candidates = result.Candidates });
                 continue;
             }
 
@@ -499,6 +501,34 @@ public sealed class IngestPlanner
             // Every video set aside by choice: the release is quarantined as a whole
             WholeReleaseQuarantine = skipped.Count == mains.Count,
         };
+    }
+
+    /// <summary>
+    /// The title an identified file was matched to: the chosen one, else the considered candidate with the identified
+    /// title's provider ids, else one made from the identified title itself.
+    /// </summary>
+    /// <param name="result">An identification that succeeded.</param>
+    /// <param name="chosen">The title chosen in review, if any.</param>
+    /// <returns>The title, or <c>null</c> when the result names none.</returns>
+    internal static MetadataCandidate? MatchedTitle(IdentificationResult result, ChosenMatch? chosen)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (chosen is not null)
+        {
+            return chosen.Candidate;
+        }
+
+        var (name, year, isSeries, ids) = result.Episode is { } ep
+            ? (ep.Series.Title, ep.Series.Year, true, ProviderIds(ep.Series))
+            : result.Movie is { } m ? (m.Title, m.Year, false, MovieIds(m)) : (null, null, false, new Dictionary<string, string>());
+        if (name is null)
+        {
+            return null;
+        }
+
+        var same = result.Candidates.Select(c => c.Candidate).FirstOrDefault(c => c.IsSeries == isSeries && ids.Count > 0
+            && ids.All(id => c.ProviderIds.TryGetValue(id.Key, out var v) && string.Equals(v, id.Value, StringComparison.OrdinalIgnoreCase)));
+        return same ?? new MetadataCandidate { Name = name, Year = year, IsSeries = isSeries, ProviderIds = ids };
     }
 
     // The library folder of the server's libraries (any kind) a path is inside, if any (the innermost, should they nest)

@@ -543,6 +543,7 @@ public sealed partial class IngestService : IHostedService, IDisposable
                 Time = _clock.GetUtcNow(),
                 Items = items,
                 Candidates = DistinctCandidates(plan.Review),
+                Matched = PlannedMatch(plan.Review),
                 RetryAt = retryAt,
             },
             seenVersion);
@@ -728,6 +729,23 @@ public sealed partial class IngestService : IHostedService, IDisposable
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// The title every review item was matched to, when they all were matched to the same one.
+    /// </summary>
+    /// <param name="items">Review items.</param>
+    /// <returns>The title, or <c>null</c> when any item wasn't matched or they were matched to different titles.</returns>
+    public static MetadataCandidate? PlannedMatch(IReadOnlyList<ReviewItem> items)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (items.Count == 0 || items.Any(i => i.Matched is null))
+        {
+            return null;
+        }
+
+        var first = items[0].Matched!;
+        return items.All(i => ReviewChoice.SameTitle(i.Matched, first)) ? first : null;
     }
 
     private static string? ReadSmallText(string path)

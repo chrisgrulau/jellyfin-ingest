@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.Ingest.Presentation;
 
@@ -36,6 +37,53 @@ public sealed record ItemView
 
     /// <summary>Gets the technical details shown when the row is expanded, in groups.</summary>
     public IReadOnlyList<DetailRow> Details { get; init; } = [];
+
+    /// <summary>Gets, for a Needs review card, the title in use and how each candidate relates to it; <c>null</c> elsewhere.</summary>
+    public ReviewMatchView? Match { get; init; }
+}
+
+/// <summary>
+/// How a candidate on a review card relates to the title the review is using.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<CandidateState>))]
+public enum CandidateState
+{
+    /// <summary>No title is in use yet: one of these may be it ("Use this").</summary>
+    Option = 0,
+
+    /// <summary>The title Ingest is using ("Using this").</summary>
+    InUse,
+
+    /// <summary>Another title, offered in case the one in use is wrong ("Use this instead").</summary>
+    Alternative,
+}
+
+/// <summary>
+/// The decision part of a Needs review card: which title Ingest is using (if any) and what it found for it, and the
+/// state of each candidate in the card's lists (same order as the review's candidates and search results).
+/// </summary>
+public sealed record ReviewMatchView
+{
+    /// <summary>Gets the key of the title in use (<see cref="Service.ReviewChoice.CurrentMatchKey"/>), sent back with a replace; <c>null</c> when none is.</summary>
+    public string? CurrentKey { get; init; }
+
+    /// <summary>Gets the title in use, e.g. <c>Lantern (2001)</c>; empty when none is.</summary>
+    public string Title { get; init; } = string.Empty;
+
+    /// <summary>Gets the decision sentence, e.g. <c>Matched to Lantern (2001). 4 of these episodes are already in Shows.</c>; empty when no title is in use.</summary>
+    public string Headline { get; init; } = string.Empty;
+
+    /// <summary>Gets a value indicating whether a title was chosen but not yet checked against the server (the next sweep does).</summary>
+    public bool Checking { get; init; }
+
+    /// <summary>Gets the heading over the candidates: <c>Is it one of these?</c>, or <c>Wrong show? Pick another</c> when a title is in use.</summary>
+    public string PickHeading { get; init; } = "Is it one of these?";
+
+    /// <summary>Gets each suggested candidate's state.</summary>
+    public IReadOnlyList<CandidateState> Candidates { get; init; } = [];
+
+    /// <summary>Gets each search result's state.</summary>
+    public IReadOnlyList<CandidateState> SearchResults { get; init; } = [];
 }
 
 /// <summary>

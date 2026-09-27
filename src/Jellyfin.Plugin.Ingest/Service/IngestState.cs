@@ -178,6 +178,14 @@ public sealed record PendingReview
     /// <summary>Gets the title and library chosen in review, if any; used instead of searching when the release is planned again.</summary>
     public ChosenMatch? Chosen { get; init; }
 
+    /// <summary>
+    /// Gets the title the last plan matched every waiting file to (the chosen one, or the one identification found when
+    /// something else, such as a copy already on the server, held the release back); <c>null</c> when identification is
+    /// what the release waits for, or its files matched different titles. <see cref="PendingReviewItem.Existing"/> was
+    /// found for this title.
+    /// </summary>
+    public Identification.MetadataCandidate? Matched { get; init; }
+
     /// <summary>Gets the pending request.</summary>
     public ReviewRequest Request { get; init; }
 
@@ -480,7 +488,8 @@ public sealed partial class IngestStateStore
             var i = s.Reviews.FindIndex(r => r.Id == review.Id);
             var existing = i >= 0 ? s.Reviews[i] : null;
             var newer = existing is not null && actedOnVersion is { } v && existing.RequestVersion != v;
-            var candidates = review.Candidates.Take(MaxCandidates).ToList();
+            // Planning a chosen title searches for nothing, so the titles considered before stay on offer (to pick another)
+            var candidates = (review.Candidates.Count == 0 && existing?.Chosen is not null ? existing.Candidates : review.Candidates).Take(MaxCandidates).ToList();
             var updated = review with
             {
                 Candidates = candidates,
@@ -528,8 +537,12 @@ public sealed partial class IngestStateStore
         {
             Chosen = chosen,
 
-            // "Clear choice and retry" starts over, file decisions included; choosing a title keeps them
-            FileDecisions = chosen is null ? new Dictionary<string, FileDecision>(StringComparer.Ordinal) : r.FileDecisions,
+            // "Clear choice and retry" starts over, file decisions included; choosing a title keeps them, except that
+            // "replace what's on the server" was decided for the copies of the title in use, so choosing a different
+            // title drops it (the new title's copies, if any, are looked for and shown before anything is replaced)
+            FileDecisions = chosen is null ? new Dictionary<string, FileDecision>(StringComparer.Ordinal)
+                : ReviewChoice.SameTitle(chosen.Candidate, ReviewChoice.CurrentMatch(r)) ? r.FileDecisions
+                : r.FileDecisions.Where(d => d.Value != FileDecision.Replace).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal),
             FileEpisodes = chosen is null ? new Dictionary<string, EpisodeNumber>(StringComparer.Ordinal) : r.FileEpisodes,
             Request = ReviewRequest.Retry,
             RequestVersion = r.RequestVersion + 1,
