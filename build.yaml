@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Ingest"
 guid: "88d6ced9-052e-45f6-b21d-fc4eefa7998d"
-version: "0.14.0.0"
+version: "0.15.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -15,5 +15,5 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Ingest.dll"
 changelog: >
-  0.14.0-alpha: AI suggests, you approve: per watch folder, releases whose identity the AI decided can wait for one-
-  click approval (or Approve all) instead of being filed automatically.
+  0.15.0-alpha: filed files are read back through the mount after the rename (and flagged if they can't be);
+  temporary copies are no longer hidden; a film that is already a TV special on the server is offered as that episode.

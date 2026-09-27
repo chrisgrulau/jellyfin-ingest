@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.0-alpha] - 2026-09-28
+
 ### Fixed
 
 - **Filed files that can't be opened on a virtiofs or network mount.** Files are still written to a temporary name
