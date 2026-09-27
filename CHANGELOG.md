@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.1-alpha] - 2026-09-27
+
 ### Changed
 
 - **Settings pages use the full width; buttons are centred.** The Ingest page's sections, lists, cards and fields now
