@@ -275,6 +275,28 @@ Samples (`sample` in the name and under ~300 MB) are clutter too.
   copy or hard-link watch folder when a filing is undone.
 - Every operation is logged with source and destination so it can be reversed.
 
+## Plugin page lists
+
+Every list on the page (Waiting, Needs review, Recent activity, Quarantine) is drawn the same way from rows the server
+presents (`Presentation.IngestPresenter`, plain C#, unit-tested): a headline, a smaller line, one friendly sentence, a
+status icon and tone, icon chips with counts (`Presentation.Icons`), and grouped key/value details for the row's
+expandable part. The page only lays them out and adds what changes by the minute (relative times).
+
+- **What it is** comes from the names Ingest gave the filed videos (`MediaTitle.FromFiledPath`: `Show S01E04 - Title`
+  under a series folder, or a film folder `Title (Year) [ids]` and a file starting with it), so it is exact for anything
+  filed; otherwise from the release name through the parser (`MediaTitle.FromReleaseName`), without its trailing text,
+  which is as often the release group as an episode title. Several videos of one series become
+  `Show — Season 2, 10 episodes`.
+- **Counts** come from `ActivityEntry.Counts`, recorded by filings and quarantines (replaced copies and files set aside
+  by choice are told apart from clutter by their sources), and **where the videos went** from `ActivityEntry.Videos`
+  (an undo copies them from its filing). Entries recorded before these existed are read from their detail lines.
+- **Sentences** for review reasons are short plain phrases (`Friendly.Reason`: "two matches look alike"); the full
+  recorded text stays in the details.
+- **Paging:** `GET Ingest/Activity` (status filter, offset, limit; per-status counts for the filter buttons) and
+  `GET Ingest/Quarantine/Page` (releases across the dated folders, plus every day's totals). The page asks for the first
+  15 and, on **Show more**, for 15 more from the top, so the automatic refresh never leaves gaps or repeats as new
+  entries arrive. Reviews and waiting releases are few and come whole with `GET Ingest/Status`, paged on the page.
+
 ## Stored files
 
 `state.json` and `search-cache.json` are read and written through common's `JsonFile` (a temporary file in the same

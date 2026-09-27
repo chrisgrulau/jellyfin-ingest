@@ -117,6 +117,7 @@ public sealed partial class QuarantineRelease
                 CultureInfo.InvariantCulture,
                 $"{(dryRun ? "Would quarantine" : "Quarantined")} the whole release ({files.Count} file{(files.Count == 1 ? string.Empty : "s")}) to {dated}."),
             Details = ActivityReport.Describe(watch.Path, report.Completed),
+            Counts = new ActivityCounts { Clutter = report.Completed.Count },
         });
         if (dryRun)
         {

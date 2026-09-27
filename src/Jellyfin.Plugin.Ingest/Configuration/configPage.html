@@ -8,108 +8,129 @@
   <div id="IngestConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
     <style>
       /* Theme-aware colours (FAM-07): dark theme by default; .ingest-light is set when the theme's text is dark */
-      #IngestConfigPage { --ingest-error: #ff9aa2; --ingest-field-bg: rgba(0,0,0,.25); --ingest-option-bg: #202020; --ingest-option-fg: #eee; color-scheme: dark; }
-      #IngestConfigPage.ingest-light { --ingest-error: #b3261e; --ingest-field-bg: #fff; --ingest-option-bg: #fff; --ingest-option-fg: #111; color-scheme: light; }
+      #IngestConfigPage { --ingest-error: #ff9aa2; --ingest-field-bg: rgba(0,0,0,.25); --ingest-option-bg: #202020; --ingest-option-fg: #eee; --ig-card: rgba(255,255,255,.05); --ig-line: rgba(255,255,255,.12); --ig-chip: rgba(255,255,255,.08); --ig-ok: #6ccf62; --ig-info: #4fb8e6; --ig-warn: #f0b429; --ig-bad: #ff7b86; --ig-muted: .72; color-scheme: dark; }
+      #IngestConfigPage.ingest-light { --ingest-error: #b3261e; --ingest-field-bg: #fff; --ingest-option-bg: #fff; --ingest-option-fg: #111; --ig-card: rgba(0,0,0,.035); --ig-line: rgba(0,0,0,.12); --ig-chip: rgba(0,0,0,.06); --ig-ok: #2e7d32; --ig-info: #0277bd; --ig-warn: #b26a00; --ig-bad: #c62828; --ig-muted: .75; color-scheme: light; }
       #IngestConfigPage select option { background: var(--ingest-option-bg); color: var(--ingest-option-fg); }
       #IngestConfigPage .ingest-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-      #IngestConfigPage .ingest-row { padding: 1em; margin: .75em 0; border-radius: 6px; border: 1px solid rgba(128,128,128,.25); }
+      #IngestConfigPage .ingest-muted { opacity: var(--ig-muted); font-size: .9em; }
+      #IngestConfigPage .emby-button { margin: 0; }
+      /* Watch folder rows */
+      #IngestConfigPage .ingest-row { padding: 1em; margin: .75em 0; border-radius: 6px; border: 1px solid var(--ig-line); }
       #IngestConfigPage .ingest-row.invalid { border-color: rgba(220,53,69,.8); }
       #IngestConfigPage .wf-top { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 1em; align-items: end; }
       #IngestConfigPage .wf-dests { margin-top: .75em; }
       #IngestConfigPage .wf-dest { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 1em; align-items: end; margin: .5em 0; }
       #IngestConfigPage .ingest-row .inputContainer, #IngestConfigPage .ingest-row .selectContainer { margin: 0; }
-      #IngestConfigPage .ingest-row .emby-button { margin: 0; }
       #IngestConfigPage .wf-hint { margin: .25em 0 0; }
       #IngestConfigPage .wf-error { color: var(--ingest-error); margin: .5em 0 0; }
       #IngestConfigPage .wf-error:empty { display: none; }
+      #IngestConfigPage .wf-transfer { margin: .5em 0; display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1.5em; }
+      #IngestConfigPage .wf-transfer select { padding: .3em .45em; background: var(--ingest-field-bg); color: inherit; border: 1px solid var(--ig-line); border-radius: 4px; font: inherit; max-width: 100%; }
+      /* Banners */
       #IngestConfigPage .ingest-banner { padding: .75em 1em; border-radius: 4px; margin: 1em 0; background: rgba(255,170,0,.15); }
       #IngestConfigPage .ingest-banner[hidden] { display: none; }
       #IngestConfigPage .ingest-banner.setup { background: rgba(0,164,220,.18); }
-      #IngestConfigPage .ingest-card { padding: 1em; margin: .75em 0; border-radius: 6px; background: rgba(128,128,128,.10); }
-      #IngestConfigPage .ingest-card h4 { margin: 0 0 .25em; word-break: break-word; }
+      #IngestConfigPage .ingest-banner.paused { background: rgba(220,53,69,.20); border-left: 4px solid rgba(220,53,69,.8); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5em 1em; }
+      /* Sections */
+      #IngestConfigPage .ingest-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5em 1em; flex-wrap: wrap; margin-top: 1.5em; }
+      #IngestConfigPage .ingest-head h3 { margin: 0; }
+      #IngestConfigPage .ingest-tools { display: flex; flex-wrap: wrap; gap: .4em; }
+      #IngestConfigPage details.ig-section { margin-top: 1.5em; border-top: 1px solid var(--ig-line); padding-top: .5em; }
+      #IngestConfigPage details.ig-section > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: .5em; padding: .4em 0; }
+      #IngestConfigPage details.ig-section > summary::-webkit-details-marker { display: none; }
+      #IngestConfigPage details.ig-section > summary::before { content: '▸'; display: inline-block; transition: transform .15s; opacity: .8; }
+      #IngestConfigPage details.ig-section[open] > summary::before { transform: rotate(90deg); }
+      #IngestConfigPage details.ig-section > summary h3, #IngestConfigPage details.ig-section > summary h4 { margin: 0; display: inline; }
+      #IngestConfigPage .ig-settings details.ig-section { margin-top: .5em; }
+      #IngestConfigPage .ig-settings details.ig-section > div { padding: .25em 0 .75em 1.2em; }
+      /* List rows: headline, smaller line, one sentence, icon chips, time; details in the expand */
+      #IngestConfigPage .ig-list { list-style: none; margin: .5em 0; padding: 0; }
+      #IngestConfigPage .ig-row, #IngestConfigPage .ingest-card { position: relative; padding: .7em .9em .7em 1em; margin: .45em 0; border-radius: 6px; background: var(--ig-card); border-left: 3px solid transparent; }
+      #IngestConfigPage .ig-tone-ok { border-left-color: var(--ig-ok); }
+      #IngestConfigPage .ig-tone-info { border-left-color: var(--ig-info); }
+      #IngestConfigPage .ig-tone-warn { border-left-color: var(--ig-warn); }
+      #IngestConfigPage .ig-tone-error { border-left-color: var(--ig-bad); }
+      #IngestConfigPage .ig-main { display: grid; grid-template-columns: 1.8em minmax(0, 1fr) auto; gap: .1em .6em; align-items: start; }
+      #IngestConfigPage .ig-icon { font-size: 1.15em; line-height: 1.4; text-align: center; }
+      #IngestConfigPage .ig-text { min-width: 0; }
+      #IngestConfigPage .ig-headline { font-weight: 600; font-size: 1.05em; word-break: break-word; }
+      #IngestConfigPage .ig-sub { opacity: var(--ig-muted); font-size: .88em; word-break: break-word; }
+      #IngestConfigPage .ig-sum { margin-top: .2em; font-size: .95em; word-break: break-word; }
+      #IngestConfigPage .ig-side { display: flex; flex-direction: column; align-items: flex-end; gap: .3em; text-align: right; }
+      #IngestConfigPage .ig-side time { font-size: .85em; opacity: var(--ig-muted); white-space: nowrap; }
+      #IngestConfigPage .ig-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .25em; }
+      #IngestConfigPage .ig-chip { display: inline-flex; align-items: center; gap: .2em; padding: .05em .45em; border-radius: 999px; background: var(--ig-chip); font-size: .85em; line-height: 1.5; white-space: nowrap; cursor: default; font-variant-numeric: tabular-nums; }
+      #IngestConfigPage .ig-actions { display: flex; flex-wrap: wrap; gap: .5em; margin: .6em 0 0 2.4em; align-items: center; }
+      #IngestConfigPage .ig-actions:empty { display: none; }
+      #IngestConfigPage .ig-actions .emby-button, #IngestConfigPage .ig-more .emby-button, #IngestConfigPage .ig-day .emby-button { font-size: .85em; }
+      #IngestConfigPage details.ig-more { margin: .4em 0 0 2.4em; font-size: .92em; }
+      #IngestConfigPage details.ig-more > summary { cursor: pointer; list-style: none; opacity: .8; display: inline-block; padding: .1em 0; }
+      #IngestConfigPage details.ig-more > summary::-webkit-details-marker { display: none; }
+      #IngestConfigPage details.ig-more > summary::before { content: '▸ '; display: inline-block; transition: transform .15s; }
+      #IngestConfigPage details.ig-more[open] > summary::before { transform: rotate(90deg); }
+      #IngestConfigPage .ig-more-actions { display: flex; flex-wrap: wrap; gap: .5em; margin: .5em 0; }
+      #IngestConfigPage .ig-nerd { margin: .5em 0 .25em; padding: .6em .8em; border-radius: 4px; border: 1px solid var(--ig-line); font-size: .9em; }
+      #IngestConfigPage .ig-nerd h5 { margin: .5em 0 .2em; font-size: .78em; letter-spacing: .06em; text-transform: uppercase; opacity: var(--ig-muted); }
+      #IngestConfigPage .ig-nerd h5:first-child { margin-top: 0; }
+      #IngestConfigPage .ig-nerd dl { display: grid; grid-template-columns: minmax(6em, max-content) minmax(0, 1fr); gap: .15em .9em; margin: 0; }
+      #IngestConfigPage .ig-nerd dt { opacity: var(--ig-muted); word-break: break-word; }
+      #IngestConfigPage .ig-nerd dd { margin: 0; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
+      #IngestConfigPage .ig-show-more { display: block; margin: .5em auto; background: none; border: 1px solid var(--ig-line); color: inherit; border-radius: 999px; padding: .35em 1.2em; cursor: pointer; font: inherit; }
+      #IngestConfigPage .ig-empty { opacity: var(--ig-muted); margin: .5em 0; }
+      /* Activity filters */
+      #IngestConfigPage .ingest-filters { display: flex; flex-wrap: wrap; gap: .4em; margin: .5em 0; }
+      #IngestConfigPage .ingest-filters button { border: 1px solid var(--ig-line); background: transparent; color: inherit; border-radius: 999px; padding: .2em .75em; cursor: pointer; font: inherit; font-size: .9em; }
+      #IngestConfigPage .ingest-filters button[aria-pressed="true"] { background: rgba(0,164,220,.25); border-color: rgba(0,164,220,.6); }
+      /* Quarantine days */
+      #IngestConfigPage .ig-day { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .25em 1em; margin: 1em 0 .2em; padding-bottom: .2em; border-bottom: 1px solid var(--ig-line); }
+      #IngestConfigPage .ig-day strong { font-size: .95em; }
+      /* Review cards */
       #IngestConfigPage .ingest-card a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+      #IngestConfigPage .ingest-card .ig-body { margin: .5em 0 0 2.4em; }
       #IngestConfigPage .ingest-links a + a { margin-left: .6em; }
-      #IngestConfigPage .ingest-muted { opacity: .7; font-size: .9em; }
-      #IngestConfigPage .ingest-reasons { margin: .5em 0; padding-left: 1.2em; }
-      #IngestConfigPage .ingest-reasons li { word-break: break-word; }
-      #IngestConfigPage .ingest-pick { max-width: 56em; margin: .75em 0; }
+      #IngestConfigPage .ingest-pick { max-width: 56em; margin: .5em 0; }
       #IngestConfigPage .ingest-into { display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1em; margin-bottom: .25em; }
-      #IngestConfigPage .ingest-into select { min-width: 14em; max-width: 100%; padding: .35em .5em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
+      #IngestConfigPage .ingest-into select { min-width: 12em; max-width: 100%; padding: .3em .5em; background: var(--ingest-field-bg); color: inherit; border: 1px solid var(--ig-line); border-radius: 4px; font: inherit; }
       #IngestConfigPage .ingest-cands { width: 100%; border-collapse: collapse; }
-      #IngestConfigPage .ingest-cands td { padding: .4em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; }
+      #IngestConfigPage .ingest-cands td { padding: .35em .5em; border-top: 1px solid var(--ig-line); vertical-align: middle; }
       #IngestConfigPage .ingest-cands td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%; }
       #IngestConfigPage .ingest-cands tr[hidden] { display: none; }
-      #IngestConfigPage .ingest-cands .emby-button { margin: 0; }
-      #IngestConfigPage .ingest-tag { display: inline-block; font-size: .72em; letter-spacing: .04em; text-transform: uppercase; padding: .1em .45em; border-radius: 3px; margin-left: .5em; vertical-align: .1em; background: rgba(128,128,128,.25); }
+      #IngestConfigPage .ingest-tag { display: inline-block; font-size: .72em; letter-spacing: .04em; text-transform: uppercase; padding: .1em .45em; border-radius: 3px; margin-left: .5em; vertical-align: .1em; background: var(--ig-chip); }
       #IngestConfigPage .ingest-tag.top { background: rgba(82,181,75,.28); }
       #IngestConfigPage .ingest-more { background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; padding: .4em .5em; font: inherit; opacity: .8; }
-      #IngestConfigPage .ingest-actions { display: flex; flex-wrap: wrap; gap: .5em; margin-top: .75em; }
-      #IngestConfigPage .ingest-files { margin-top: .75em; }
-      #IngestConfigPage .wf-transfer { margin: .5em 0; display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1.5em; }
-      #IngestConfigPage .wf-transfer select { padding: .3em .45em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; max-width: 100%; }
-      #IngestConfigPage .ingest-files > summary { cursor: pointer; }
-      #IngestConfigPage .ingest-files table { width: 100%; border-collapse: collapse; margin: .5em 0; }
-      #IngestConfigPage .ingest-files td { padding: .3em .5em; border-top: 1px solid rgba(128,128,128,.2); vertical-align: middle; word-break: break-word; }
-      #IngestConfigPage .ingest-files td.ingest-num { white-space: nowrap; }
-      #IngestConfigPage .ingest-files input[type=number] { width: 4.5em; padding: .3em .4em; background: transparent; color: inherit; border: 1px solid rgba(128,128,128,.5); border-radius: 4px; font: inherit; }
-      #IngestConfigPage .ingest-files select { padding: .3em .4em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
-      #IngestConfigPage .ingest-actions .emby-button { margin: 0; }
       #IngestConfigPage .ingest-chosen { padding: .5em .75em; border-radius: 4px; background: rgba(0,164,220,.15); border-left: 3px solid rgba(0,164,220,.7); margin: .5em 0; }
-      #IngestConfigPage .ingest-search summary { cursor: pointer; margin-top: .75em; opacity: .85; }
+      #IngestConfigPage .ingest-files { margin-top: .5em; }
+      #IngestConfigPage .ingest-files > summary, #IngestConfigPage .ingest-search > summary { cursor: pointer; opacity: .85; }
+      #IngestConfigPage .ingest-files table { width: 100%; border-collapse: collapse; margin: .5em 0; }
+      #IngestConfigPage .ingest-files td { padding: .3em .5em; border-top: 1px solid var(--ig-line); vertical-align: middle; word-break: break-word; }
+      #IngestConfigPage .ingest-files td.ingest-num { white-space: nowrap; }
+      #IngestConfigPage .ingest-files input[type=number] { width: 4.5em; padding: .3em .4em; background: transparent; color: inherit; border: 1px solid var(--ig-line); border-radius: 4px; font: inherit; }
+      #IngestConfigPage .ingest-files select { padding: .3em .4em; background: var(--ingest-field-bg); color: inherit; border: 1px solid var(--ig-line); border-radius: 4px; font: inherit; max-width: 100%; }
+      #IngestConfigPage .ingest-search { margin-top: .5em; }
       #IngestConfigPage .ingest-search form { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; margin: .5em 0; }
-      #IngestConfigPage .ingest-search input, #IngestConfigPage .ingest-search select { padding: .4em .5em; background: var(--ingest-field-bg); color: inherit; border: 1px solid rgba(128,128,128,.4); border-radius: 4px; font: inherit; }
+      #IngestConfigPage .ingest-search input, #IngestConfigPage .ingest-search select { padding: .4em .5em; background: var(--ingest-field-bg); color: inherit; border: 1px solid var(--ig-line); border-radius: 4px; font: inherit; }
       #IngestConfigPage .ingest-search input[name=q] { flex: 1 1 14em; min-width: 0; }
       #IngestConfigPage .ingest-search input[name=y] { width: 5.5em; }
-      #IngestConfigPage .ingest-search .emby-button { margin: 0; }
-      #IngestConfigPage .ingest-filters { display: flex; flex-wrap: wrap; gap: .4em; margin: .5em 0 1em; }
-      #IngestConfigPage .ingest-filters button { border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; border-radius: 999px; padding: .25em .8em; cursor: pointer; font: inherit; }
-      #IngestConfigPage .ingest-filters button[aria-pressed="true"] { background: rgba(0,164,220,.25); border-color: rgba(0,164,220,.6); }
-      #IngestConfigPage .ingest-activity { list-style: none; margin: 0; padding: 0; }
-      #IngestConfigPage .ingest-activity > li { display: grid; grid-template-columns: 7.5em 1fr; gap: .25em 1em; padding: .6em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
-      #IngestConfigPage .ingest-activity .when { font-variant-numeric: tabular-nums; font-size: .85em; opacity: .75; grid-column: 1; }
-      #IngestConfigPage .ingest-activity .what { grid-column: 2; min-width: 0; word-break: break-word; }
-      #IngestConfigPage .ingest-activity details { margin-top: .25em; font-size: .85em; }
-      #IngestConfigPage .ingest-activity details ul { margin: .25em 0; padding-left: 1.2em; opacity: .85; }
-      #IngestConfigPage .badge { display: inline-block; font-size: .72em; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: .15em .55em; border-radius: 3px; margin-right: .5em; vertical-align: .1em; }
-      #IngestConfigPage .badge.Filed { background: rgba(82,181,75,.25); }
-      #IngestConfigPage .badge.DryRun { background: rgba(255,170,0,.22); }
-      #IngestConfigPage .badge.NeedsReview { background: rgba(0,164,220,.25); }
-      #IngestConfigPage .badge.Decision { background: rgba(150,110,220,.28); }
-      #IngestConfigPage .badge.Failed { background: rgba(220,53,69,.30); }
-      #IngestConfigPage .badge.Quarantined, #IngestConfigPage .badge.Purged, #IngestConfigPage .badge.ReviewRemoved { background: rgba(128,128,128,.30); }
-      #IngestConfigPage .badge.Undone, #IngestConfigPage .badge.Restored { background: rgba(150,110,220,.28); }
-      #IngestConfigPage .ingest-banner.paused { background: rgba(220,53,69,.20); border-left: 4px solid rgba(220,53,69,.8); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5em 1em; }
-      #IngestConfigPage .ingest-banner.paused .emby-button { margin: 0; }
-      #IngestConfigPage .ingest-qr { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .25em 1em; }
-      #IngestConfigPage .ingest-qr > details { flex: 1 1 18em; min-width: 0; }
-      #IngestConfigPage .ingest-qactions { display: flex; flex-wrap: wrap; gap: .4em; }
-      #IngestConfigPage .ingest-qactions .emby-button, #IngestConfigPage .ingest-q h4 .emby-button { margin: 0; font-size: .85em; }
-      #IngestConfigPage .ingest-activity .ingest-undo { margin: .4em 0 0; }
-      #IngestConfigPage .ingest-q { padding: .75em 1em; margin: .75em 0; border-radius: 6px; background: rgba(128,128,128,.10); }
-      #IngestConfigPage .ingest-q h4 { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .25em 1em; }
-      #IngestConfigPage .ingest-q details { margin: .4em 0 0; }
-      #IngestConfigPage .ingest-q summary { cursor: pointer; word-break: break-word; }
-      #IngestConfigPage .ingest-q ul { list-style: none; margin: .25em 0 .5em; padding-left: 1.2em; font-size: .9em; }
-      #IngestConfigPage .ingest-q li { display: flex; justify-content: space-between; gap: 1em; padding: .1em 0; }
-      #IngestConfigPage .ingest-q li span:first-child { min-width: 0; word-break: break-word; }
-      #IngestConfigPage .ingest-q .size { font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .75; }
-      #IngestConfigPage .ingest-waiting { list-style: none; margin: 0 0 1em; padding: 0; }
-      #IngestConfigPage .ingest-waiting > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5em 1em; padding: .5em 0; border-bottom: 1px solid rgba(128,128,128,.2); }
-      #IngestConfigPage .ingest-waiting .what { min-width: 0; word-break: break-word; }
-      #IngestConfigPage .ingest-waiting .emby-button { margin: 0; }
-      #IngestConfigPage .ingest-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; flex-wrap: wrap; }
       @media (max-width: 720px) {
         #IngestConfigPage .wf-top, #IngestConfigPage .wf-dest { grid-template-columns: 1fr; }
-        #IngestConfigPage .ingest-activity > li { grid-template-columns: 1fr; }
-        #IngestConfigPage .ingest-activity .what { grid-column: 1; }
+        /* Rows become stacked cards: chips and time go under the text */
+        #IngestConfigPage .ig-main { grid-template-columns: 1.6em minmax(0, 1fr); }
+        #IngestConfigPage .ig-side { grid-column: 2; flex-direction: row-reverse; justify-content: space-between; align-items: center; text-align: left; }
+        #IngestConfigPage .ig-chips { justify-content: flex-start; }
+        #IngestConfigPage .ig-actions, #IngestConfigPage details.ig-more, #IngestConfigPage .ingest-card .ig-body { margin-left: 0; }
+        #IngestConfigPage .ig-nerd dl { grid-template-columns: 1fr; }
+        #IngestConfigPage .ig-nerd dd { margin-bottom: .35em; }
         #IngestConfigPage .ingest-cands td.links { display: none; }
+        #IngestConfigPage .ingest-files table, #IngestConfigPage .ingest-files tbody, #IngestConfigPage .ingest-files tr, #IngestConfigPage .ingest-files td { display: block; width: auto; }
+        #IngestConfigPage .ingest-files tr { padding: .4em 0; border-top: 1px solid var(--ig-line); }
+        #IngestConfigPage .ingest-files td { border: 0; padding: .15em 0; }
       }
     </style>
     <div data-role="content">
       <div class="content-primary">
         <h2 class="sectionTitle">Shoal Ingest</h2>
         <div id="IngestStatus" class="ingest-visually-hidden" role="status" aria-live="polite"></div>
-        <p>New media dropped into a watch folder is identified, renamed to Jellyfin's naming standard and moved into the chosen library with its subtitles. Anything else in the release is quarantined and deleted after the retention period. Releases that can't be identified confidently are left where they are and listed under <em>Needs review</em>.</p>
+        <p class="ingest-muted">New media dropped into a watch folder is identified, renamed and filed into your libraries with its subtitles; the rest of the release is quarantined. Anything Ingest can't identify confidently waits under <em>Needs review</em>.</p>
 
         <div class="ingest-banner paused" id="PausedBanner" role="status" hidden>
           <span><strong>Ingest is paused.</strong> Nothing is filed or quarantined until you resume it; releases are still listed as waiting.</span>
@@ -124,80 +145,112 @@
           <strong id="DryRunBannerTitle">Dry run is on.</strong> Ingest records what it would do in these watch folders and moves nothing. Check <em>Recent activity</em>, then turn dry run off for the folder under <em>Watch folders</em> and save.
         </div>
 
-        <div id="WaitingBox" hidden>
-          <h3 class="sectionTitle">Waiting <span class="ingest-muted" id="WaitingCount"></span></h3>
-          <p class="ingest-muted">Releases seen in a watch folder that haven't finished arriving yet. Each is processed once nothing in it has changed for the settle time.</p>
-          <ul class="ingest-waiting" id="Waiting"></ul>
-        </div>
-
         <div class="ingest-head">
-          <h3 class="sectionTitle">Needs review <span class="ingest-muted" id="ReviewCount"></span></h3>
-          <span class="ingest-qactions">
+          <span></span>
+          <span class="ingest-tools">
             <button is="emby-button" type="button" class="raised button-cancel" id="PauseIngest"><span>Pause Ingest</span></button>
             <button is="emby-button" type="button" class="raised button-alt" id="RefreshStatus"><span>Refresh</span></button>
           </span>
         </div>
+
+        <div id="WaitingBox" hidden>
+          <div class="ingest-head"><h3 class="sectionTitle">Waiting <span class="ingest-muted" id="WaitingCount"></span></h3></div>
+          <ul class="ig-list" id="Waiting" aria-label="Releases still arriving"></ul>
+        </div>
+
+        <div class="ingest-head"><h3 class="sectionTitle">Needs review <span class="ingest-muted" id="ReviewCount"></span></h3></div>
         <div id="Reviews"></div>
 
-        <h3 class="sectionTitle" style="margin-top:2em">Recent activity</h3>
+        <div class="ingest-head"><h3 class="sectionTitle">Recent activity</h3></div>
         <div class="ingest-filters" id="ActivityFilters" role="group" aria-label="Filter activity"></div>
-        <ul class="ingest-activity" id="Activity"></ul>
+        <ul class="ig-list" id="Activity" aria-label="Recent activity"></ul>
 
-        <h3 class="sectionTitle" style="margin-top:2em">Quarantine <span class="ingest-muted" id="QuarantineCount"></span></h3>
-        <p class="ingest-muted" id="QuarantineHint">Clutter from filed releases, and releases quarantined from review, kept by date until the retention period ends.</p>
-        <div id="Quarantine"></div>
+        <details class="ig-section" id="QuarantineSection">
+          <summary><h3 class="sectionTitle">Quarantine</h3> <span class="ingest-muted" id="QuarantineCount"></span></summary>
+          <p class="ingest-muted">Clutter from filed releases, releases quarantined from review and replaced copies, kept by date until the retention period ends.</p>
+          <div id="Quarantine"></div>
+        </details>
 
-        <form id="IngestConfigForm">
-          <h3 class="sectionTitle" style="margin-top:2em" id="WatchFoldersHead">Watch folders</h3>
-          <p class="ingest-muted">A new watch folder starts in <strong>dry run</strong>: Ingest records what it would do (see <em>Recent activity</em>) and moves nothing until you untick it for that folder. Each release is filed by type into the watch folder's destination for that kind: shows into a Shows library, films into a Movies library, or both into a Mixed Movies and Shows library. A watch folder can have one destination per kind, so a mixed library must be its only destination. Media with no destination of its kind is left for review. To split films between two Movies libraries, use a watch folder for each.</p>
-          <div id="WatchFolders"></div>
-          <button is="emby-button" type="button" class="raised button-alt" id="AddWatchFolder"><span>Add watch folder</span></button>
-
+        <form id="IngestConfigForm" class="ig-settings">
           <h3 class="sectionTitle" style="margin-top:2em">Settings</h3>
-          <div class="inputContainer">
-            <label class="inputLabel inputLabelUnfocused" for="QuarantinePath">Quarantine folder</label>
-            <input id="QuarantinePath" name="QuarantinePath" type="text" is="emby-input" />
-            <div class="fieldDescription">Leave empty to use a hidden <code>.ingest-quarantine</code> folder inside each watch folder (same disk, so moves are instant). It must not be, contain or sit inside a library folder; only the dated folders Ingest creates there are ever deleted.</div>
-            <div class="wf-error" id="QuarantinePathError" aria-live="polite"></div>
-          </div>
-          <div class="inputContainer">
-            <label class="inputLabel inputLabelUnfocused" for="QuarantineRetentionDays">Keep quarantined items for (days)</label>
-            <input id="QuarantineRetentionDays" name="QuarantineRetentionDays" type="number" min="1" is="emby-input" />
-          </div>
-          <div class="inputContainer">
-            <label class="inputLabel inputLabelUnfocused" for="SettleSeconds">Wait until a release has stopped changing for (seconds)</label>
-            <input id="SettleSeconds" name="SettleSeconds" type="number" min="5" is="emby-input" />
-            <div class="fieldDescription">A release is processed once no file in it has been added, resized or written for this long. <strong>Download clients must not write straight into a watch folder:</strong> use their "incomplete" or temporary folder outside it (or an in-progress suffix such as <code>.part</code> or <code>.!qb</code>) and let them move finished downloads in. A download that stalls for longer than this can otherwise look finished.</div>
-          </div>
-          <div class="checkboxContainer checkboxContainer-withDescription">
-            <label class="emby-checkbox-label">
-              <input id="ScanLibraryAfterIngest" name="ScanLibraryAfterIngest" type="checkbox" is="emby-checkbox" />
-              <span>Refresh filed folders in Jellyfin after ingesting</span>
-            </label>
-            <div class="fieldDescription checkboxFieldDescription">Only the film or show folders that were filed into are refreshed, so new items appear within a minute or so without scanning whole libraries.</div>
-          </div>
-          <div class="checkboxContainer checkboxContainer-withDescription">
-            <label class="emby-checkbox-label">
-              <input id="UseAiTiebreak" name="UseAiTiebreak" type="checkbox" is="emby-checkbox" />
-              <span>Let the AI plugin settle close matches</span>
-            </label>
-            <div class="fieldDescription checkboxFieldDescription">Only when the Shoal AI plugin is installed and allows Ingest (its settings page, where its spending limits also apply). When two or more candidates are too close to call, it picks one of them, using only the file name and the candidates' titles and years. When a file names its episode by title only (a special, say) and no title matches clearly, it picks one of that season's episodes from their titles and short synopses. Anything else waits for review as before. Each settled match is noted in the activity panel with the reason.</div>
-          </div>
-          <div class="checkboxContainer checkboxContainer-withDescription">
-            <label class="emby-checkbox-label">
-              <input id="UseTranscripts" name="UseTranscripts" type="checkbox" is="emby-checkbox" />
-              <span>Identify unnamed episodes from a short transcript</span>
-            </label>
-            <div class="fieldDescription checkboxFieldDescription">When an episode's name doesn't say which episode it is, the Shoal Subtitles plugin transcribes two minutes of it and the AI plugin compares that with the episode synopses. Needs both plugins, with <strong>Let Ingest ask for short transcripts</strong> on in the Subtitles plugin (built-in speech-to-text is free and stays on this server). The AI must pick one of the show's listed episodes; anything else waits for review.</div>
-          </div>
-          <div class="checkboxContainer checkboxContainer-withDescription">
-            <label class="emby-checkbox-label">
-              <input id="WriteToActivityLog" name="WriteToActivityLog" type="checkbox" is="emby-checkbox" />
-              <span>Also write to Jellyfin's Activity log</span>
-            </label>
-            <div class="fieldDescription checkboxFieldDescription">Releases waiting for your decision, failures, filings and quarantines also appear under Dashboard → Activity (at most once a day for the same release and outcome), so they're seen without opening this page.</div>
-          </div>
-          <div>
+
+          <details class="ig-section" id="WatchFoldersSection" open>
+            <summary><h4 id="WatchFoldersHead">Watch folders</h4></summary>
+            <div>
+              <p class="ingest-muted">A new watch folder starts in <strong>dry run</strong>: Ingest records what it would do (see <em>Recent activity</em>) and moves nothing until you untick it for that folder. Releases are filed by kind: shows into a Shows library, films into a Movies library, or both into a Mixed Movies and Shows library (which must then be the folder's only destination). Media with no destination of its kind waits for review. To split films between two Movies libraries, use a watch folder for each.</p>
+              <div id="WatchFolders"></div>
+              <button is="emby-button" type="button" class="raised button-alt" id="AddWatchFolder"><span>Add watch folder</span></button>
+            </div>
+          </details>
+
+          <details class="ig-section" open>
+            <summary><h4>Processing</h4></summary>
+            <div>
+              <div class="inputContainer">
+                <label class="inputLabel inputLabelUnfocused" for="SettleSeconds">Wait until a release has stopped changing for (seconds)</label>
+                <input id="SettleSeconds" name="SettleSeconds" type="number" min="5" is="emby-input" />
+                <div class="fieldDescription">A release is processed once no file in it has been added, resized or written for this long. <strong>Download clients must not write straight into a watch folder:</strong> use their "incomplete" or temporary folder outside it (or an in-progress suffix such as <code>.part</code> or <code>.!qb</code>) and let them move finished downloads in. A download that stalls for longer than this can otherwise look finished.</div>
+              </div>
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input id="ScanLibraryAfterIngest" name="ScanLibraryAfterIngest" type="checkbox" is="emby-checkbox" />
+                  <span>Refresh filed folders in Jellyfin after ingesting</span>
+                </label>
+                <div class="fieldDescription checkboxFieldDescription">Only the film or show folders that were filed into are refreshed, so new items appear within a minute or so without scanning whole libraries.</div>
+              </div>
+            </div>
+          </details>
+
+          <details class="ig-section" id="QuarantineSettings">
+            <summary><h4>Quarantine</h4></summary>
+            <div>
+              <div class="inputContainer">
+                <label class="inputLabel inputLabelUnfocused" for="QuarantinePath">Quarantine folder</label>
+                <input id="QuarantinePath" name="QuarantinePath" type="text" is="emby-input" />
+                <div class="fieldDescription">Leave empty to use a hidden <code>.ingest-quarantine</code> folder inside each watch folder (same disk, so moves are instant). It must not be, contain or sit inside a library folder; only the dated folders Ingest creates there are ever deleted.</div>
+                <div class="wf-error" id="QuarantinePathError" aria-live="polite"></div>
+              </div>
+              <div class="inputContainer">
+                <label class="inputLabel inputLabelUnfocused" for="QuarantineRetentionDays">Keep quarantined items for (days)</label>
+                <input id="QuarantineRetentionDays" name="QuarantineRetentionDays" type="number" min="1" is="emby-input" />
+              </div>
+            </div>
+          </details>
+
+          <details class="ig-section">
+            <summary><h4>AI help</h4></summary>
+            <div>
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input id="UseAiTiebreak" name="UseAiTiebreak" type="checkbox" is="emby-checkbox" />
+                  <span>Let the AI plugin settle close matches</span>
+                </label>
+                <div class="fieldDescription checkboxFieldDescription">Only when the Shoal AI plugin is installed and allows Ingest (its settings page, where its spending limits also apply). When two or more candidates are too close to call, it picks one of them, using only the file name and the candidates' titles and years. When a file names its episode by title only (a special, say) and no title matches clearly, it picks one of that season's episodes from their titles and short synopses. Anything else waits for review as before. Each settled match is marked 🤖 in Recent activity, with the reason in its details.</div>
+              </div>
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input id="UseTranscripts" name="UseTranscripts" type="checkbox" is="emby-checkbox" />
+                  <span>Identify unnamed episodes from a short transcript</span>
+                </label>
+                <div class="fieldDescription checkboxFieldDescription">When an episode's name doesn't say which episode it is, the Shoal Subtitles plugin transcribes two minutes of it and the AI plugin compares that with the episode synopses. Needs both plugins, with <strong>Let Ingest ask for short transcripts</strong> on in the Subtitles plugin (built-in speech-to-text is free and stays on this server). The AI must pick one of the show's listed episodes; anything else waits for review.</div>
+              </div>
+            </div>
+          </details>
+
+          <details class="ig-section">
+            <summary><h4>Notifications</h4></summary>
+            <div>
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input id="WriteToActivityLog" name="WriteToActivityLog" type="checkbox" is="emby-checkbox" />
+                  <span>Also write to Jellyfin's Activity log</span>
+                </label>
+                <div class="fieldDescription checkboxFieldDescription">Releases waiting for your decision, failures, filings and quarantines also appear under Dashboard → Activity (at most once a day for the same release and outcome), so they're seen without opening this page.</div>
+              </div>
+            </div>
+          </details>
+
+          <div style="margin-top:1em">
             <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
           </div>
         </form>
@@ -338,10 +391,107 @@
           page.querySelector('#SetupBanner').hidden = isSetUp(config);
         }
 
+        // ---- Shared list rendering: the server presents each row (headline, smaller line, sentence, chips, details) ----
+        var PAGE = 15;
+        var openRows = {};
+
+        // Relative times: "just now", "5 minutes ago", "3 hours ago", "yesterday", "2 days ago", then a short date
+        function dayDiff(a, b) {
+          var x = new Date(a.getFullYear(), a.getMonth(), a.getDate()), y = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+          return Math.round((x - y) / 86400000);
+        }
+        function shortDate(d) {
+          var opts = { day: 'numeric', month: 'short' };
+          if (d.getFullYear() !== new Date().getFullYear()) { opts.year = 'numeric'; }
+          return d.toLocaleDateString([], opts);
+        }
+        function exact(iso) { return new Date(iso).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+        function ago(iso) {
+          var d = new Date(iso), now = new Date();
+          var mins = Math.floor((now - d) / 60000);
+          if (mins < 1) { return 'just now'; }
+          if (mins < 60) { return mins === 1 ? '1 minute ago' : mins + ' minutes ago'; }
+          var hours = Math.floor(mins / 60);
+          var days = dayDiff(now, d);
+          if (hours < 12 || days === 0) { return hours === 1 ? '1 hour ago' : hours + ' hours ago'; }
+          if (days === 1) { return 'yesterday'; }
+          if (days < 7) { return days + ' days ago'; }
+          return shortDate(d);
+        }
+        function until(iso) {
+          var d = new Date(iso), now = new Date();
+          var mins = Math.ceil((d - now) / 60000);
+          if (mins <= 1) { return mins < 1 ? 'any moment now' : 'in 1 minute'; }
+          if (mins < 60) { return 'in ' + mins + ' minutes'; }
+          var hours = Math.round(mins / 60);
+          var days = dayDiff(d, now);
+          if (hours < 12 || days === 0) { return hours === 1 ? 'in 1 hour' : 'in ' + hours + ' hours'; }
+          if (days === 1) { return 'tomorrow'; }
+          if (days < 7) { return 'in ' + days + ' days'; }
+          return 'on ' + shortDate(d);
+        }
+        function timeTag(iso, mode) {
+          if (!iso) { return ''; }
+          return '<time datetime="' + esc(iso) + '" data-mode="' + (mode || 'ago') + '" title="' + esc(exact(iso)) + '">' + esc(mode === 'until' ? until(iso) : ago(iso)) + '</time>';
+        }
+        function tickTimes() {
+          Array.prototype.forEach.call(page.querySelectorAll('time[data-mode]'), function (t) {
+            var iso = t.getAttribute('datetime');
+            t.textContent = t.getAttribute('data-mode') === 'until' ? until(iso) : ago(iso);
+          });
+        }
+
+        function chipsHtml(list) {
+          return (list || []).map(function (c) {
+            return '<span class="ig-chip" role="img" title="' + esc(c.Label) + '" aria-label="' + esc(c.Label) + '">' + esc(c.Icon) + (c.Count ? '<span aria-hidden="true">' + esc(c.Count) + '</span>' : '') + '</span>';
+          }).join('');
+        }
+
+        // The technical details ("nerd stats"), grouped
+        function nerdHtml(rows) {
+          if (!rows || !rows.length) { return ''; }
+          var groups = [], by = {};
+          rows.forEach(function (d) { if (!by[d.Group]) { by[d.Group] = []; groups.push(d.Group); } by[d.Group].push(d); });
+          return '<div class="ig-nerd">' + groups.map(function (g) {
+            return '<h5>' + esc(g) + '</h5><dl>' + by[g].map(function (d) { return '<dt>' + esc(d.Label) + '</dt><dd>' + esc(d.Value) + '</dd>'; }).join('') + '</dl>';
+          }).join('') + '</div>';
+        }
+
+        // The head of a row: status icon, headline, smaller line, sentence; chips and time on the side
+        function headHtml(v, time, mode, sentence) {
+          return '<div class="ig-main"><span class="ig-icon" role="img" aria-label="' + esc(v.StatusLabel) + '" title="' + esc(v.StatusLabel) + '">' + esc(v.Icon) + '</span>' +
+            '<div class="ig-text"><div class="ig-headline">' + esc(v.Headline) + '</div>' +
+            (v.Subline ? '<div class="ig-sub">' + esc(v.Subline) + '</div>' : '') +
+            '<div class="ig-sum">' + (sentence != null ? sentence : esc(v.Summary)) + '</div></div>' +
+            '<div class="ig-side">' + timeTag(time, mode) + '<span class="ig-chips">' + chipsHtml(v.Chips) + '</span></div></div>';
+        }
+
+        // The expandable part: secondary actions, then the details
+        function moreHtml(key, label, actions, rows) {
+          if (!actions && !(rows && rows.length)) { return ''; }
+          return '<details class="ig-more" data-k="' + esc(key) + '"' + (openRows[key] ? ' open' : '') + '><summary>' + esc(label || 'Details') + '</summary>' +
+            (actions ? '<div class="ig-more-actions">' + actions + '</div>' : '') + nerdHtml(rows) + '</details>';
+        }
+
+        function rowHtml(v, o) {
+          o = o || {};
+          return '<li class="ig-row ig-tone-' + esc(v.Tone || 'neutral') + '" data-key="' + esc(v.Key) + '">' + headHtml(v, o.time, o.mode, o.sentence) +
+            '<div class="ig-actions">' + (o.actions || '') + '</div>' + moreHtml(v.Key, o.moreLabel, o.more, v.Details) + '</li>';
+        }
+
+        function showMoreHtml(id, shown, total) {
+          return shown < total ? '<button type="button" class="ig-show-more" id="' + id + '">Show more (' + (total - shown) + ' more)</button>' : '';
+        }
+
+        page.addEventListener('toggle', function (e) {
+          var d = e.target;
+          if (d && d.classList && d.classList.contains('ig-more')) { openRows[d.getAttribute('data-k')] = d.open; }
+        }, true);
+
         // ---- Needs review ----
-        var statusTimer = null;
-        var activity = [];
-        var reviews = [];
+        var statusTimer = null, tickTimer = null;
+        var reviews = [], reviewViews = {};
+        var reviewLimit = 10;
         var filter = 'All';
         var confirmQuarantine = {};
         var confirmUndo = {};
@@ -369,6 +519,7 @@
           return r.Chosen ? !!r.Chosen.Candidate.IsSeries : (r.Candidates || []).some(function (c) { return c.Candidate.IsSeries; });
         }
         function videoCount(r) { return (r.Items || []).filter(function (i) { return i.IsVideo; }).length; }
+        function fileName(p) { return String(p).split(/[\\/]/).pop(); }
         function perFile(r, n) {
           var items = r.Items || [];
           var numbers = looksTv(r) && videoCount(r) > 0;
@@ -378,8 +529,8 @@
             var id = 'ingest-f-' + n + '-' + k;
             var opt = function (v, t) { return '<option value="' + v + '"' + (c === v ? ' selected' : '') + '>' + t + '</option>'; };
             var num = numbers && i.IsVideo ? fileNum(r, i) : null;
-            return '<tr><td>' + esc(i.Source.split(/[\\/]/).pop()) + '<div class="ingest-muted">' + esc(i.Reason) + '</div></td>' +
-              '<td><label class="ingest-visually-hidden" for="' + id + '">What to do with ' + esc(i.Source.split(/[\\/]/).pop()) + '</label><select id="' + id + '" class="ingest-file-choice" data-source="' + esc(i.Source) + '">' +
+            return '<tr><td>' + esc(fileName(i.Source)) + '<div class="ingest-muted">' + esc(i.Reason) + '</div></td>' +
+              '<td><label class="ingest-visually-hidden" for="' + id + '">What to do with ' + esc(fileName(i.Source)) + '</label><select id="' + id + '" class="ingest-file-choice" data-source="' + esc(i.Source) + '">' +
               opt('later', 'Decide later') + (i.Existing ? opt('replace', 'Replace existing') : '') + opt('quarantine', 'Quarantine this file') + '</select></td>' +
               '<td class="ingest-num">' + (num
                 ? '<label for="' + id + '-s">Season</label> <input id="' + id + '-s" class="ingest-file-num" data-part="s" data-source="' + esc(i.Source) + '" type="number" min="0" max="2999" inputmode="numeric" value="' + esc(num.s) + '" />' +
@@ -419,15 +570,7 @@
         // The library picked in a card, kept across the automatic refresh (ING-27)
         var libChoice = {};
         var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Decision', 'Decisions'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged'], ['Undone', 'Undone'], ['Restored', 'Restored'], ['ReviewRemoved', 'Review removed']];
-        var labels = {}; filters.forEach(function (f) { labels[f[0]] = f[1]; });
-        var SHOWN = 5;
-
-        function when(iso) {
-          var d = new Date(iso);
-          var sameDay = d.toDateString() === new Date().toDateString();
-          var t = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          return sameDay ? t : d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + t;
-        }
+        var SHOWN = 3;
 
         function links(ids, isTv) {
           ids = ids || {};
@@ -476,123 +619,143 @@
               (imdbOnly(c) ? '<span class="ingest-tag" title="Only IMDb knows this title; Jellyfin may not find artwork or episode data">IMDb only</span>' : '') +
               (c.Source === 'Library' ? '<span class="ingest-tag" title="Already in your library">In library</span>' : '');
             return '<tr' + (i >= SHOWN && !expanded[key] ? ' hidden' : '') + '><td>' + title(c) + tags + '</td><td class="links">' + links(c.ProviderIds, c.IsSeries) + '</td>' +
-              '<td class="num">' + Math.round(Math.min(1, sc.Score) * 100) + '%</td>' +
+              '<td class="num" title="How closely it matches the name">' + Math.round(Math.min(1, sc.Score) * 100) + '%</td>' +
               '<td class="num"><button is="emby-button" type="button" class="raised button-submit ingest-choose" data-list="' + list + '" data-i="' + i + '"><span>Use this</span></button></td></tr>';
           }).join('');
           var more = cands.length > SHOWN && !expanded[key]
             ? '<button type="button" class="ingest-more" data-key="' + esc(key) + '">Show ' + (cands.length - SHOWN) + ' more</button>' : '';
           var videos = videoCount(r);
           var libId = 'ingest-lib-' + r.Id + '-' + list;
-          var warn = videos > 1 ? '<div class="ingest-muted">“Use this” files all ' + videos + ' waiting videos as this title. To set one aside, use <em>Choose file by file</em> below.</div>' : '';
+          var warn = videos > 1 ? '<div class="ingest-muted">“Use this” files all ' + videos + ' waiting videos as this title. To set one aside, use <em>Choose file by file</em>.</div>' : '';
           return '<div class="ingest-pick" data-list="' + list + '">' +
-            '<div class="ingest-into"><strong>' + (list === 'suggested' ? 'Possible matches' : 'Search results') + '</strong>' +
+            '<div class="ingest-into"><strong>' + (list === 'suggested' ? 'Is it one of these?' : 'Search results') + '</strong>' +
             '<label for="' + esc(libId) + '">File into</label> <select id="' + esc(libId) + '" class="ingest-lib" data-key="' + esc(key) + '">' + (opts || '<option value="">No ' + (isTv ? 'TV' : 'film') + ' library</option>') + '</select></div>' +
             warn + '<table class="ingest-cands"><tbody>' + rows + '</tbody></table>' + more + '</div>';
+        }
+
+        function searchForm(r, open) {
+          var sr = searchResults[r.Id];
+          var guessTv = (r.Candidates || []).length ? !!r.Candidates[0].Candidate.IsSeries : !!(libById(defaultLibrary(r.WatchFolder, true)) && !defaultLibrary(r.WatchFolder, false));
+          return '<details class="ingest-search"' + (open ? ' open' : '') + '><summary>Search for a different title</summary>' +
+            '<form><label class="ingest-visually-hidden" for="ingest-q-' + esc(r.Id) + '">Title to search for</label><input id="ingest-q-' + esc(r.Id) + '" name="q" type="text" placeholder="Title" value="' + esc(sr ? sr.q : '') + '" required />' +
+            '<label class="ingest-visually-hidden" for="ingest-y-' + esc(r.Id) + '">Year (optional)</label><input id="ingest-y-' + esc(r.Id) + '" name="y" type="number" min="1880" max="2100" placeholder="Year" value="' + esc(sr ? sr.y : '') + '" />' +
+            '<label class="ingest-visually-hidden" for="ingest-k-' + esc(r.Id) + '">Film or show</label><select id="ingest-k-' + esc(r.Id) + '" name="k"><option value="film"' + ((sr ? sr.k === 'film' : !guessTv) ? ' selected' : '') + '>Film</option><option value="tv"' + ((sr ? sr.k === 'tv' : guessTv) ? ' selected' : '') + '>Show</option></select>' +
+            '<button is="emby-button" type="submit" class="raised button-alt"><span>Search</span></button></form></details>';
+        }
+
+        function reviewView(r) {
+          return reviewViews[r.Id] || { Key: r.Id, Headline: r.Release, Subline: '', Summary: 'Waiting for you.', Icon: '⚠️', StatusLabel: 'Needs review', Tone: 'warn', Chips: [], Details: [] };
         }
 
         function renderReviews() {
           var box = page.querySelector('#Reviews');
           page.querySelector('#ReviewCount').textContent = reviews.length ? '(' + reviews.length + ')' : '';
-          if (!reviews.length) { box.innerHTML = '<p class="ingest-muted">Nothing waiting. Releases Ingest can\'t file confidently will appear here.</p>'; return; }
-          box.innerHTML = reviews.map(function (r, n) {
+          if (!reviews.length) { box.innerHTML = '<p class="ig-empty">Nothing waiting. Releases Ingest can\'t file confidently will appear here.</p>'; return; }
+          box.innerHTML = reviews.slice(0, reviewLimit).map(function (r, n) {
+            var v = reviewView(r);
             var pending = r.Request && r.Request !== 'None';
-            var html = '<div class="ingest-card" data-id="' + esc(r.Id) + '">' +
-              '<h4>' + esc(r.Release) + '</h4>' +
-              '<div class="ingest-muted">' + esc(r.WatchFolder) + ' · ' + when(r.Time) + '</div>' +
-              '<ul class="ingest-reasons">' + (r.Items || []).map(function (i) {
-                return '<li>' + (i.Source !== r.Release ? '<span class="ingest-muted">' + esc(i.Source) + ':</span> ' : '') + esc(i.Reason) + '</li>';
-              }).join('') + '</ul>';
+            var html = '<div class="ingest-card ig-tone-warn" data-id="' + esc(r.Id) + '">' + headHtml(v, r.Time, 'ago') + '<div class="ig-body">';
             if (r.RetryAt) {
-              html += '<p class="ingest-muted">Trying again automatically at ' + when(r.RetryAt) + '. You can still decide now.</p>';
+              html += '<p class="ingest-muted">Trying again by itself <time datetime="' + esc(r.RetryAt) + '" data-mode="until" title="' + esc(exact(r.RetryAt)) + '">' + esc(until(r.RetryAt)) + '</time>. You can still decide now.</p>';
             }
             if (r.Chosen) {
               html += '<div class="ingest-chosen">Chosen: <strong>' + title(r.Chosen.Candidate) + '</strong> into <strong>' + esc(libraryFor(r.Chosen.Target.Root)) + '</strong> &nbsp;' + links(r.Chosen.Candidate.ProviderIds, r.Chosen.Candidate.IsSeries) +
                 (isDryRun(r.WatchFolder) ? '<div class="ingest-muted">Dry run is on, so it has only been planned (see Recent activity). It will be filed once dry run is off.</div>' : '') + '</div>';
             }
             if (pending) {
-              return html + '<p class="ingest-muted">' + (r.Request === 'Quarantine' ? 'Quarantining' : r.Request === 'Replace' ? 'Replacing what\'s on the server in ' + esc(replacingIn(r)) : 'Planning again') + ' on the next sweep (within 30 seconds)…</p></div>';
+              return html + '<p class="ingest-muted">On the next sweep (within 30 seconds)…</p></div>' + moreHtml('rv:' + r.Id, 'Details', '', v.Details) + '</div>';
             }
-            html += pickTable(r, r.Candidates || [], 'suggested');
+            var cands = r.Candidates || [];
             var sr = searchResults[r.Id];
+            html += pickTable(r, cands, 'suggested');
             if ((r.SearchResults || []).length) { html += pickTable(r, r.SearchResults, 'search'); }
             else if (sr) { html += '<p class="ingest-muted">No results for “' + esc(sr.q) + '”.</p>'; }
-            var guessTv = (r.Candidates || []).length ? !!r.Candidates[0].Candidate.IsSeries : !!(libById(defaultLibrary(r.WatchFolder, true)) && !defaultLibrary(r.WatchFolder, false));
-            html += '<details class="ingest-search"' + (sr || !(r.Candidates || []).length ? ' open' : '') + '><summary>Search for a different title</summary>' +
-              '<form><label class="ingest-visually-hidden" for="ingest-q-' + esc(r.Id) + '">Title to search for</label><input id="ingest-q-' + esc(r.Id) + '" name="q" type="text" placeholder="Title" value="' + esc(sr ? sr.q : '') + '" required />' +
-              '<label class="ingest-visually-hidden" for="ingest-y-' + esc(r.Id) + '">Year (optional)</label><input id="ingest-y-' + esc(r.Id) + '" name="y" type="number" min="1880" max="2100" placeholder="Year" value="' + esc(sr ? sr.y : '') + '" />' +
-              '<label class="ingest-visually-hidden" for="ingest-k-' + esc(r.Id) + '">Film or show</label><select id="ingest-k-' + esc(r.Id) + '" name="k"><option value="film"' + ((sr ? sr.k === 'film' : !guessTv) ? ' selected' : '') + '>Film</option><option value="tv"' + ((sr ? sr.k === 'tv' : guessTv) ? ' selected' : '') + '>Show</option></select>' +
-              '<button is="emby-button" type="submit" class="raised button-alt"><span>Search</span></button></form></details>';
-            html += '<div class="ingest-actions">' +
-              '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>' + (r.Chosen ? 'Clear choice and retry' : 'Retry') + '</span></button>' +
-              (canReplace(r) ? '<button is="emby-button" type="button" class="raised button-submit ingest-replace"><span>' + (confirmReplace[r.Id] ? 'Confirm: replace ' + existingCount(r) + ' file' + (existingCount(r) === 1 ? '' : 's') + ' on the server' : 'Replace existing copies') + '</span></button>' : '') +
-              '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>' +
-              '</div>' + (canReplace(r) ? '<p class="ingest-muted">Replacing ' + existingCount(r) + ' file' + (existingCount(r) === 1 ? '' : 's') + ' in ' + esc(replacingIn(r)) + '. The new copy is filed where the old one is, unless you chose a library above.</p>' : '') + perFile(r, n);
+            // With nothing to pick from, searching is the main way forward
+            var searchUpFront = !cands.length || !!sr;
+            if (searchUpFront) { html += searchForm(r, true); }
+            if (canReplace(r)) {
+              var ec = existingCount(r);
+              html += '<div class="ig-actions" style="margin-left:0"><button is="emby-button" type="button" class="raised button-submit ingest-replace"><span>' + (confirmReplace[r.Id] ? 'Confirm: replace ' + ec + ' file' + (ec === 1 ? '' : 's') + ' on the server' : 'Replace existing copies') + '</span></button>' +
+                '<span class="ingest-muted">Replaces ' + ec + ' file' + (ec === 1 ? '' : 's') + ' in ' + esc(replacingIn(r)) + '; the old copies go to quarantine.</span></div>';
+            }
+            html += perFile(r, n) + '</div>';
+            var secondary = '<button is="emby-button" type="button" class="raised button-alt ingest-retry"><span>' + (r.Chosen ? 'Clear choice and retry' : 'Retry') + '</span></button>' +
+              '<button is="emby-button" type="button" class="raised button-cancel ingest-quarantine"><span>' + (confirmQuarantine[r.Id] ? 'Confirm: quarantine whole release' : 'Quarantine release') + '</span></button>';
+            html += moreHtml('rv:' + r.Id, 'More options and details', (searchUpFront ? '' : searchForm(r, false)) + secondary, v.Details);
             return html + '</div>';
-          }).join('');
+          }).join('') + showMoreHtml('ReviewsMore', Math.min(reviewLimit, reviews.length), reviews.length);
         }
 
         // ---- Waiting (ING-36) ----
-        var waiting = [], working = null;
-        function minutesFromNow(iso) { return Math.max(0, Math.round((new Date(iso) - new Date()) / 60000)); }
+        var waiting = [], working = null, waitingViews = {}, workingView = null;
+        var waitingLimit = 10;
         function renderWaiting() {
           var shown = waiting.filter(function (w) { return !working || w.Id !== working.Id; });
           page.querySelector('#WaitingBox').hidden = !shown.length && !working;
           page.querySelector('#WaitingCount').textContent = shown.length ? '(' + shown.length + ')' : '';
           var items = [];
           if (working) {
-            items.push('<li><div class="what"><strong>' + esc(working.Release) + '</strong><div class="ingest-muted">' + esc(working.WatchFolder) + '</div></div><span>' +
-              (working.Stage === 'Filing' && working.Files ? 'Filing file ' + working.File + ' of ' + working.Files + '…' : 'Identifying…') + '</span></li>');
+            var wv = workingView || { Key: working.Id, Headline: working.Release, Summary: 'Working on it…', Icon: '⚙️', StatusLabel: 'Working on it now', Tone: 'info', Details: [] };
+            items.push(rowHtml(wv, { time: working.Since, mode: 'ago' }));
           }
-          shown.forEach(function (w) {
-            var state, button = '';
-            if (!w.SettlesAt) { state = 'Still downloading (in-progress files such as .part are in it)'; }
-            else if (w.ProcessNow) { state = 'Processing on the next sweep…'; }
+          shown.slice(0, waitingLimit).forEach(function (w) {
+            var v = waitingViews[w.Id] || { Key: w.Id, Headline: w.Release, Summary: '', Icon: '⏳', StatusLabel: 'Waiting', Tone: 'info', Details: [] };
+            var sentence, button = '';
+            if (!w.SettlesAt) { sentence = 'Still downloading (in-progress files such as .part are in it).'; }
+            else if (w.ProcessNow) { sentence = 'Processing on the next sweep…'; }
+            else if (new Date(w.SettlesAt) <= new Date()) { sentence = 'Settled; processing on the next sweep.'; }
             else {
-              var m = minutesFromNow(w.SettlesAt);
-              state = m < 1 ? 'Settled; processing on the next sweep' : 'Settles at ' + when(w.SettlesAt) + ' (in about ' + m + ' min) if nothing changes';
+              sentence = 'Settles <time datetime="' + esc(w.SettlesAt) + '" data-mode="until" title="' + esc(exact(w.SettlesAt)) + '">' + esc(until(w.SettlesAt)) + '</time> if nothing changes.';
               button = '<button is="emby-button" type="button" class="raised button-alt ingest-process-now" data-id="' + esc(w.Id) + '"><span>Process now</span></button>';
             }
-            items.push('<li><div class="what"><strong>' + esc(w.Release) + '</strong><div class="ingest-muted">' + esc(w.WatchFolder) + ' · ' + esc(state) + '</div></div>' + button + '</li>');
+            items.push(rowHtml(v, { sentence: sentence, actions: button }));
           });
-          page.querySelector('#Waiting').innerHTML = items.join('');
+          page.querySelector('#Waiting').innerHTML = items.join('') + (shown.length > waitingLimit ? '<li>' + showMoreHtml('WaitingMore', waitingLimit, shown.length) + '</li>' : '');
         }
 
-        // ---- Recent activity ----
+        // ---- Recent activity (paged on the server) ----
+        var activityPage = { Items: [], Total: 0, StatusCounts: {} };
+        var activityLimit = PAGE;
         function renderActivity() {
-          page.querySelector('#ActivityFilters').innerHTML = filters.map(function (f) {
-            var n = f[0] === 'All' ? activity.length : activity.filter(function (a) { return a.Status === f[0]; }).length;
-            return '<button type="button" data-f="' + f[0] + '" aria-pressed="' + (filter === f[0]) + '">' + f[1] + ' <span class="ingest-muted">' + n + '</span></button>';
+          var counts = activityPage.StatusCounts || {};
+          page.querySelector('#ActivityFilters').innerHTML = filters.filter(function (f) { return f[0] === 'All' || f[0] === filter || counts[f[0]]; }).map(function (f) {
+            return '<button type="button" data-f="' + f[0] + '" aria-pressed="' + (filter === f[0]) + '">' + f[1] + ' <span class="ingest-muted">' + (counts[f[0]] || 0) + '</span></button>';
           }).join('');
-          var shown = activity.filter(function (a) { return filter === 'All' || a.Status === filter; });
           var list = page.querySelector('#Activity');
-          if (!shown.length) { list.innerHTML = '<li><span class="what ingest-muted">No activity yet.</span></li>'; return; }
-          list.innerHTML = shown.map(function (a, i) {
-            var details = (a.Details || []);
-            return '<li data-k="' + esc(a.Time + a.Release) + '"><span class="when">' + when(a.Time) + '</span><div class="what">' +
-              '<span class="badge ' + esc(a.Status) + '">' + esc(labels[a.Status] || a.Status) + '</span>' + (a.UndoneAt ? '<span class="badge Undone">Undone</span>' : '') + '<strong>' + esc(a.Release) + '</strong>' +
-              '<div>' + esc(a.Summary) + '</div>' + undoButton(a) +
-              (details.length ? '<details><summary>' + details.length + ' detail' + (details.length === 1 ? '' : 's') + '</summary><ul>' + details.map(function (d) { return '<li>' + esc(d) + '</li>'; }).join('') + '</ul></details>' : '') +
-              '</div></li>';
-          }).join('');
+          var items = activityPage.Items || [];
+          if (!items.length) { list.innerHTML = '<li class="ig-empty">No activity yet.</li>'; return; }
+          list.innerHTML = items.map(function (a) {
+            var v = a.Item;
+            return rowHtml(v, { time: a.Time, mode: 'ago', actions: undoButton(a) });
+          }).join('') + (activityPage.Total > items.length ? '<li>' + showMoreHtml('ActivityMore', items.length, activityPage.Total) + '</li>' : '');
         }
 
-        // A filing can be undone while the action log still holds its moves (90 days)
+        // A filing can be undone while the action log still holds its moves (90 days); the server says whether it can
         function undoButton(a) {
-          if (a.Status !== 'Filed' || !a.Run || a.UndoneAt || new Date() - new Date(a.Time) > 90 * 86400000) { return ''; }
-          if (queued.some(function (q) { return q.Kind === 'Undo' && q.Run === a.Run; })) { return '<div class="ingest-muted">Undoing on the next sweep…</div>'; }
+          if (!a.CanUndo) { return ''; }
+          if (queued.some(function (q) { return q.Kind === 'Undo' && q.Run === a.Run; })) { return '<span class="ingest-muted">Undoing on the next sweep…</span>'; }
           return '<button is="emby-button" type="button" class="raised button-cancel ingest-undo" data-run="' + esc(a.Run) + '"><span>' + (confirmUndo[a.Run] ? 'Confirm: undo this filing' : 'Undo') + '</span></button>';
+        }
+
+        function loadActivity() {
+          return ApiClient.getJSON(ApiClient.getUrl('Ingest/Activity', { status: filter, offset: 0, limit: activityLimit })).then(function (p) {
+            activityPage = p || { Items: [], Total: 0, StatusCounts: {} };
+            renderActivity();
+          });
         }
 
         function loadStatus() {
           // don't redraw under someone typing in a search box
           var active = document.activeElement;
           if (active && page.contains(active) && active.closest('.ingest-search')) { return Promise.resolve(); }
-          return ApiClient.getJSON(ApiClient.getUrl('Ingest/Status', { limit: 150 })).then(function (s) {
-            var open = Array.prototype.map.call(page.querySelectorAll('#Activity details[open]'), function (d) { return d.closest('li').getAttribute('data-k'); });
-            activity = s.Activity || [];
+          return Promise.all([ApiClient.getJSON(ApiClient.getUrl('Ingest/Status', { limit: 0 })), loadActivity()]).then(function (res) {
+            var s = res[0];
             reviews = s.Reviews || [];
+            reviewViews = s.ReviewViews || {};
             waiting = s.Waiting || [];
+            waitingViews = s.WaitingViews || {};
             working = s.Working || null;
+            workingView = s.WorkingView || null;
             queued = s.Queued || [];
             paused = !!s.Paused;
             page.querySelector('#PausedBanner').hidden = !paused;
@@ -600,63 +763,66 @@
             renderWaiting();
             renderReviews();
             renderActivity();
-            open.forEach(function (k) {
-              var li = Array.prototype.filter.call(page.querySelectorAll('#Activity > li'), function (x) { return x.getAttribute('data-k') === k; })[0];
-              var d = li && li.querySelector('details');
-              if (d) { d.open = true; }
-            });
           });
         }
 
-        // ---- Quarantine ----
-        function size(b) {
-          var u = ['bytes', 'KB', 'MB', 'GB', 'TB'], i = 0;
-          while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
-          return (i ? b.toFixed(b < 10 ? 1 : 0) : b) + ' ' + u[i];
-        }
+        // ---- Quarantine (paged on the server) ----
+        var quarantinePage = { Items: [], Total: 0, Days: [] };
+        var quarantineLimit = PAGE;
 
         function day(ymd) {
           var p = String(ymd).split('-');
-          return new Date(+p[0], +p[1] - 1, +p[2]).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+          return new Date(+p[0], +p[1] - 1, +p[2]);
         }
 
         function plural(n, one) { return n + ' ' + one + (n === 1 ? '' : 's'); }
 
-        function renderQuarantine(folders) {
-          var box = page.querySelector('#Quarantine');
-          var open = Array.prototype.map.call(box.querySelectorAll('details[open]'), function (d) { return d.getAttribute('data-k'); });
-          var roots = folders.map(function (f) { return f.Root; }).filter(function (r, i, a) { return a.indexOf(r) === i; });
-          var files = 0, bytes = 0;
-          folders.forEach(function (f) { files += f.FileCount; bytes += f.Bytes; });
-          page.querySelector('#QuarantineCount').textContent = folders.length ? '(' + plural(files, 'file') + ', ' + size(bytes) + ')' : '';
-          if (!folders.length) { box.innerHTML = '<p class="ingest-muted">Nothing in quarantine.</p>'; return; }
-          box.innerHTML = folders.map(function (f) {
-            var fate = f.Managed ? 'deleted on ' + day(f.DeletesOn) : 'not created by Ingest, so never deleted';
-            var fk = f.Root + '|' + (f.Folder || f.Date) + '|';
-            var attrs = ' data-root="' + esc(f.Root) + '" data-folder="' + esc(f.Folder || f.Date) + '"';
-            return '<div class="ingest-q"><h4><span>' + esc(day(f.Date)) + (f.Folder && f.Folder !== f.Date ? ' <span class="ingest-muted">' + esc(f.Folder) + '</span>' : '') + '</span><span class="ingest-muted">' + plural(f.FileCount, 'file') + ', ' + size(f.Bytes) + ', ' + esc(fate) + '</span>' +
-              (f.Managed ? '<button is="emby-button" type="button" class="raised button-cancel ingest-qdelete"' + attrs + ' data-name=""><span>' + (confirmDelete[fk] ? 'Confirm: delete this day now' : 'Delete now') + '</span></button>' : '') + '</h4>' +
-              (roots.length > 1 ? '<div class="ingest-muted">' + esc(f.Root) + '</div>' : '') +
-              f.Releases.map(function (r) {
-                var k = f.Root + '|' + (f.Folder || f.Date) + '|' + r.Name;
-                var more = r.FileCount - r.Files.length;
-                var ra = attrs + ' data-name="' + esc(r.Name) + '"';
-                var restoring = queued.some(function (q) { return q.Kind === 'Restore' && q.Root === f.Root && q.Folder === (f.Folder || f.Date) && q.Name === r.Name; });
-                var actions = !f.Managed ? '' : restoring ? '<span class="ingest-muted">Restoring on the next sweep…</span>'
-                  : '<button is="emby-button" type="button" class="raised button-alt ingest-qrestore"' + ra + '><span>Restore</span></button>' +
-                    '<button is="emby-button" type="button" class="raised button-cancel ingest-qdelete"' + ra + '><span>' + (confirmDelete[k] ? 'Confirm: delete now' : 'Delete now') + '</span></button>';
-                return '<div class="ingest-qr"><details data-k="' + esc(k) + '"><summary>' + esc(r.Name) + ' <span class="ingest-muted">' + plural(r.FileCount, 'file') + ', ' + size(r.Bytes) + '</span></summary><ul>' +
-                  r.Files.map(function (x) { return '<li><span>' + esc(x.Path) + '</span><span class="size">' + size(x.Bytes) + '</span></li>'; }).join('') +
-                  (more > 0 ? '<li class="ingest-muted"><span>and ' + plural(more, 'more file') + '</span></li>' : '') + '</ul></details><div class="ingest-qactions">' + actions + '</div></div>';
-              }).join('') + '</div>';
-          }).join('');
-          Array.prototype.forEach.call(box.querySelectorAll('details'), function (d) { if (open.indexOf(d.getAttribute('data-k')) >= 0) { d.open = true; } });
+        function dayHeading(d) {
+          var date = day(d.Date);
+          var label = dayDiff(new Date(), date) === 0 ? 'Today' : dayDiff(new Date(), date) === 1 ? 'Yesterday' : date.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+          var fate = d.Managed ? 'deleted ' + until(day(d.DeletesOn).toISOString()) : 'not created by Ingest, so never deleted';
+          var fk = d.Root + '|' + d.Folder + '|';
+          var roots = (quarantinePage.Days || []).map(function (x) { return x.Root; }).filter(function (r, i, a) { return a.indexOf(r) === i; });
+          return '<div class="ig-day"><span><strong title="' + esc(d.Folder) + '">' + esc(label) + '</strong> <span class="ingest-muted">' + plural(d.Releases, 'release') + ', ' + esc(d.Size) + ' · ' + esc(fate) + '</span>' +
+            (roots.length > 1 ? '<div class="ingest-muted">' + esc(d.Root) + '</div>' : '') + '</span>' +
+            (d.Managed ? '<button is="emby-button" type="button" class="raised button-cancel ingest-qdelete" data-root="' + esc(d.Root) + '" data-folder="' + esc(d.Folder) + '" data-name=""><span>' + (confirmDelete[fk] ? 'Confirm: delete this day now' : 'Delete day now') + '</span></button>' : '') + '</div>';
         }
 
-        var lastQuarantine = [];
+        function renderQuarantine() {
+          var box = page.querySelector('#Quarantine');
+          var p = quarantinePage;
+          page.querySelector('#QuarantineCount').textContent = p.Total ? '(' + plural(p.Total, 'release') + ', ' + plural(p.FileCount, 'file') + ', ' + p.Size + ')' : '(empty)';
+          if (!p.Items.length) { box.innerHTML = '<p class="ig-empty">Nothing in quarantine.</p>'; return; }
+          var days = {};
+          (p.Days || []).forEach(function (d) { days[d.Root + '|' + d.Folder] = d; });
+          var html = '', open = false, last = null;
+          p.Items.forEach(function (q) {
+            var dk = q.Root + '|' + q.Folder;
+            if (dk !== last) {
+              if (open) { html += '</ul>'; }
+              html += days[dk] ? dayHeading(days[dk]) : '';
+              html += '<ul class="ig-list">';
+              open = true;
+              last = dk;
+            }
+            var restoring = queued.some(function (x) { return x.Kind === 'Restore' && x.Root === q.Root && x.Folder === q.Folder && x.Name === q.Name; });
+            var attrs = ' data-root="' + esc(q.Root) + '" data-folder="' + esc(q.Folder) + '" data-name="' + esc(q.Name) + '"';
+            var k = q.Root + '|' + q.Folder + '|' + q.Name;
+            var primary = !q.Managed ? '' : restoring ? '<span class="ingest-muted">Restoring on the next sweep…</span>'
+              : '<button is="emby-button" type="button" class="raised button-alt ingest-qrestore"' + attrs + '><span>Restore</span></button>';
+            var secondary = q.Managed && !restoring ? '<button is="emby-button" type="button" class="raised button-cancel ingest-qdelete"' + attrs + '><span>' + (confirmDelete[k] ? 'Confirm: delete now' : 'Delete now') + '</span></button>' : '';
+            html += rowHtml(q.Item, { actions: primary, more: secondary });
+          });
+          if (open) { html += '</ul>'; }
+          box.innerHTML = html + showMoreHtml('QuarantineMore', p.Items.length, p.Total);
+        }
+
         function loadQuarantine() {
-          return ApiClient.getJSON(ApiClient.getUrl('Ingest/Quarantine')).then(function (f) { lastQuarantine = f || []; renderQuarantine(lastQuarantine); }, function () {
-            page.querySelector('#Quarantine').innerHTML = '<p class="ingest-muted">The quarantine couldn\'t be read.</p>';
+          return ApiClient.getJSON(ApiClient.getUrl('Ingest/Quarantine/Page', { offset: 0, limit: quarantineLimit })).then(function (p) {
+            quarantinePage = p || { Items: [], Total: 0, Days: [] };
+            renderQuarantine();
+          }, function () {
+            page.querySelector('#Quarantine').innerHTML = '<p class="ig-empty">The quarantine couldn\'t be read.</p>';
           });
         }
 
@@ -685,6 +851,7 @@
         function reviewById(id) { return reviews.filter(function (r) { return r.Id === id; })[0]; }
 
         page.querySelector('#Reviews').addEventListener('click', function (e) {
+          if (e.target.closest('#ReviewsMore')) { reviewLimit += 10; renderReviews(); return; }
           var card = e.target.closest('.ingest-card');
           if (!card) { return; }
           var id = card.getAttribute('data-id');
@@ -780,6 +947,7 @@
         });
 
         page.querySelector('#Waiting').addEventListener('click', function (e) {
+          if (e.target.closest('#WaitingMore')) { waitingLimit += 10; renderWaiting(); return; }
           var b = e.target.closest('.ingest-process-now');
           if (!b) { return; }
           b.disabled = true;
@@ -788,6 +956,7 @@
         });
 
         page.querySelector('#Activity').addEventListener('click', function (e) {
+          if (e.target.closest('#ActivityMore')) { activityLimit += PAGE; loadActivity(); return; }
           var b = e.target.closest('.ingest-undo');
           if (!b) { return; }
           var run = b.getAttribute('data-run');
@@ -799,6 +968,7 @@
         });
 
         page.querySelector('#Quarantine').addEventListener('click', function (e) {
+          if (e.target.closest('#QuarantineMore')) { quarantineLimit += PAGE; loadQuarantine(); return; }
           var b = e.target.closest('.ingest-qrestore, .ingest-qdelete');
           if (!b) { return; }
           var body = { Root: b.getAttribute('data-root'), Folder: b.getAttribute('data-folder'), Name: b.getAttribute('data-name') };
@@ -821,11 +991,14 @@
 
         page.querySelector('#ActivityFilters').addEventListener('click', function (e) {
           var b = e.target.closest('button');
-          if (b) { filter = b.getAttribute('data-f'); renderActivity(); }
+          if (b) { filter = b.getAttribute('data-f'); activityLimit = PAGE; loadActivity(); }
         });
         page.querySelector('#RefreshStatus').addEventListener('click', function () { if (document.activeElement) { document.activeElement.blur(); } loadStatus(); loadQuarantine(); });
 
-        page.addEventListener('pagehide', function () { if (statusTimer) { clearInterval(statusTimer); statusTimer = null; } });
+        page.addEventListener('pagehide', function () {
+          if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+          if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+        });
 
         // ---- load / save ----
         page.addEventListener('pageshow', function () {
@@ -849,6 +1022,7 @@
             loadStatus();
             loadQuarantine();
             if (!statusTimer) { statusTimer = setInterval(function () { if (!document.hidden && !busyCard && !page.querySelector('#Reviews').contains(document.activeElement)) { loadStatus(); } }, 15000); }
+            if (!tickTimer) { tickTimer = setInterval(tickTimes, 30000); }
           });
         });
 
@@ -856,8 +1030,16 @@
 
         page.querySelector('#GoToSetup').addEventListener('click', function (e) {
           e.preventDefault();
+          page.querySelector('#WatchFoldersSection').open = true;
           page.querySelector('#WatchFoldersHead').scrollIntoView({ behavior: 'smooth' });
         });
+
+        // Opens the settings group holding a field with a problem, and scrolls to it
+        function reveal(el) {
+          var sec = el.closest('details');
+          if (sec) { sec.open = true; }
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
 
         // Reads the rows back, checking each one; returns null (with the problems shown on the rows) if any is invalid.
         function readRows() {
@@ -891,7 +1073,7 @@
           if (!folders) {
             Dashboard.alert('Ingest needs at least one watch folder with at least one destination library. Fix the highlighted folders, then save.');
             var bad = page.querySelector('.ingest-row.invalid') || page.querySelector('.ingest-row');
-            if (bad) { bad.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+            if (bad) { reveal(bad); }
             return false;
           }
 
@@ -919,7 +1101,7 @@
               Dashboard.hideLoadingMsg();
               Dashboard.alert('Some folders aren\'t safe to use. Fix the highlighted settings, then save.');
               var bad = page.querySelector('.ingest-row.invalid') || qError;
-              if (bad) { bad.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+              if (bad) { reveal(bad); }
               return;
             }
 

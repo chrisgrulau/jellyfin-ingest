@@ -136,7 +136,48 @@ public sealed class ActivityReport
                 + (plan.Skipped.Count > 0 ? string.Create(CultureInfo.InvariantCulture, $" {plan.Skipped.Count} file(s) quarantined as chosen, not filed.") : string.Empty)
                 + (plan.Notes.Count > 0 ? " The AI plugin decided part of this (see the details)." : string.Empty),
             Details = [.. plan.Notes, .. plan.ReplacementNotes, .. plan.Replacing.Select(p => "Replaced (moved to quarantine): " + p), .. plan.Skipped.Select(p => "Quarantined as chosen: " + Path.GetRelativePath(watchFolder, p)), .. Describe(watchFolder, completed)],
+            Counts = CountOf(plan, completed),
+            Videos = VideosOf(completed),
         };
+    }
+
+    /// <summary>
+    /// Counts what a plan's completed operations moved, by kind: replaced copies and files set aside by a person's
+    /// choice are told apart from the release's clutter by their sources.
+    /// </summary>
+    /// <param name="plan">The plan.</param>
+    /// <param name="completed">The operations completed.</param>
+    /// <returns>The counts.</returns>
+    public static ActivityCounts CountOf(IngestPlan plan, IReadOnlyCollection<PlannedOperation> completed)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(completed);
+        var replacing = plan.Replacing.ToHashSet(StringComparer.Ordinal);
+        var skipped = plan.Skipped.ToHashSet(StringComparer.Ordinal);
+        var quarantined = completed.Where(o => o.Kind == OperationKind.Quarantine).ToList();
+        var replaced = quarantined.Count(o => replacing.Contains(o.Source));
+        var setAside = quarantined.Count(o => skipped.Contains(o.Source));
+        return new ActivityCounts
+        {
+            Videos = completed.Count(o => o.Kind == OperationKind.Video),
+            Subtitles = completed.Count(o => o.Kind == OperationKind.Subtitle),
+            Extras = completed.Count(o => o.Kind == OperationKind.Extra),
+            Replaced = replaced,
+            SetAside = setAside,
+            Clutter = quarantined.Count - replaced - setAside,
+        };
+    }
+
+    /// <summary>
+    /// Where the videos among some operations go (at most <see cref="IngestStateStore.MaxDetails"/>).
+    /// </summary>
+    /// <param name="operations">The operations.</param>
+    /// <returns>The destinations, or <c>null</c> when there are no videos.</returns>
+    public static IReadOnlyList<string>? VideosOf(IEnumerable<PlannedOperation> operations)
+    {
+        ArgumentNullException.ThrowIfNull(operations);
+        List<string> videos = [.. operations.Where(o => o.Kind == OperationKind.Video).Select(o => o.Destination).Take(IngestStateStore.MaxDetails)];
+        return videos.Count == 0 ? null : videos;
     }
 
     /// <summary>

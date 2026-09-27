@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Ingest.Identification;
 using Jellyfin.Plugin.Ingest.Planning;
+using Jellyfin.Plugin.Ingest.Presentation;
 using Jellyfin.Plugin.Ingest.Quarantine;
 using Jellyfin.Plugin.Ingest.Service;
 using MediaBrowser.Common.Configuration;
@@ -60,25 +61,45 @@ public class IngestController : ControllerBase
     }
 
     /// <summary>
-    /// Gets pending reviews, recent activity, releases waiting to settle and the release being worked on.
+    /// Gets pending reviews, recent activity, releases waiting to settle and the release being worked on, with how the
+    /// page shows each review and waiting release.
     /// </summary>
-    /// <param name="limit">Maximum activity entries to return.</param>
+    /// <param name="limit">Maximum activity entries to return (0 for none: the page pages them through <see cref="GetActivity"/>).</param>
     /// <returns>The dashboard state.</returns>
     [HttpGet("Status")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<IngestState> GetStatus([FromQuery] int limit = 100)
     {
         var s = _state.Snapshot();
+        var waiting = _progress.Waiting();
+        var working = _progress.Working;
+        var presenter = Presenter();
         return new IngestState
         {
             Reviews = [.. s.Reviews.OrderByDescending(r => r.Time)],
-            Activity = [.. s.Activity.Take(Math.Clamp(limit, 1, IngestStateStore.MaxActivity))],
-            Waiting = _progress.Waiting(),
-            Working = _progress.Working,
+            Activity = [.. s.Activity.Take(Math.Clamp(limit, 0, IngestStateStore.MaxActivity))],
+            Waiting = waiting,
+            Working = working,
             Paused = s.Paused,
             Queued = _progress.Queued(),
+            ReviewViews = s.Reviews.ToDictionary(r => r.Id, presenter.Review, StringComparer.Ordinal),
+            WaitingViews = waiting.GroupBy(w => w.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => IngestPresenter.Waiting(g.First()), StringComparer.Ordinal),
+            WorkingView = working is null ? null : IngestPresenter.Working(working),
         };
     }
+
+    /// <summary>
+    /// Gets a page of Recent activity, newest first, as the page shows it: a headline, a friendly sentence, icon chips
+    /// and the details for each entry.
+    /// </summary>
+    /// <param name="status">Only entries with this status (<c>Filed</c>, <c>DryRun</c> …); <c>All</c> or empty for all.</param>
+    /// <param name="offset">Entries to skip.</param>
+    /// <param name="limit">Entries to return (1 to 300).</param>
+    /// <returns>The page, with how many entries there are of each status.</returns>
+    [HttpGet("Activity")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<ActivityPage> GetActivity([FromQuery] string? status, [FromQuery] int offset = 0, [FromQuery] int limit = Paging.DefaultLimit)
+        => Presenter().ActivityPage(_state.Snapshot().Activity, status, offset, limit, DateTimeOffset.UtcNow);
 
     /// <summary>
     /// Pauses Ingest: sweeps file and quarantine nothing until it is resumed (releases are still shown as waiting).
@@ -239,12 +260,26 @@ public class IngestController : ControllerBase
     /// <returns>The dated folders.</returns>
     [HttpGet("Quarantine")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<IReadOnlyList<QuarantineFolder>> GetQuarantine()
+    public ActionResult<IReadOnlyList<QuarantineFolder>> GetQuarantine() => Quarantined().ToList();
+
+    /// <summary>
+    /// Gets a page of what is in quarantine, as the page shows it: the quarantined releases across the dated folders,
+    /// newest day first, plus every dated folder's totals and when it is deleted.
+    /// </summary>
+    /// <param name="offset">Releases to skip.</param>
+    /// <param name="limit">Releases to return (1 to 300).</param>
+    /// <returns>The page.</returns>
+    [HttpGet("Quarantine/Page")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<QuarantinePage> GetQuarantinePage([FromQuery] int offset = 0, [FromQuery] int limit = Paging.DefaultLimit)
+        => IngestPresenter.QuarantinePage([.. Quarantined()], offset, limit);
+
+    private IEnumerable<QuarantineFolder> Quarantined()
     {
         var config = IngestPlugin.Instance?.Configuration;
         if (config is null)
         {
-            return new List<QuarantineFolder>();
+            return [];
         }
 
         var problems = FolderPolicy.FolderProblems(config, FolderPolicy.Libraries(_libraryManager.GetVirtualFolders()), _paths, _configuration);
@@ -252,9 +287,10 @@ public class IngestController : ControllerBase
         var today = DateOnly.FromDateTime(DateTime.Now);
         return FolderPolicy.SafeQuarantineRoots(config, problems)
             .SelectMany(root => QuarantineListing.List(root, today, retention))
-            .OrderByDescending(f => f.Date, StringComparer.Ordinal)
-            .ToList();
+            .OrderByDescending(f => f.Date, StringComparer.Ordinal);
     }
+
+    private IngestPresenter Presenter() => new(FolderPolicy.Libraries(_libraryManager.GetVirtualFolders()));
 
     /// <summary>
     /// Checks proposed watch and quarantine folders against the safety rules (used by the settings page before saving;
