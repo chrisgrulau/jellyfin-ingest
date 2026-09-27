@@ -14,6 +14,15 @@ All notable changes to this project are documented here. The format follows
   ♻️ replaced, 🤖 AI helped, ⚠️ needs attention, ↩️ put back). Release names, paths, scores, candidates and the AI's
   reasoning are in each row's expandable details. The wording and icons are worked out on the server
   (`Presentation.IngestPresenter`), so every list reads the same.
+- Lists show a first page (15 rows; 10 reviews or waiting releases) with **Show more**; *Recent activity* and
+  *Quarantine* are paged on the server, and the activity filters only offer statuses that occur. Times read "5 minutes
+  ago", "yesterday", "2 days ago" (then a short date), with the exact date and time on hover; a waiting release
+  "settles in 4 minutes".
+- Primary actions stay on the row (Use this, Replace existing copies, Undo, Restore, Process now); the rest (search,
+  retry, quarantine a release, delete now) are in the row's expandable part. *Quarantine* is grouped by day and folded
+  away until opened.
+- Settings are grouped into collapsible sections (Watch folders and Processing open; Quarantine, AI help and
+  Notifications folded), a section with a problem opens when saving, and rows become stacked cards on narrow screens.
 - New filings and quarantines record how many files of each kind they moved and where the videos went, for those
   icons; older entries are read from their details.
 - API: `GET Ingest/Activity?status=&offset=&limit=` and `GET Ingest/Quarantine/Page?offset=&limit=` return a page of
