@@ -90,6 +90,8 @@
       #IngestConfigPage details.ig-more > summary::before { content: '▸ '; display: inline-block; transition: transform .15s; }
       #IngestConfigPage details.ig-more[open] > summary::before { transform: rotate(90deg); }
       #IngestConfigPage .ig-more-actions { display: flex; flex-wrap: wrap; gap: .5em; margin: .5em 0; }
+      #IngestConfigPage .ingest-move { display: flex; flex-wrap: wrap; align-items: center; gap: .5em; }
+      #IngestConfigPage .ingest-move .ingest-muted { flex-basis: 100%; }
       #IngestConfigPage .ig-nerd { margin: .5em 0 .25em; padding: .6em .8em; border-radius: 4px; border: 1px solid var(--ig-line); font-size: .9em; }
       #IngestConfigPage .ig-nerd h5 { margin: .5em 0 .2em; font-size: .78em; letter-spacing: .06em; text-transform: uppercase; opacity: var(--ig-muted); }
       #IngestConfigPage .ig-nerd h5:first-child { margin-top: 0; }
@@ -669,7 +671,7 @@
 
         // The library picked in a card, kept across the automatic refresh (ING-27)
         var libChoice = {};
-        var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Decision', 'Decisions'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged'], ['Undone', 'Undone'], ['Restored', 'Restored'], ['ReviewRemoved', 'Review removed']];
+        var filters = [['All', 'All'], ['Filed', 'Filed'], ['DryRun', 'Dry run'], ['NeedsReview', 'Needs review'], ['Decision', 'Decisions'], ['Failed', 'Failed'], ['Quarantined', 'Quarantined'], ['Purged', 'Purged'], ['Undone', 'Undone'], ['Restored', 'Restored'], ['Moved', 'Moved'], ['ReviewRemoved', 'Review removed']];
         var SHOWN = 3;
 
         function links(ids, isTv) {
@@ -862,7 +864,8 @@
           if (!items.length) { list.innerHTML = '<li class="ig-empty">No activity yet.</li>'; return; }
           list.innerHTML = items.map(function (a) {
             var v = a.Item;
-            return rowHtml(v, { time: a.Time, mode: 'ago', actions: undoButton(a) });
+            var move = moveHtml(a);
+            return rowHtml(v, { time: a.Time, mode: 'ago', actions: undoButton(a), more: move, moreLabel: move ? 'More options and details' : '' });
           }).join('') + (activityPage.Total > items.length ? '<li>' + showMoreHtml('ActivityMore', items.length, activityPage.Total) + '</li>' : '');
         }
 
@@ -871,6 +874,44 @@
           if (!a.CanUndo) { return ''; }
           if (queued.some(function (q) { return q.Kind === 'Undo' && q.Run === a.Run; })) { return '<span class="ingest-muted">Undoing on the next sweep…</span>'; }
           return '<button is="emby-button" type="button" class="raised button-cancel ingest-undo" data-run="' + esc(a.Run) + '"><span>' + (confirmUndo[a.Run] ? 'Confirm: undo this filing' : 'Undo') + '</span></button>';
+        }
+
+        // "Move to another library…" for a filing whose library Ingest chose itself: a small picker of the libraries that
+        // can hold it (films: Movies or mixed; shows: Shows or mixed), then a confirmation. The sweep does the move.
+        var movePick = {};
+        function moveHtml(a) {
+          if (!a.CanMove || !a.Run) { return ''; }
+          if (queued.some(function (q) { return q.Kind === 'Move' && q.Run === a.Run; })) { return '<span class="ingest-muted">Moving to another library on the next sweep…</span>'; }
+          var m = movePick[a.Run];
+          var run = esc(a.Run);
+          if (!m) { return '<button is="emby-button" type="button" class="raised button-alt ingest-move-open" data-run="' + run + '"><span>Move to another library…</span></button>'; }
+          if (m.loading) { return '<span class="ingest-muted">Finding libraries that can hold it…</span>'; }
+          if (m.error) { return '<span class="ingest-muted">' + esc(m.error) + '</span> <button is="emby-button" type="button" class="raised button-alt ingest-move-cancel" data-run="' + run + '"><span>Close</span></button>'; }
+          var o = m.options;
+          var id = 'ingest-move-' + run;
+          var chosen = o.Targets.filter(function (t) { return t.LibraryId === m.choice; })[0] || o.Targets[0];
+          return '<div class="ingest-move"><label for="' + id + '">Move from <strong>' + esc(o.From) + '</strong> to</label> ' +
+            '<select id="' + id + '" class="ingest-move-lib" data-run="' + run + '">' + o.Targets.map(function (t) {
+              return '<option value="' + esc(t.LibraryId) + '"' + (t === chosen ? ' selected' : '') + '>' + esc(t.Name) + (o.ShowFolders ? ' — ' + esc(t.Folder) : '') + '</option>';
+            }).join('') + '</select>' +
+            '<div class="ingest-muted">' + (chosen.HasTitle ? (o.IsSeries ? 'This show is already there; its files join that folder.' : 'A folder for this film is already there; its files join it.') : 'Every file it filed (videos, subtitles, extras) moves, keeping its folder layout.') +
+            ' Jellyfin sees the moved ' + (o.IsSeries ? 'episodes' : 'film') + ' as new, so watched state and resume points may not carry over.</div>' +
+            '<button is="emby-button" type="button" class="raised button-submit ingest-move-go" data-run="' + run + '"><span>Confirm: move to ' + esc(chosen.Name) + '</span></button>' +
+            '<button is="emby-button" type="button" class="raised button-alt ingest-move-cancel" data-run="' + run + '"><span>Cancel</span></button></div>';
+        }
+        function openMove(run) {
+          movePick[run] = { loading: true };
+          renderActivity();
+          ApiClient.getJSON(ApiClient.getUrl('Ingest/Activity/' + encodeURIComponent(run) + '/MoveTargets')).then(function (o) {
+            movePick[run] = { options: o, choice: o.Targets.length ? o.Targets[0].LibraryId : '' };
+            renderActivity();
+          }, function (r) {
+            var p = r && r.text ? r.text() : Promise.resolve('');
+            return p.then(function (t) {
+              movePick[run] = { error: t && t.length < 300 ? t.replace(/^"|"$/g, '') : 'It can\'t be moved now.' };
+              renderActivity();
+            });
+          });
         }
 
         function loadActivity() {
@@ -1126,6 +1167,18 @@
 
         page.querySelector('#Activity').addEventListener('click', function (e) {
           if (e.target.closest('#ActivityMore')) { activityLimit += PAGE; loadActivity(); return; }
+          var mv = e.target.closest('.ingest-move-open, .ingest-move-go, .ingest-move-cancel');
+          if (mv) {
+            var mr = mv.getAttribute('data-run');
+            if (mv.classList.contains('ingest-move-open')) { openMove(mr); return; }
+            if (mv.classList.contains('ingest-move-cancel')) { delete movePick[mr]; renderActivity(); return; }
+            var pick = movePick[mr];
+            if (!pick || !pick.options) { return; }
+            mv.disabled = true;
+            delete movePick[mr];
+            post('Ingest/Activity/' + encodeURIComponent(mr) + '/Move', { LibraryId: pick.choice }).then(function () { setTimeout(loadStatus, 5000); });
+            return;
+          }
           var b = e.target.closest('.ingest-undo');
           if (!b) { return; }
           var run = b.getAttribute('data-run');
@@ -1133,6 +1186,18 @@
           if (!confirmUndo[run]) { confirmUndo[run] = true; b.querySelector('span').textContent = 'Confirm: undo this filing'; return; }
           delete confirmUndo[run];
           post('Ingest/Activity/' + encodeURIComponent(run) + '/Undo', null, b, 'Undoing…').then(function () { setTimeout(loadStatus, 5000); });
+        });
+
+        page.querySelector('#Activity').addEventListener('change', function (e) {
+          var sel = e.target.closest('.ingest-move-lib');
+          if (!sel) { return; }
+          var pick = movePick[sel.getAttribute('data-run')];
+          if (!pick || !pick.options) { return; }
+          pick.choice = sel.value;
+          var id = sel.id;
+          renderActivity();
+          var again = page.querySelector('#' + id);
+          if (again) { again.focus(); }
         });
 
         page.querySelector('#Quarantine').addEventListener('click', function (e) {

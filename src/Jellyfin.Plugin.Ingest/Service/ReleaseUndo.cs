@@ -129,7 +129,8 @@ public sealed class ReleaseUndo
     /// Plans the undo of a filing. Nothing is changed.
     /// </summary>
     /// <param name="filing">The filing's activity entry.</param>
-    /// <param name="moves">The moves its run completed (<see cref="ActionLogLine.CompletedMoves"/>), in order.</param>
+    /// <param name="moves">The moves its run completed, followed to where a move to another library put the files
+    /// (<see cref="LibraryMove.FiledMoves"/>), in order.</param>
     /// <param name="scope">The folders as configured now.</param>
     /// <param name="fs">File-system access.</param>
     /// <param name="now">Current time.</param>
@@ -284,7 +285,7 @@ public sealed class ReleaseUndo
         var filing = _state.FindFiling(run);
         return filing is null
             ? "That filing isn't in Recent activity any more."
-            : Plan(filing, ActionLogLine.CompletedMoves(actionLogLines, run), scope, _fs, _clock.GetUtcNow()).Refusal;
+            : Plan(filing, LibraryMove.FiledMoves(filing, actionLogLines), scope, _fs, _clock.GetUtcNow()).Refusal;
     }
 
     /// <summary>
@@ -303,7 +304,7 @@ public sealed class ReleaseUndo
             return new ReturnOutcome(false, "That filing isn't in Recent activity any more.", []);
         }
 
-        var planned = Plan(filing, ActionLogLine.CompletedMoves(actionLogLines, run), scope, _fs, _clock.GetUtcNow());
+        var planned = Plan(filing, LibraryMove.FiledMoves(filing, actionLogLines), scope, _fs, _clock.GetUtcNow());
         if (planned.Refusal is not null)
         {
             Record(filing, ActivityStatus.Failed, "Couldn't undo: " + planned.Refusal, []);

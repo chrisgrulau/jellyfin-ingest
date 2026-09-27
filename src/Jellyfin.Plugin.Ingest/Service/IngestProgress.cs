@@ -68,6 +68,9 @@ public enum QueuedActionKind
 
     /// <summary>Restore a quarantined release (<see cref="QueuedAction.Root"/>, <see cref="QueuedAction.Folder"/>, <see cref="QueuedAction.Name"/>).</summary>
     Restore,
+
+    /// <summary>Move a filing (<see cref="QueuedAction.Run"/>) to another library (<see cref="QueuedAction.LibraryId"/>).</summary>
+    Move,
 }
 
 /// <summary>
@@ -90,6 +93,9 @@ public sealed record QueuedAction
 
     /// <summary>Gets the release's name in the dated folder, for a restore.</summary>
     public string? Name { get; init; }
+
+    /// <summary>Gets the library to move a filing to, for a move.</summary>
+    public string? LibraryId { get; init; }
 }
 
 /// <summary>

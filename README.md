@@ -70,6 +70,7 @@ plugin page, where you pick the right title (and library) with one click or sear
 | Review | *Needs review* on the plugin page: reasons, candidate titles with provider links, a library picker, title search, retry, or quarantine the whole release. *Choose file by file* replaces or quarantines single files, and gives a video of a show a season and episode when its name has none it can read. |
 | Activity | *Recent activity* on the plugin page: filed, dry run, needs review, decisions, failures, quarantine and purges. Each row says what the media is ("Lantern S01E04", "Harbour Lights (2024)", "Lantern — Season 2, 10 episodes"), what happened in one sentence, and what moved as icons with counts; release names, paths, scores and the AI's reasoning are in the row's details. A page at a time, with **Show more**. |
 | Undo | **Undo** on a filed release in *Recent activity* (for 90 days, while the action log holds it) puts everything back: the files return to the watch folder (for a copy or hard-link folder, the library copies are deleted instead), clutter leaves quarantine, and copies it replaced return to the library. All or nothing: refused, with the reason, if anything has gone, a video or extra has changed since filing, or a place is taken (subtitles corrected since filing go back as they are now). The release then waits under *Needs review* instead of being filed again. |
+| Move to another library | **Move to another library…** (under *More options and details* on a filing in *Recent activity*) moves a film or show Ingest filed by itself (not one whose library was chosen in review) to another library that can hold it: films to Movies or mixed libraries, shows to Shows or mixed libraries. Every file the filing put in the library (videos, subtitles, extras) moves to the same place there, joining a film or show folder of the same name if the library has one. All or nothing, like Undo: refused, with the reason, if anything has gone or changed, a place is taken, or the same episode or film is already in that library. Replaced copies stay in quarantine, and the filing can still be undone afterwards. Jellyfin treats the moved item as new, so watched state and resume points may not carry over. |
 | Safety | Dry-run mode per watch folder (on for a new folder), never overwrites, never files a second copy of an episode or film already on the server, crash-safe moves (hidden temporary name, size check, then rename; interrupted moves are finished or discarded at the next start), all-or-nothing per release (a failure undoes the moves already made), a JSON-lines action log. |
 | Library refresh | Asks Jellyfin to refresh just the film or show folders filed into after a real ingest. |
 
@@ -141,7 +142,7 @@ Everything stays on your server, in Jellyfin's plugin data folder (`<jellyfin da
 | File | What's in it | Kept |
 |---|---|---|
 | `state.json` | Releases waiting for review and the recent activity shown on the Ingest page (release names, paths, chosen titles). Who made a decision is not recorded. | The latest 300 activity entries |
-| `actions.jsonl` | One line per file moved: time, release, source and destination, size and modified time. Used to finish or undo moves interrupted by a restart, and for **Undo**. | 90 days, at most 5 MB |
+| `actions.jsonl` | One line per file moved: time, release, source and destination, size and modified time. Used to finish or undo moves interrupted by a restart, and for **Undo** and **Move to another library**. | 90 days, at most 5 MB |
 | `search-cache.json` | Recent title searches and their provider ids, so the same title isn't searched again. | 24 hours |
 
 Jellyfin's log gets one line per release at Information level. Per-file moves and review reasons, which include full
@@ -200,6 +201,7 @@ Continuous integration builds every push and pull request; tagged commits (`v*`)
 - [x] Episodes named by title only (specials), with the AI plugin as a fallback
 - [x] Episodes with no usable name: a short transcript compared with episode synopses
 - [x] Undo a filed release from *Recent activity*
+- [x] Move an automatically filed release to another library from *Recent activity*
 - [x] Restore from quarantine, delete now, pause switch; new titles into the library folder with the most free space
 
 Design notes live in [`docs/DESIGN.md`](docs/DESIGN.md).

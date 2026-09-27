@@ -49,6 +49,22 @@ public enum ActivityStatus
 
     /// <summary>A review was dropped because its release (or its watch folder) is gone.</summary>
     ReviewRemoved,
+
+    /// <summary>A filed release was moved to another library by an administrator.</summary>
+    Moved,
+}
+
+/// <summary>
+/// How a filing's library was decided.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<FilingChoice>))]
+public enum FilingChoice
+{
+    /// <summary>Ingest chose it: the watch folder's destinations, or the library of a copy being replaced.</summary>
+    Automatic = 0,
+
+    /// <summary>An administrator chose the library in review.</summary>
+    Review,
 }
 
 /// <summary>
@@ -117,6 +133,28 @@ public sealed record ActivityEntry
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? Videos { get; init; }
+
+    /// <summary>
+    /// Gets how a filing's library was decided; <c>null</c> for other entries and filings recorded before it existed
+    /// (see <see cref="LibraryMove.IsAutomatic"/>).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public FilingChoice? ChosenBy { get; init; }
+
+    /// <summary>
+    /// Gets the run of the move of this filing's files to another library, set before the first file moves (so an undo
+    /// can follow the files even after a crash part-way); <c>null</c> if it was never moved.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MoveRun { get; init; }
+
+    /// <summary>Gets when this filing was moved to another library, once the move has succeeded.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? MovedAt { get; init; }
+
+    /// <summary>Gets the library this filing was moved to (its name), once the move has succeeded.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MovedTo { get; init; }
 }
 
 /// <summary>
@@ -718,6 +756,30 @@ public sealed partial class IngestStateStore
             }
 
             s.Activity[i] = s.Activity[i] with { UndoneAt = time };
+            Save(s);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Changes a filing's activity entry (found by its run), for a move to another library.
+    /// </summary>
+    /// <param name="run">The filing's run.</param>
+    /// <param name="change">The change.</param>
+    /// <returns>Whether the entry was found.</returns>
+    public bool UpdateFiling(string run, Func<ActivityEntry, ActivityEntry> change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        lock (_lock)
+        {
+            var s = Load();
+            var i = s.Activity.FindIndex(a => a.Status == ActivityStatus.Filed && string.Equals(a.Run, run, StringComparison.Ordinal));
+            if (i < 0)
+            {
+                return false;
+            }
+
+            s.Activity[i] = change(s.Activity[i]);
             Save(s);
             return true;
         }

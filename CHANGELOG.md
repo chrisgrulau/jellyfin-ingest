@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Move to another library.** A film or show that Ingest filed by itself (its library came from the watch folder's
+  destinations, or from the copy it replaced; not a library chosen in review) can be moved from *Recent activity*:
+  *More options and details* → *Move to another library…* lists the libraries that can hold it (films: Movies or mixed
+  libraries; shows: Shows or mixed libraries; not the one it is in), with the folder used when a library has several,
+  and asks to confirm. The next sweep moves every file the filing put in the library (videos, subtitles, extras) to
+  the same place in the other library, joining a film or show folder of the same name already there (an existing
+  show's own season folders are used), through the same crash-safe, all-or-nothing executor as filing. Nothing moves
+  if a file has gone or changed since filing (a corrected subtitle moves as it is), a place is taken, or the same
+  episode or film is already in that library. Copies it replaced stay in quarantine; folders left empty are removed
+  (never a library folder). A *Moved* entry is recorded (and copied to Jellyfin's Activity log), both folders are
+  refreshed, and the filing can still be undone: **Undo** follows the files to where they were moved. Jellyfin sees
+  the moved item as new, so watched state and resume points may not carry over. API: `GET
+  Ingest/Activity/{run}/MoveTargets`, `POST Ingest/Activity/{run}/Move` (`{ "LibraryId": … }`).
+- Filings now record how their library was chosen (`ChosenBy`: `Automatic` or `Review`). Filings recorded before
+  this count as automatic unless *Recent activity* holds a review decision for the release made before it was filed.
 ### Fixed
 
 - **Quarantine: *Delete now* can't race filing or orphan a folder.** *Delete day now*, *Delete now* for one release and

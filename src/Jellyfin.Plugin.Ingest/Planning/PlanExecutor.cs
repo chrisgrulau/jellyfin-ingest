@@ -170,6 +170,13 @@ public sealed class PlanExecutor
     public Action<int, int>? Filing { get; init; }
 
     /// <summary>
+    /// Gets the id this execution's moves carry in the action log, when the caller needs it before anything moves (a
+    /// move to another library records it first, so an undo can follow the files even after a crash part-way);
+    /// <c>null</c> for a new one.
+    /// </summary>
+    public string? RunId { get; init; }
+
+    /// <summary>
     /// Executes a plan.
     /// </summary>
     /// <param name="plan">A ready plan.</param>
@@ -219,7 +226,7 @@ public sealed class PlanExecutor
             }
         }
 
-        var run = Guid.NewGuid().ToString("N");
+        var run = string.IsNullOrEmpty(RunId) ? Guid.NewGuid().ToString("N") : RunId;
         var done = new List<(PlannedOperation Op, long Bytes, string Temp)>();
         var created = new List<string>();
         foreach (var op in plan.Operations)

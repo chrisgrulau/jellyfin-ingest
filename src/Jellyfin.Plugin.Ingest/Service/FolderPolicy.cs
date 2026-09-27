@@ -111,6 +111,25 @@ public static class FolderPolicy
     }
 
     /// <summary>
+    /// The libraries and folders a move to another library works with: the return scope (for tidying up), and every
+    /// configured watch and quarantine folder and Jellyfin's own folders, which no library folder filed into may overlap.
+    /// </summary>
+    /// <param name="config">Plugin configuration.</param>
+    /// <param name="libraries">The server's libraries.</param>
+    /// <param name="problems">Problems from <see cref="FolderProblems"/>.</param>
+    /// <param name="protectedFolders">Jellyfin's own folders (<see cref="ProtectedFolders"/>).</param>
+    /// <returns>The scope.</returns>
+    public static MoveScope MoveScopeOf(PluginConfiguration config, IReadOnlyList<MediaLibrary> libraries, IReadOnlyList<FolderProblem> problems, IReadOnlyList<string> protectedFolders)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(protectedFolders);
+        var watch = config.WatchFolders.Where(w => !string.IsNullOrWhiteSpace(w.Path)).ToList();
+        var forbidden = watch.Select(w => w.Path).Concat(watch.Select(w => QuarantineFor(config, w))).Concat(protectedFolders)
+            .Where(f => !string.IsNullOrWhiteSpace(f) && Path.IsPathFullyQualified(f)).Distinct(PathGuard.Comparer).ToList();
+        return new MoveScope(libraries, ReturnScopeOf(config, libraries, problems), forbidden, PhysicalFileOperations.FreeBytes, ListDirectories, ListFiles);
+    }
+
+    /// <summary>
     /// Reduces Jellyfin's libraries to what routing needs.
     /// </summary>
     /// <param name="libraries">The server's libraries.</param>
@@ -129,5 +148,22 @@ public static class FolderPolicy
     {
         ArgumentNullException.ThrowIfNull(watch);
         return [.. watch.Destinations.Select(d => new DestinationSetting(d.LibraryId, d.Path))];
+    }
+
+    // A folder's sub-folders and files, never through a link; an unreadable or missing folder has none
+    private static List<string> ListDirectories(string folder) => List(folder, Directory.EnumerateDirectories);
+
+    private static List<string> ListFiles(string folder) => List(folder, Directory.EnumerateFiles);
+
+    private static List<string> List(string folder, Func<string, string, EnumerationOptions, IEnumerable<string>> list)
+    {
+        try
+        {
+            return Directory.Exists(folder) ? [.. list(folder, "*", new EnumerationOptions { AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = true })] : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 }
