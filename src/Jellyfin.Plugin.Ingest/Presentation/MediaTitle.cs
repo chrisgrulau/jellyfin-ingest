@@ -149,7 +149,7 @@ public sealed partial record MediaTitle
             Season = parsed.Season,
             Episode = parsed.Episode,
             LastEpisode = parsed.EndingEpisode,
-            EpisodeTitle = parsed.EpisodeTitle,
+            // What follows the code in a release name is as often the release group as the episode's title
             Edition = parsed.Edition,
         };
     }
@@ -222,6 +222,7 @@ public sealed partial record MediaTitle
         {
             "copy" => "copies",
             "other title" => "other titles",
+            _ when noun.EndsWith("ch", StringComparison.Ordinal) || noun.EndsWith("sh", StringComparison.Ordinal) || noun.EndsWith('s') || noun.EndsWith('x') => noun + "es",
             _ when noun.EndsWith('y') && !noun.EndsWith("ey", StringComparison.Ordinal) => noun[..^1] + "ies",
             _ => noun + "s",
         };

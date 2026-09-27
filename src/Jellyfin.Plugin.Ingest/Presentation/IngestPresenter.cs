@@ -79,17 +79,6 @@ public sealed partial class IngestPresenter
         var titles = videos.Select(MediaTitle.FromFiledPath).OfType<MediaTitle>().ToList();
         var library = videos.Select(LibraryOf).FirstOrDefault(l => l is not null);
         var (headline, subline) = Identity(titles, entry.Release);
-        var sublineParts = new List<string>();
-        if (subline.Length > 0)
-        {
-            sublineParts.Add(subline);
-        }
-
-        if (library is not null && entry.Status is ActivityStatus.Filed or ActivityStatus.DryRun or ActivityStatus.Undone)
-        {
-            sublineParts.Add(library);
-        }
-
         var counts = entry.Counts ?? lines.Count();
         var summary = SummaryOf(entry, lines, counts, library);
         var details = new List<DetailRow>();
@@ -127,7 +116,7 @@ public sealed partial class IngestPresenter
             {
                 Key = KeyOf(entry.Run ?? string.Create(CultureInfo.InvariantCulture, $"{entry.Time.UtcTicks}|{entry.Status}|{entry.WatchFolder}|{entry.Release}")),
                 Headline = headline,
-                Subline = string.Join(" · ", sublineParts),
+                Subline = subline,
                 Summary = summary,
                 Icon = IconOf(entry.Status),
                 StatusLabel = LabelOf(entry.Status) + (entry.UndoneAt is null ? string.Empty : ", then undone"),
@@ -160,8 +149,11 @@ public sealed partial class IngestPresenter
             (headline, subline) = Identity(fromName is null ? [] : [fromName], review.Release);
             if (review.Candidates.Count > 0)
             {
-                var top = review.Candidates[0].Candidate;
-                subline = (subline.Length > 0 ? subline + " · " : string.Empty) + "Looks like " + Named(top);
+                var top = Named(review.Candidates[0].Candidate);
+                if (!string.Equals(top, headline, StringComparison.OrdinalIgnoreCase))
+                {
+                    subline = (subline.Length > 0 ? subline + " · " : string.Empty) + "Looks like " + top;
+                }
             }
         }
 

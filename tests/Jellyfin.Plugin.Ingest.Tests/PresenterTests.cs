@@ -46,7 +46,7 @@ public sealed class PresenterTests
         var view = Presenter.Activity(entry, Now);
 
         Assert.Equal("Lantern S01E05", view.Item.Headline);
-        Assert.Equal("Glass Harbour · Shows", view.Item.Subline);
+        Assert.Equal("Glass Harbour", view.Item.Subline);
         Assert.Equal("Filed into Shows.", view.Item.Summary);
         Assert.Equal(Icons.Filed, view.Item.Icon);
         Assert.Equal("ok", view.Item.Tone);
@@ -80,7 +80,7 @@ public sealed class PresenterTests
         var view = Presenter.Activity(entry, Now);
 
         Assert.Equal("Harbour Lights (2024)", view.Item.Headline);
-        Assert.Equal("Director's Cut · Movies", view.Item.Subline);
+        Assert.Equal("Director's Cut", view.Item.Subline);
         Assert.Equal("Filed into Movies. It replaced the copy that was there. The AI plugin helped decide.", view.Item.Summary);
         Assert.Contains(view.Item.Chips, c => c.Icon == Icons.Replaced && c.Count == 1 && c.Label == "1 copy on the server replaced");
         Assert.Contains(view.Item.Chips, c => c.Icon == Icons.Ai);
@@ -105,7 +105,7 @@ public sealed class PresenterTests
         var view = Presenter.Activity(entry, Now);
 
         Assert.Equal("Lantern — Season 2, 10 episodes", view.Item.Headline);
-        Assert.Equal("Shows", view.Item.Subline);
+        Assert.Equal(string.Empty, view.Item.Subline);
         Assert.Equal("Dry run: would be filed into Shows. Nothing was moved.", view.Item.Summary);
         Assert.Equal("10 videos would be filed", Assert.Single(view.Item.Chips).Label);
         Assert.False(view.CanUndo);
@@ -300,6 +300,7 @@ public sealed class PresenterTests
         Assert.Equal(23, page.FileCount);
         var release = page.Items[0];
         Assert.Equal("Lantern S01E04", release.Item.Headline);
+        Assert.Equal(string.Empty, release.Item.Subline);
         Assert.Equal("Lantern.S01E04.1080p-GRP", release.Name);
         Assert.Equal("1.5 KB", release.Item.Chips[0].Label.Split(", ")[1]);
         Assert.Contains(release.Item.Details, d => d.Group == "Files" && d.Label == "sample.mkv" && d.Value == "1.0 KB");
@@ -327,9 +328,12 @@ public sealed class PresenterTests
         var view = Presenter.Review(review);
 
         Assert.Equal("Harbour (2024)", view.Headline);
-        Assert.Equal("Looks like Harbour (2024)", view.Subline);
+        Assert.Equal(string.Empty, view.Subline);
+        Assert.Equal("Looks like Harbour Lights (2024)", Presenter.Review(review with { Candidates = [new ScoredCandidate(new MetadataCandidate { Name = "Harbour Lights", Year = 2024 }, 0.7)] }).Subline);
         Assert.Equal("Waiting for you: it's already on the server.", view.Summary);
         Assert.Contains(view.Chips, c => c.Icon == Icons.Replaced && c.Count == 1);
+        Assert.Contains(view.Chips, c => c.Label == "1 possible match");
+        Assert.Equal("2 matches", MediaTitle.Plural(2, "match"));
         Assert.Contains(view.Details, d => d.Group == "Already on the server" && d.Label == "Movies");
         Assert.Contains(view.Details, d => d.Group == "Candidates" && d.Value.StartsWith("score 0.93 · film · Tmdb 400001", StringComparison.Ordinal));
     }
