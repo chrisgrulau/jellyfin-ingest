@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0-alpha] - 2026-09-27
+
 ### Added
 
 - **AI suggests, you approve.** Each watch folder has a new setting, *When the AI decides*: **file automatically** (the
