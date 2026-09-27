@@ -247,7 +247,8 @@ public sealed class QuarantineRestore
 
         var summary = string.Create(CultureInfo.InvariantCulture, $"Restored from quarantine by an administrator: {plan.Operations.Count} file(s) put back where they came from.")
             + (planned.Releases.Count > 0 ? " Put back into a watch folder, it now waits under Needs review." : string.Empty);
-        Record(name!, watch, ActivityStatus.Restored, summary, [.. (report.Warning is null ? [] : new[] { "Needs attention: " + report.Warning }), .. plan.Operations.Select(o => $"{o.Source} → {o.Destination}")]);
+        Record(name!, watch, ActivityStatus.Restored, summary, [.. (report.Warning is null ? [] : new[] { "Needs attention: " + report.Warning }), .. ActivityReport.UnreadableLines(report), .. plan.Operations.Select(o => $"{o.Source} → {o.Destination}")]);
+        ActivityReport.RecordUnreadable(_state, _clock.GetUtcNow(), name!, report);
         return new ReturnOutcome(true, summary, planned.Refresh);
     }
 

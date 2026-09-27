@@ -85,6 +85,23 @@ public interface IFileOperations
     /// <param name="bytes">Its size.</param>
     /// <returns><c>false</c> only when there is known not to be enough room.</returns>
     bool HasRoomFor(string source, string destinationFolder, long bytes);
+
+    /// <summary>
+    /// Opens a file for reading by its path, as a player or Jellyfin's scan would, and returns its length: a caching
+    /// network file system (virtiofs, CIFS) can list a name it then fails to open, which a size check alone doesn't catch.
+    /// </summary>
+    /// <param name="path">Absolute path.</param>
+    /// <returns>The length, or <c>null</c> when the file can't be opened.</returns>
+    long? ReadBack(string path) => Exists(path) ? Length(path) : null;
+
+    /// <summary>
+    /// Lists a folder's entries, which makes a caching network file system look the folder up afresh (and can revalidate
+    /// a stale entry for a file just renamed into it). Never throws.
+    /// </summary>
+    /// <param name="path">Absolute path of the folder.</param>
+    void Relist(string path)
+    {
+    }
 }
 
 /// <summary>
@@ -125,6 +142,13 @@ public sealed record ExecutionReport
     /// </summary>
     public string? Run { get; init; }
 
+    /// <summary>
+    /// Gets the files that were filed (renamed into place) but couldn't be opened again by their new name, even after
+    /// looking the folder up afresh: most likely a stale cache in the mount the library is on. They are filed and logged
+    /// (an undo finds them), but need attention; see <see cref="PlanExecutor.UnreadableAdvice"/>.
+    /// </summary>
+    public IReadOnlyList<string> Unreadable { get; init; } = [];
+
     /// <summary>Gets a value indicating whether every operation completed.</summary>
     public bool Succeeded => Failed is null && !Cancelled && Error is null;
 }
@@ -133,8 +157,9 @@ public sealed record ExecutionReport
 /// Carries out an <see cref="IngestPlan"/> so that a release is filed completely or not at all, and a crash can never
 /// leave a half-copied file under a real name:
 /// <list type="bullet">
-/// <item>every file first moves to a hidden temporary name in its destination folder (Jellyfin ignores hidden files),
-/// its size is verified, then it is renamed into place;</item>
+/// <item>every file first moves to a temporary name beside its destination (<c>&lt;name&gt;.ingest-&lt;id&gt;.partial</c>, which
+/// Jellyfin doesn't treat as media), its size is verified, then it is renamed into place and opened again by its new
+/// name (<see cref="ReadBackAttempts"/>);</item>
 /// <item>each move is written to the action log before (<c>intent</c>) and after (<c>done</c>), so an interrupted move can
 /// be finished or discarded at the next start (<see cref="Recover"/>);</item>
 /// <item>if a move fails, the moves already made are undone in reverse order;</item>
@@ -143,8 +168,13 @@ public sealed record ExecutionReport
 /// </summary>
 public sealed class PlanExecutor
 {
-    private const string TempPrefix = ".ingest-";
+    // Temporary names are not hidden (no leading dot): a Samba share stores the DOS "hidden" attribute on a file created
+    // with a dot name, and it stayed on the filed file after the rename. Older versions used ".ingest-<32 hex>.partial";
+    // recovery still recognises those
+    private const string TempMarker = ".ingest-";
     private const string TempSuffix = ".partial";
+    private const int TempIdLength = 8;
+    private const string TempPrefix = ".ingest-";
     private const string TrashSuffix = ".undone";
 
     private static readonly System.Buffers.SearchValues<char> HexDigits = System.Buffers.SearchValues.Create("0123456789abcdef");
@@ -175,6 +205,38 @@ public sealed class PlanExecutor
     /// <c>null</c> for a new one.
     /// </summary>
     public string? RunId { get; init; }
+
+    /// <summary>
+    /// Gets how many times a file just renamed into place is opened again by its new name before it counts as unreadable
+    /// (the folder is listed again before each retry, which can revalidate a stale cache entry).
+    /// </summary>
+    public int ReadBackAttempts { get; init; } = 4;
+
+    /// <summary>Gets the wait before the first retry of <see cref="ReadBackAttempts"/>; it doubles each time.</summary>
+    public TimeSpan ReadBackDelay { get; init; } = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>
+    /// Gets what to do about files that were filed but can't be read back (<see cref="ExecutionReport.Unreadable"/>).
+    /// </summary>
+    public static string UnreadableAdvice =>
+        "The file was written, but can't be read back through the mount the library is on (it may be listed with '?' "
+        + "fields, or fail to open as missing). This is usually a stale cache in a shared-folder mount, such as virtiofs "
+        + "in a virtual machine over a network share: set the host's virtiofs cache to \"metadata\" or \"never\", or drop "
+        + "the caches in the guest (sysctl vm.drop_caches=2), then scan the library. Nothing needs moving: the file is "
+        + "complete on the storage.";
+
+    /// <summary>
+    /// The temporary name a file is moved or copied to before it is renamed into place: beside the destination, named
+    /// after it, so a leftover is recognisable (<c>Film (2019).mkv.ingest-1a2b3c4d.partial</c>). It isn't hidden and
+    /// ends in <c>.partial</c>, which Jellyfin doesn't treat as media and download filters treat as unfinished.
+    /// </summary>
+    /// <param name="destination">The final path.</param>
+    /// <returns>The temporary path.</returns>
+    public static string TempPathFor(string destination)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        return destination + TempMarker + Guid.NewGuid().ToString("N")[..TempIdLength] + TempSuffix;
+    }
 
     /// <summary>
     /// Executes a plan.
@@ -229,6 +291,7 @@ public sealed class PlanExecutor
         var run = string.IsNullOrEmpty(RunId) ? Guid.NewGuid().ToString("N") : RunId;
         var done = new List<(PlannedOperation Op, long Bytes, string Temp)>();
         var created = new List<string>();
+        var unreadable = new List<string>();
         foreach (var op in plan.Operations)
         {
             if (cancellationToken.IsCancellationRequested)
@@ -237,6 +300,7 @@ public sealed class PlanExecutor
                 {
                     Run = run,
                     Completed = [.. done.Select(d => d.Op)],
+                    Unreadable = unreadable,
                     Cancelled = true,
                     Error = string.Create(CultureInfo.InvariantCulture, $"Stopped because the server is shutting down: {done.Count} of {plan.Operations.Count} files moved; the rest are still in the watch folder."),
                 };
@@ -244,7 +308,7 @@ public sealed class PlanExecutor
 
             Filing?.Invoke(done.Count + 1, plan.Operations.Count);
             var folder = Path.GetDirectoryName(op.Destination)!;
-            var temp = Path.Combine(folder, TempPrefix + Guid.NewGuid().ToString("N") + TempSuffix);
+            var temp = TempPathFor(op.Destination);
             long size = 0;
             try
             {
@@ -270,8 +334,8 @@ public sealed class PlanExecutor
                 var keeps = KeepsSource(plan, op);
                 Log(actionLogPath, run, plan.ReleaseName, op, size, "intent", temp, kept: keeps);
 
-                // 1. into a hidden name (a rename, or a copy across file systems; or, when the release stays for seeding, a
-                //    copy or hard link); 2. verify; 3. rename into place
+                // 1. into the temporary name (a rename, or a copy across file systems; or, when the release stays for
+                //    seeding, a copy or hard link); 2. verify; 3. rename into place; 4. open it again by its new name
                 if (!keeps)
                 {
                     _fs.Move(op.Source, temp);
@@ -292,8 +356,17 @@ public sealed class PlanExecutor
                 }
 
                 _fs.Move(temp, op.Destination);
-                if (!_fs.Exists(op.Destination) || _fs.Length(op.Destination) != size)
+
+                // The rename returned, so the file is in place on the storage. One that can't be opened by its new name
+                // (a stale cache in the mount) is still filed, not rolled back through the same cache, but reported
+                if (ReadBack(op.Destination, cancellationToken) is not { } read)
                 {
+                    unreadable.Add(op.Destination);
+                }
+                else if (read != size)
+                {
+                    // It reached its real name, so the rollback puts it back from there
+                    done.Add((op, size, temp));
                     throw new IOException($"Move could not be verified: {temp} -> {op.Destination}");
                 }
 
@@ -304,7 +377,7 @@ public sealed class PlanExecutor
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                var (rolledBack, problems) = RollBack(actionLogPath, run, plan, op, size, temp, done, created);
+                var (rolledBack, problems) = RollBack(actionLogPath, run, plan, op, size, temp, done, created, unreadable);
                 return new ExecutionReport { Run = run, Failed = op, Error = ex.Message, RolledBack = rolledBack, RollbackProblems = problems };
             }
         }
@@ -337,12 +410,12 @@ public sealed class PlanExecutor
             }
         }
 
-        return new ExecutionReport { Run = run, Completed = [.. done.Select(d => d.Op)], Warning = warning };
+        return new ExecutionReport { Run = run, Completed = [.. done.Select(d => d.Op)], Warning = warning, Unreadable = unreadable };
     }
 
     /// <summary>
     /// Finishes or discards moves that a crash, restart or power cut interrupted, using the action log: a move logged as
-    /// started but not finished whose hidden temporary file holds the whole file is completed; one whose copy was cut
+    /// started but not finished whose temporary file holds the whole file is completed; one whose copy was cut
     /// short (the original is still in place) has its partial copy deleted.
     /// </summary>
     /// <param name="actionLogLines">Lines of the action log.</param>
@@ -421,8 +494,9 @@ public sealed class PlanExecutor
     }
 
     /// <summary>
-    /// Whether a temporary file named in the action log is one Ingest would have made for that destination: its hidden
-    /// temporary name, in the destination's folder, inside a current library or quarantine folder.
+    /// Whether a temporary file named in the action log is one Ingest would have made for that destination: its
+    /// temporary name (<see cref="TempPathFor"/>, or the hidden <c>.ingest-&lt;id&gt;.partial</c> of older versions), in the
+    /// destination's folder, inside a current library or quarantine folder.
     /// </summary>
     /// <param name="temp">The temporary file.</param>
     /// <param name="destination">The destination.</param>
@@ -437,9 +511,15 @@ public sealed class PlanExecutor
         }
 
         var name = Path.GetFileName(temp);
-        return name.Length == TempPrefix.Length + 32 + TempSuffix.Length
+        var own = Path.GetFileName(destination) + TempMarker;
+        var current = own.Length > TempMarker.Length
+            && name.Length == own.Length + TempIdLength + TempSuffix.Length
+            && name.StartsWith(own, StringComparison.Ordinal) && name.EndsWith(TempSuffix, StringComparison.Ordinal)
+            && !name.AsSpan(own.Length, TempIdLength).ContainsAnyExcept(HexDigits);
+        var legacy = name.Length == TempPrefix.Length + 32 + TempSuffix.Length
             && name.StartsWith(TempPrefix, StringComparison.Ordinal) && name.EndsWith(TempSuffix, StringComparison.Ordinal)
-            && !name.AsSpan(TempPrefix.Length, 32).ContainsAnyExcept(HexDigits)
+            && !name.AsSpan(TempPrefix.Length, 32).ContainsAnyExcept(HexDigits);
+        return (current || legacy)
             && PathGuard.SamePath(Path.GetDirectoryName(temp), Path.GetDirectoryName(destination))
             && PathGuard.IsUnderAny(destination, allowedRoots);
     }
@@ -558,13 +638,48 @@ public sealed class PlanExecutor
     private static bool KeepsSource(IngestPlan plan, PlannedOperation op)
         => plan.Transfer != TransferMode.Move && op.Kind != OperationKind.Quarantine;
 
+    // Opens a file just renamed into place by its new name; when that fails, lists its folder again (a fresh look-up) and
+    // retries, waiting a little longer each time. Null: it still can't be opened
+    private long? ReadBack(string path, CancellationToken cancellationToken)
+    {
+        var folder = Path.GetDirectoryName(path)!;
+        var delay = ReadBackDelay;
+        for (var attempt = 1; ; attempt++)
+        {
+            if (_fs.ReadBack(path) is { } length)
+            {
+                return length;
+            }
+
+            if (attempt >= ReadBackAttempts)
+            {
+                return null;
+            }
+
+            if (delay > TimeSpan.Zero && cancellationToken.WaitHandle.WaitOne(delay))
+            {
+                return null;
+            }
+
+            delay += delay;
+            _fs.Relist(folder);
+        }
+    }
+
     private (IReadOnlyList<PlannedOperation> RolledBack, IReadOnlyList<string> Problems) RollBack(
-        string logPath, string run, IngestPlan plan, PlannedOperation failed, long size, string temp, List<(PlannedOperation Op, long Bytes, string Temp)> done, List<string> created)
+        string logPath, string run, IngestPlan plan, PlannedOperation failed, long size, string temp, List<(PlannedOperation Op, long Bytes, string Temp)> done, List<string> created, List<string> unreadable)
     {
         var rolledBack = new List<PlannedOperation>();
         var problems = new List<string>();
 
-        // The failed move itself: put a file that reached the hidden name back, or drop a partial copy
+        // A file the mount couldn't read back may look missing here while it is still on the storage: it is never
+        // assumed removed or moved back
+        foreach (var path in unreadable)
+        {
+            problems.Add($"{path}: filed, but it couldn't be read back through the library's mount, so it is left where it is. {UnreadableAdvice}");
+        }
+
+        // The failed move itself: put a file that reached the temporary name back, or drop a partial copy
         try
         {
             if (_fs.Exists(temp))
@@ -589,6 +704,11 @@ public sealed class PlanExecutor
         // Then everything already filed, newest first (a copy or link of a file that stayed is simply removed)
         foreach (var (op, bytes, opTemp) in Enumerable.Reverse(done))
         {
+            if (unreadable.Contains(op.Destination, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
             try
             {
                 if (KeepsSource(plan, op) && _fs.Exists(op.Source))
@@ -684,6 +804,36 @@ public sealed class PhysicalFileOperations : IFileOperations
 
     /// <inheritdoc />
     public void AppendLine(string path, string line) => File.AppendAllLines(path, [line]);
+
+    /// <inheritdoc />
+    public long? ReadBack(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return stream.Length;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Relist(string path)
+    {
+        try
+        {
+            using var entries = Directory.EnumerateFileSystemEntries(path).GetEnumerator();
+            while (entries.MoveNext())
+            {
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Only a nudge to the file system's cache
+        }
+    }
 
     /// <inheritdoc />
     public DateTime? LastWriteUtc(string path)

@@ -96,6 +96,67 @@ public sealed class ActivityReport
     }
 
     /// <summary>
+    /// The detail lines for files that were filed but can't be read back through the library's mount (see
+    /// <see cref="ExecutionReport.Unreadable"/>), each shown as needing attention.
+    /// </summary>
+    /// <param name="report">The execution.</param>
+    /// <returns>The lines; empty when every file read back.</returns>
+    public static IReadOnlyList<string> UnreadableLines(ExecutionReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        return [.. report.Unreadable.Select(p => $"Needs attention: {p} was written, but can't be read back through the library's mount.")];
+    }
+
+    /// <summary>
+    /// The sentence added to a summary when files were filed but can't be read back, so the entry never reads as a
+    /// plain success.
+    /// </summary>
+    /// <param name="report">The execution.</param>
+    /// <returns>The sentence (with a leading space), or empty when every file read back.</returns>
+    public static string UnreadableSentence(ExecutionReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        return report.Unreadable.Count == 0
+            ? string.Empty
+            : string.Create(CultureInfo.InvariantCulture, $" But {(report.Unreadable.Count == 1 ? "1 file" : report.Unreadable.Count + " files")} can't be read back through the library's mount (see Library storage).");
+    }
+
+    /// <summary>
+    /// Records the storage problem behind files that were filed but can't be read back, as an entry of its own: it is
+    /// about the server's mount, not the release, and says what to change.
+    /// </summary>
+    /// <param name="state">Activity shown on the dashboard.</param>
+    /// <param name="now">The time.</param>
+    /// <param name="release">The release (or title) being filed, moved or restored when it was seen.</param>
+    /// <param name="report">The execution.</param>
+    /// <returns>Whether an entry was recorded (only when a file couldn't be read back).</returns>
+    public static bool RecordUnreadable(IngestStateStore state, DateTimeOffset now, string release, ExecutionReport report)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(report);
+        if (report.Unreadable.Count == 0)
+        {
+            return false;
+        }
+
+        state.Record(new ActivityEntry
+        {
+            Time = now,
+            Status = ActivityStatus.Failed,
+            Release = StorageRelease,
+            Summary = PlanExecutor.UnreadableAdvice,
+            Details = [$"Seen while filing {release}:", .. report.Unreadable],
+        });
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the name the activity panel shows for problems with the library's storage itself (see
+    /// <see cref="RecordUnreadable"/>).
+    /// </summary>
+    public static string StorageRelease => "Library storage";
+
+    /// <summary>
     /// What a failed whole-release quarantine says.
     /// </summary>
     /// <param name="report">The failed execution.</param>

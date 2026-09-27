@@ -116,9 +116,10 @@ public sealed partial class QuarantineRelease
             Summary = string.Create(
                 CultureInfo.InvariantCulture,
                 $"{(dryRun ? "Would quarantine" : "Quarantined")} the whole release ({files.Count} file{(files.Count == 1 ? string.Empty : "s")}) to {dated}."),
-            Details = ActivityReport.Describe(watch.Path, report.Completed),
+            Details = [.. ActivityReport.UnreadableLines(report), .. ActivityReport.Describe(watch.Path, report.Completed)],
             Counts = new ActivityCounts { Clutter = report.Completed.Count },
         });
+        ActivityReport.RecordUnreadable(_state, _clock.GetUtcNow(), review.Release, report);
         if (dryRun)
         {
             _state.ClearRequest(review.Id, review.RequestVersion);

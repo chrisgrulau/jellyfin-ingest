@@ -121,6 +121,25 @@ public class ExecutorTests
 
         public bool HasRoomFor(string source, string destinationFolder, long bytes) => Room;
 
+        // Files the mount can't open by name until the folder has been listed this many times (int.MaxValue: never)
+        public Dictionary<string, int> StaleUntilRelisted { get; } = new(StringComparer.Ordinal);
+
+        public List<string> Relisted { get; } = [];
+
+        public Func<string, long>? ReadBackAs { get; set; }
+
+        public long? ReadBack(string path)
+        {
+            if (StaleUntilRelisted.TryGetValue(path, out var needed) && Relisted.Count(r => r == Path.GetDirectoryName(path)) < needed)
+            {
+                return null;
+            }
+
+            return !Files.TryGetValue(path, out var size) ? null : ReadBackAs?.Invoke(path) ?? size;
+        }
+
+        public void Relist(string path) => Relisted.Add(path);
+
         public IEnumerable<string> Phases() => Log.Select(l => JsonDocument.Parse(l).RootElement.GetProperty("phase").GetString()!);
     }
 
@@ -149,7 +168,7 @@ public class ExecutorTests
         => new PlanExecutor(fs, TimeProvider.System).Execute(Plan(), "/drop/r", "/log", dryRun: false, ct);
 
     [Fact]
-    public void Each_move_goes_through_a_hidden_name_and_is_logged_before_and_after()
+    public void Each_move_goes_through_a_temporary_name_and_is_logged_before_and_after()
     {
         var fs = Seeded();
         var moves = new List<(string, string)>();
@@ -159,7 +178,8 @@ public class ExecutorTests
 
         Assert.True(report.Succeeded);
         Assert.Equal(1000, fs.Files["/lib/Films/A (2019)/A (2019).mkv"]);
-        Assert.Contains(moves, m => m.Item1 == "/drop/r/a.mkv" && Path.GetFileName(m.Item2).StartsWith(".ingest-", StringComparison.Ordinal) && m.Item2.EndsWith(".partial", StringComparison.Ordinal));
+        Assert.Contains(moves, m => m.Item1 == "/drop/r/a.mkv" && Path.GetFileName(m.Item2).StartsWith("A (2019).mkv.ingest-", StringComparison.Ordinal) && m.Item2.EndsWith(".partial", StringComparison.Ordinal));
+        Assert.DoesNotContain(moves, m => Path.GetFileName(m.Item2).StartsWith('.'));
         Assert.Equal(["intent", "done", "intent", "done", "intent", "done"], fs.Phases());
         Assert.DoesNotContain(fs.Files.Keys, k => k.EndsWith(".partial", StringComparison.Ordinal));
     }
@@ -495,5 +515,137 @@ public class ExecutorTests
         Assert.Contains("/lib/Old/B", fs.Dirs);
         Assert.Contains("/lib/Old", fs.Dirs);
         Assert.Contains("/lib/Old/C", fs.Dirs);
+    }
+
+    // A temporary name isn't hidden (Samba kept the DOS "hidden" attribute of a dot name on the filed file), names its
+    // destination, and still reads as unfinished to download filters and as Ingest's own to recovery
+    [Fact]
+    public void The_temporary_name_is_visible_beside_its_destination_and_recognised()
+    {
+        var temp = PlanExecutor.TempPathFor("/lib/Films/A/A (2019).mkv");
+
+        Assert.Equal("/lib/Films/A", Path.GetDirectoryName(temp));
+        Assert.False(Path.GetFileName(temp).StartsWith('.'));
+        Assert.Matches(@"^A \(2019\)\.mkv\.ingest-[0-9a-f]{8}\.partial$", Path.GetFileName(temp));
+        Assert.NotEqual(temp, PlanExecutor.TempPathFor("/lib/Films/A/A (2019).mkv"));
+        Assert.True(PlanExecutor.IsOwnTemp(temp, "/lib/Films/A/A (2019).mkv", Roots));
+        Assert.True(Service.ReleaseTracker.IsIgnored(Path.GetFileName(temp)));
+        Assert.NotEqual(FileRole.Video, ReleaseClassifier.Classify(new ReleaseFile(Path.GetFileName(temp), 1000)));
+    }
+
+    [Theory]
+    [InlineData("/lib/Films/A/B.mkv.ingest-1a2b3c4d.partial", "/lib/Films/A/A.mkv")]
+    [InlineData("/lib/Films/A/A.mkv.ingest-1a2b3c4.partial", "/lib/Films/A/A.mkv")]
+    [InlineData("/lib/Films/A/A.mkv.ingest-1a2b3c4g.partial", "/lib/Films/A/A.mkv")]
+    [InlineData("/lib/Films/B/A.mkv.ingest-1a2b3c4d.partial", "/lib/Films/A/A.mkv")]
+    [InlineData("/etc/passwd.ingest-1a2b3c4d.partial", "/etc/passwd")]
+    public void Only_a_temporary_name_made_for_that_destination_is_ingests_own(string temp, string destination)
+        => Assert.False(PlanExecutor.IsOwnTemp(temp, destination, Roots));
+
+    [Fact]
+    public void An_interrupted_move_under_the_new_temporary_name_is_finished()
+    {
+        var fs = new Fs();
+        const string temp = "/lib/Films/A/A.mkv.ingest-0123abcd.partial";
+        fs.Files[temp] = 1000;
+
+        var results = new PlanExecutor(fs, TimeProvider.System).Recover([Line("intent", "/drop/r/a.mkv", "/lib/Films/A/A.mkv", temp, 1000)], "/log", Roots);
+
+        Assert.Single(results);
+        Assert.Equal(1000, fs.Files["/lib/Films/A/A.mkv"]);
+        Assert.False(fs.Exists(temp));
+    }
+
+    private static PlanExecutor Quick(Fs fs) => new(fs, TimeProvider.System) { ReadBackDelay = TimeSpan.Zero };
+
+    // Production incident: after the rename, the guest's cache kept a stale entry, so the filed file couldn't be opened
+    [Fact]
+    public void A_file_that_reads_back_after_the_folder_is_listed_again_is_filed_normally()
+    {
+        var fs = Seeded();
+        fs.StaleUntilRelisted["/lib/Films/A (2019)/A (2019).mkv"] = 2;
+
+        var report = Quick(fs).Execute(Plan(), "/drop/r", "/log", dryRun: false);
+
+        Assert.True(report.Succeeded);
+        Assert.Empty(report.Unreadable);
+        Assert.Equal(["/lib/Films/A (2019)", "/lib/Films/A (2019)"], fs.Relisted);
+    }
+
+    [Fact]
+    public void A_file_that_never_reads_back_is_left_filed_and_reported_not_rolled_back()
+    {
+        var fs = Seeded();
+        fs.StaleUntilRelisted["/lib/Films/A (2019)/A (2019).mkv"] = int.MaxValue;
+
+        var report = Quick(fs).Execute(Plan(), "/drop/r", "/log", dryRun: false);
+
+        Assert.True(report.Succeeded);
+        Assert.Equal(["/lib/Films/A (2019)/A (2019).mkv"], report.Unreadable);
+        Assert.Equal(1000, fs.Files["/lib/Films/A (2019)/A (2019).mkv"]);
+        Assert.Equal(3, report.Completed.Count);
+        Assert.Equal(["intent", "done", "intent", "done", "intent", "done"], fs.Phases());
+
+        // Tried 4 times, listing the folder before each retry
+        Assert.Equal(3, fs.Relisted.Count);
+    }
+
+    [Fact]
+    public void A_file_that_reads_back_at_the_wrong_size_is_rolled_back()
+    {
+        var fs = Seeded();
+        fs.ReadBackAs = p => p == "/lib/Films/A (2019)/A (2019).mkv" ? 999 : fs.Files[p];
+
+        var report = Quick(fs).Execute(Plan(), "/drop/r", "/log", dryRun: false);
+
+        Assert.False(report.Succeeded);
+        Assert.Contains("could not be verified", report.Error, StringComparison.Ordinal);
+        Assert.Equal(1000, fs.Files["/drop/r/a.mkv"]);
+        Assert.Empty(report.Unreadable);
+    }
+
+    [Fact]
+    public void A_later_failure_never_assumes_an_unreadable_file_was_put_back()
+    {
+        var fs = Seeded();
+        fs.StaleUntilRelisted["/lib/Films/A (2019)/A (2019).mkv"] = int.MaxValue;
+        fs.FailMove = (s, _) => s == "/drop/r/a.srt";
+
+        var report = Quick(fs).Execute(Plan(), "/drop/r", "/log", dryRun: false);
+
+        Assert.False(report.Succeeded);
+        Assert.Empty(report.RolledBack);
+        Assert.Contains(report.RollbackProblems, p => p.StartsWith("/lib/Films/A (2019)/A (2019).mkv: filed, but it couldn't be read back", StringComparison.Ordinal) && p.Contains("virtiofs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_advice_for_an_unreadable_file_says_what_to_change()
+    {
+        Assert.Contains("written", PlanExecutor.UnreadableAdvice, StringComparison.Ordinal);
+        Assert.Contains("can't be read back", PlanExecutor.UnreadableAdvice, StringComparison.Ordinal);
+        Assert.Contains("\"metadata\" or \"never\"", PlanExecutor.UnreadableAdvice, StringComparison.Ordinal);
+        Assert.Contains("drop_caches", PlanExecutor.UnreadableAdvice, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Reading_back_on_disk_opens_the_file_by_name()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "ingest-readback-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var file = Path.Combine(dir, "a.mkv");
+            File.WriteAllBytes(file, new byte[123]);
+            var fs = new PhysicalFileOperations();
+
+            Assert.Equal(123, fs.ReadBack(file));
+            Assert.Null(fs.ReadBack(Path.Combine(dir, "missing.mkv")));
+            fs.Relist(dir);
+            fs.Relist(Path.Combine(dir, "gone"));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 }

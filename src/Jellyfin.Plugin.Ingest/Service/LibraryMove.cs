@@ -470,6 +470,8 @@ public sealed partial class LibraryMove
 
         var problems = new List<string>();
         ReleaseUndo.TidyUp(_fs, planned.Tidy, problems);
+        problems.AddRange(report.Unreadable.Select(p => $"{p} was written, but can't be read back through the library's mount."));
+        ActivityReport.RecordUnreadable(_state, _clock.GetUtcNow(), filing.Release, report);
 
         var now = _clock.GetUtcNow();
         var to = planned.To!.Name;

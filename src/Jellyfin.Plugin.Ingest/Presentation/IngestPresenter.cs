@@ -574,6 +574,11 @@ public sealed partial class IngestPresenter
                     text += " The AI plugin helped decide.";
                 }
 
+                if (lines.Attention.Count > 0)
+                {
+                    text += lines.Attention.Count == 1 ? " But 1 file needs attention (see the details)." : string.Create(CultureInfo.InvariantCulture, $" But {lines.Attention.Count} files need attention (see the details).");
+                }
+
                 if (entry.MovedTo is not null)
                 {
                     text += " Later moved to " + entry.MovedTo + ".";

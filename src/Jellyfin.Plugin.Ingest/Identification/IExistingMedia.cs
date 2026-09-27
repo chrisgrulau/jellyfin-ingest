@@ -42,4 +42,14 @@ public interface IExistingMedia
     /// <param name="season">Season number.</param>
     /// <returns>The folder, or <c>null</c> if the show has none for that season yet.</returns>
     string? FindSeasonFolder(string seriesFolder, int season);
+
+    /// <summary>
+    /// Finds episodes already on the server (with their files) that one of the titles could be: of a show whose name
+    /// starts the title, titled as the rest of it (<c>24</c> + <c>Redemption</c> for the film <c>24: Redemption</c>).
+    /// A TV film or special the providers also list as a film is found this way, so it isn't filed a second time as a
+    /// film (<see cref="FilmAsEpisode"/>).
+    /// </summary>
+    /// <param name="titles">The film's titles (its provider title, the title read from the release name).</param>
+    /// <returns>The episodes; empty when none fits (or this isn't known).</returns>
+    IReadOnlyList<ExistingEpisode> FindEpisodesTitled(IReadOnlyCollection<string> titles) => [];
 }

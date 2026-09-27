@@ -20,7 +20,7 @@ Working notes for Jellyfin Ingest. Descriptive of intent; will be updated as the
 | **Settler** | A release is processed only after its files, sizes and last-write times have stayed unchanged for the settle time. |
 | **Classifier** | The plugin's own release-name parser (`ReleaseNameParser`: title, year, season, episode, edition, extras, release tags), then `IProviderManager` remote search against the server's configured providers (cached; see *Identification*). Scores candidates (title similarity, year, titles already on the server); below the threshold → review. |
 | **Planner** | `(release files, identification, library targets) → planned operations`, all-or-nothing per release. Disk access is only through callbacks (does a path exist, read a subtitle's text), so it is fully unit-testable. |
-| **Executor** | Every file moves first to a hidden `.ingest-<id>.partial` name in its destination folder (a rename, or a copy across file systems), is size-verified, then renamed into place, so a half-copied file never appears under a real name (Jellyfin ignores hidden files). Each move is logged before (`intent`) and after (`done`) in `actions.jsonl`; a failure undoes the moves already made (and removes folders it created), and moves interrupted by a crash are finished or discarded at the next start. Never overwrites; every destination is re-checked against the plan's allowed folders first; free space is checked before a cross-file-system copy. |
+| **Executor** | Every file moves first to a temporary `<final name>.ingest-<id>.partial` name in its destination folder (a rename, or a copy across file systems), is size-verified, then renamed into place, so a half-copied file never appears under a real name (Jellyfin doesn't treat `.partial` files as media; the name isn't hidden, because a Samba share keeps a dot name's DOS hidden attribute through the rename). After the rename the file is opened by its new name and its length checked, retrying with the folder listed again; a file a stale mount cache (virtiofs, CIFS) still can't read back stays filed and is reported, with the fix, as a *Library storage* problem. Each move is logged before (`intent`) and after (`done`) in `actions.jsonl`; a failure undoes the moves already made (and removes folders it created), and moves interrupted by a crash are finished or discarded at the next start. Never overwrites; every destination is re-checked against the plan's allowed folders first; free space is checked before a cross-file-system copy. |
 | **Quarantine purge** | `IScheduledTask`, daily; deletes dated quarantine folders older than the retention period, but only ones Ingest created and marked (`.ingest-created`), never through links. |
 | **Refresh** | `ILibraryMonitor.ReportFileSystemChanged` for each film or show folder filed into, the same path Jellyfin's real-time monitoring uses; never a server-wide scan. |
 
@@ -99,6 +99,20 @@ repeat the copies the page showed (otherwise 409). The next sweep then plans wit
   routed as usual and `IngestPlan.ReplacementNotes` says why. Whenever the new copy goes elsewhere, the replaced
   copy's folders are listed in `IngestPlan.TidyIfEmpty` and removed after filing if truly empty (never the library
   folder itself). `IngestPlan.ReplacementSummary` ("Replacing 1 copy in <library>.") is added to the activity entry.
+
+### A film that is an episode already on the server
+
+Providers list some TV films and specials as films too (`24: Redemption`, 2008), while the TV library keeps them as
+a show's episode (`24 S00E09 - Redemption`). When a video identifies as a film (not one chosen or approved in review),
+the planner asks `IExistingMedia.FindEpisodesTitled` for episodes (with files) of shows whose name starts the film's
+title or the title read from the name, on a word boundary, titled as the rest (`FilmAsEpisode`). The same IMDb id, or
+the titles plus the year the episode was first shown, is *confident*; the titles alone (or two episodes that fit
+equally) are *possible*. Either way the video is identified as that episode instead, so its old copy is a duplicate:
+the review item names the episode (and says "may be" when only possible), carries the old copy in `Existing` (so
+**Replace existing copies** files it in the episode's slot with the episode's name and quarantines the old copy under
+`Replaced/`, as for any duplicate), is matched to the show, and keeps the film candidates, so **Use this instead** on
+the film files it as a film. Nothing is replaced without that decision. A show chosen in review for a name without
+episode numbers uses its episode of that title the same way.
 
 ### Decisions file by file
 

@@ -5,6 +5,36 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Filed files that can't be opened on a virtiofs or network mount.** Files are still written to a temporary name
+  beside their destination and renamed into place (so a half-written file never has a real name, Jellyfin never scans
+  one, and a crash leaves something recovery recognises), but the temporary name is no longer hidden: it is now
+  `<final name>.ingest-<8 hex>.partial` instead of `.ingest-<32 hex>.partial`. On a Samba share a dot name got the DOS
+  *hidden* attribute, which stayed on the filed file after the rename. It still ends in `.partial`, so download
+  filters and recovery treat a leftover as unfinished; leftovers with the old name are still recovered. After the
+  rename each file is opened again by its new name and its length checked; if it can't be opened, the folder is listed
+  again (a fresh look-up that can revalidate a stale cache entry) and the open retried, up to 4 times over about 3.5
+  seconds. A file that still can't be read back is left filed (the rename succeeded, and rolling back through the same
+  stale cache could orphan it) but never reported as a plain success: the filing says "But 1 file can't be read back
+  through the library's mount" with the file under *Needs attention*, the server log has an error, and a *Library
+  storage* failure entry (also in Jellyfin's Activity log) says what to change: set the host's virtiofs cache to
+  `metadata` or `never`, or drop the guest's caches (`sysctl vm.drop_caches=2`), then scan the library. Undo, restore
+  from quarantine and move to another library check the same way. A file whose length reads back wrong after the
+  rename is now moved back by the rollback (it used to be left at its real name).
+- **A TV film or special filed as a second copy in the film library.** A release the providers know as a film
+  (`24.Redemption.2008…` → *24: Redemption*, 2008) was filed into Movies although the TV library already had it as
+  *24* S00E09 *Redemption*. Now a video identified as a film is checked against the episodes already on the server:
+  a show whose name starts the title, with an episode titled as the rest. The same IMDb id, or the titles plus the
+  year it was first shown, is a confident match; the titles alone (or two equally good episodes) only a possible one.
+  Either way it is held under *Needs review* as that episode, already on the server ("Identified as the film '24:
+  Redemption' (2008), but it is 24 S00E09 'Redemption' (same title and year)…", or "it may be …" when only possible):
+  **Replace existing copies** files it in the episode's slot with the episode's name (`Season 00/24 S00E09 -
+  Redemption.mkv`) and moves the old copy to quarantine's *Replaced* folder, as for any duplicate; **Use this
+  instead** on the film, still listed, files it as a film. Nothing is replaced without that decision. Choosing the
+  show in review for such a name (no episode numbers) now finds its episode of that title too, instead of stopping at
+  "the season or episode number can't be read".
+
 ## [0.14.0-alpha] - 2026-09-27
 
 ### Added

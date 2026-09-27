@@ -597,17 +597,32 @@ public sealed partial class IngestService : IHostedService, IDisposable
             LogTidyWarning(_logger, release, report.Warning);
         }
 
+        // Filed, but the mount can't read some files back: said on the filing and, with what to do, as a storage problem
+        foreach (var path in report.Unreadable)
+        {
+            LogUnreadable(_logger, release, path);
+        }
+
         if (!report.Succeeded)
         {
             LogExecutionFailed(_logger, release, report.Error ?? "unknown error");
             var summary = ActivityReport.FilingFailed(report);
             var retryAt = report.FolderUnavailable ? _retries.Schedule(id, watch.Path, release, RetryKind.FolderUnavailable) : null;
             _activity.ReportFailure(watch, release, summary, report.Completed, seenVersion, retryAt);
+            ActivityReport.RecordUnreadable(_state, _clock.GetUtcNow(), release, report);
             return;
         }
 
         // A real filing carries its run, so it can be undone from Recent activity
-        _state.RecordUnlessRepeat(_activity.Filed(watch.Path, release, plan, report.Completed, summaryLine, dryRun) with { Run = dryRun ? null : report.Run, ChosenBy = ChoiceOf(previous, plan) });
+        var filed = _activity.Filed(watch.Path, release, plan, report.Completed, summaryLine, dryRun);
+        _state.RecordUnlessRepeat(filed with
+        {
+            Run = dryRun ? null : report.Run,
+            ChosenBy = ChoiceOf(previous, plan),
+            Summary = filed.Summary + ActivityReport.UnreadableSentence(report),
+            Details = [.. ActivityReport.UnreadableLines(report), .. filed.Details],
+        });
+        ActivityReport.RecordUnreadable(_state, _clock.GetUtcNow(), release, report);
 
         // A release filed by copy or hard link stays in the watch folder: remember it so it isn't filed again
         if (!dryRun && watch.Transfer != TransferMode.Move)
@@ -846,6 +861,9 @@ public sealed partial class IngestService : IHostedService, IDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Ingest of {Release}: filed, but tidying up the release folder failed: {Warning}")]
     private static partial void LogTidyWarning(ILogger logger, string release, string warning);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Ingest of {Release}: {Path} was filed, but can't be read back through the library's mount (stale file system cache? For virtiofs, set the host's cache mode to metadata or never, or drop the guest's caches)")]
+    private static partial void LogUnreadable(ILogger logger, string release, string path);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Ingest sweep failed")]
     private static partial void LogSweepFailed(ILogger logger, Exception exception);

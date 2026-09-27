@@ -328,6 +328,8 @@ public sealed class ReleaseUndo
 
         var problems = executor.DeleteSetAside(planned.SetAside, filing.Release, report.Run!, actionLogPath, scope.LibraryFolders).ToList();
         TidyUp(_fs, planned.Tidy, problems);
+        problems.AddRange(report.Unreadable.Select(p => $"{p} was written, but can't be read back through the library's mount."));
+        ActivityReport.RecordUnreadable(_state, _clock.GetUtcNow(), filing.Release, report);
 
         var now = _clock.GetUtcNow();
         _state.MarkUndone(run, now);
