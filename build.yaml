@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Ingest"
 guid: "88d6ced9-052e-45f6-b21d-fc4eefa7998d"
-version: "0.12.1.0"
+version: "0.12.2.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -15,5 +15,6 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Ingest.dll"
 changelog: >
-  0.12.1-alpha: the settings page uses the full width with centred buttons; summaries no longer add a full stop
-  after a question mark.
+  0.12.2-alpha: the review card says which title Ingest is using, with Replace existing copies up front and other
+  shows under Wrong show; picking another show re-checks what's already on the server; the paused banner only shows
+  when Ingest is actually paused.
