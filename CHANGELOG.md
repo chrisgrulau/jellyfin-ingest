@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0-alpha] - 2026-09-27
+
 ### Added
 
 - **Move to another library.** A film or show that Ingest filed by itself (its library came from the watch folder's
@@ -22,6 +24,7 @@ All notable changes to this project are documented here. The format follows
   Ingest/Activity/{run}/MoveTargets`, `POST Ingest/Activity/{run}/Move` (`{ "LibraryId": … }`).
 - Filings now record how their library was chosen (`ChosenBy`: `Automatic` or `Review`). Filings recorded before
   this count as automatic unless *Recent activity* holds a review decision for the release made before it was filed.
+
 ### Fixed
 
 - The "Move to another library" confirm button shows progress ("Moving…") like the page's other actions.
