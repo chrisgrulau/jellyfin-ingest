@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0-alpha] - 2026-09-27
+
 ### Changed
 
 - **Tidier lists on the Ingest page.** Each row of *Recent activity*, *Waiting*, *Needs review* and *Quarantine* now

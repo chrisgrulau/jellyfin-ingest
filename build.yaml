@@ -1,7 +1,7 @@
 # Plugin metadata for Jellyfin Plugin Repository Manager (JPRM) packaging
 name: "Shoal Ingest"
 guid: "88d6ced9-052e-45f6-b21d-fc4eefa7998d"
-version: "0.11.0.0"
+version: "0.12.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "chrisgrulau"
@@ -15,5 +15,6 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Ingest.dll"
 changelog: >
-  0.11.0-alpha: undo a filed release from Recent activity; restore from quarantine and delete now; pause Ingest; new
-  titles go to the library folder with the most free space.
+  0.12.0-alpha: tidier page (what the media is, one plain sentence, icon counts, relative times, details on expand,
+  Show more); generic file names use the release folder; season-only names mean a series; the transcript now runs
+  for unknown episodes; reviews of releases that are gone are removed.
